@@ -353,7 +353,7 @@ async function handleYouTubeCallback({ code, state, error }) {
 // ═══════════════════════════════════════════════════════════════
 
 async function getLinkedInAuthUrl() {
-  const clientId = process.env.LINKEDIN_CLIENT_ID;
+  const clientId = (process.env.LINKEDIN_CLIENT_ID || '').replace(/[\s"\\n]+/g, '').trim();
   if (!clientId) throw new Error('LINKEDIN_CLIENT_ID not configured');
   
   const redirectUri = 'https://imc.goodcreativemedia.com/api/oauth?action=li-callback';
@@ -361,10 +361,7 @@ async function getLinkedInAuthUrl() {
     'openid',
     'profile', 
     'email',
-    'w_member_social',
-    'w_organization_social',
-    'r_organization_social',
-    'rw_organization_admin'
+    'w_member_social'
   ].join(' ');
   
   // Generate CSRF state parameter
@@ -391,8 +388,8 @@ async function handleLinkedInCallback({ code, state, error, error_description })
   // Verify state parameter
   await verifyOAuthState('linkedin', state);
   
-  const clientId = process.env.LINKEDIN_CLIENT_ID;
-  const clientSecret = process.env.LINKEDIN_CLIENT_SECRET;
+  const clientId = (process.env.LINKEDIN_CLIENT_ID || '').replace(/[\s"\\n]+/g, '').trim();
+  const clientSecret = (process.env.LINKEDIN_CLIENT_SECRET || '').replace(/[\s"\\n]+/g, '').trim();
   if (!clientId || !clientSecret) throw new Error('LinkedIn credentials not configured');
   
   const redirectUri = 'https://imc.goodcreativemedia.com/api/oauth?action=li-callback';
