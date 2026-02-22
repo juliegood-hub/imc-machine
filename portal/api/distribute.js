@@ -679,11 +679,24 @@ async function postInstagram(event, venue, content, images) {
   const container = await containerRes.json();
   if (container.error) throw new Error(`IG container: ${container.error.message}`);
 
+  // Poll until container is ready (Instagram needs time to process the image)
+  const containerId = container.id;
+  let status = 'IN_PROGRESS';
+  for (let i = 0; i < 10; i++) {
+    await new Promise(r => setTimeout(r, 3000)); // wait 3 seconds between checks
+    const statusRes = await fetch(`https://graph.facebook.com/v19.0/${containerId}?fields=status_code&access_token=${token}`);
+    const statusData = await statusRes.json();
+    status = statusData.status_code;
+    if (status === 'FINISHED') break;
+    if (status === 'ERROR') throw new Error('IG container processing failed');
+  }
+  if (status !== 'FINISHED') throw new Error(`IG container not ready after 30s (status: ${status})`);
+
   // Publish
   const pubRes = await fetch(`https://graph.facebook.com/v19.0/${igId}/media_publish`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ access_token: token, creation_id: container.id }),
+    body: JSON.stringify({ access_token: token, creation_id: containerId }),
   });
   const pub = await pubRes.json();
   if (pub.error) throw new Error(`IG publish: ${pub.error.message}`);
