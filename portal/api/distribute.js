@@ -206,7 +206,7 @@ async function sendEmail({ to, subject, html, from, replyTo }) {
         to: Array.isArray(to) ? to : [to],
         subject,
         html,
-        reply_to: replyTo || 'thisisthegoodlife@juliegood.com',
+        reply_to: replyTo || 'juliegood@goodcreativemedia.com',
       }),
     });
     const data = await response.json();
@@ -281,7 +281,7 @@ async function sendPressRelease(event, venue, content, options = {}) {
           to: [r.email],
           subject: `Press Release: ${event.title}`,
           html: pressReleaseHtml,
-          reply_to: 'thisisthegoodlife@juliegood.com',
+          reply_to: 'juliegood@goodcreativemedia.com',
         }),
       });
       data = await response.json();
@@ -295,7 +295,7 @@ async function sendPressRelease(event, venue, content, options = {}) {
             to: [r.email],
             subject: `Press Release: ${event.title}`,
             html: pressReleaseHtml,
-            reply_to: 'thisisthegoodlife@juliegood.com',
+            reply_to: 'juliegood@goodcreativemedia.com',
           }),
         });
         data = await retryRes.json();
@@ -669,7 +669,7 @@ async function sendEmailBlast({ event, venue, content }) {
       const response = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from: fromAddr, to: batch, subject, html, reply_to: 'thisisthegoodlife@juliegood.com' }),
+        body: JSON.stringify({ from: fromAddr, to: batch, subject, html, reply_to: 'juliegood@goodcreativemedia.com' }),
       });
       const data = await response.json();
       if (data.id) { sent += batch.length; }
@@ -677,7 +677,7 @@ async function sendEmailBlast({ event, venue, content }) {
         const retryRes = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ from: 'Good Creative Media <onboarding@resend.dev>', to: batch, subject, html, reply_to: 'thisisthegoodlife@juliegood.com' }),
+          body: JSON.stringify({ from: 'Good Creative Media <onboarding@resend.dev>', to: batch, subject, html, reply_to: 'juliegood@goodcreativemedia.com' }),
         });
         const retryData = await retryRes.json();
         if (retryData.id) sent += batch.length;
@@ -970,7 +970,7 @@ async function notifyAdminDistribution({ event, venue, distributionResults, chan
   const key = process.env.RESEND_API_KEY;
   if (!key) return { success: false, error: 'RESEND_API_KEY not configured' };
 
-  const adminEmail = 'thisisthegoodlife@juliegood.com';
+  const adminEmail = 'juliegood@goodcreativemedia.com';
   const eventDate = event.date ? new Date(event.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : 'TBD';
   const venueName = venue?.name || event.venue || 'Unknown venue';
 
@@ -1073,7 +1073,7 @@ ${lines.join('\n')}
         to: [adminEmail],
         subject: `🚀 IMC Distribution: ${event.title} — ${venueName}`,
         html,
-        reply_to: 'thisisthegoodlife@juliegood.com',
+        reply_to: 'juliegood@goodcreativemedia.com',
       }),
     });
     const data = await response.json();
@@ -1089,7 +1089,7 @@ ${lines.join('\n')}
           to: [adminEmail],
           subject: `🚀 IMC Distribution: ${event.title} — ${venueName}`,
           html,
-          reply_to: 'thisisthegoodlife@juliegood.com',
+          reply_to: 'juliegood@goodcreativemedia.com',
         }),
       });
       const retryData = await retryRes.json();
