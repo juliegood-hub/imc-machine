@@ -699,13 +699,17 @@ async function postLinkedIn(event, venue, content, images) {
   const tokenData = await getToken('linkedin');
   const token = tokenData.token;
   
-  // Get organization ID from stored connection or env var
-  let orgId = process.env.LINKEDIN_ORG_ID || '2944916';
+  // Determine author: use org if available, otherwise post as person
+  let author;
   if (tokenData.source === 'supabase' && tokenData.metadata?.organizations?.length > 0) {
-    orgId = tokenData.metadata.organizations[0].id; // Use first organization
+    author = `urn:li:organization:${tokenData.metadata.organizations[0].id}`;
+  } else if (process.env.LINKEDIN_ORG_ID) {
+    author = `urn:li:organization:${process.env.LINKEDIN_ORG_ID}`;
+  } else if (tokenData.source === 'supabase' && tokenData.metadata?.user_id) {
+    author = `urn:li:person:${tokenData.metadata.user_id}`;
+  } else {
+    throw new Error('No LinkedIn organization or user ID available. Reconnect LinkedIn in Settings.');
   }
-
-  const author = `urn:li:organization:${orgId}`;
   const text = buildLinkedInText(event, venue, content);
 
   const imageUrl = images?.linkedin_post || images?.fb_post_landscape;
