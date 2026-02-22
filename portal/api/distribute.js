@@ -1005,16 +1005,83 @@ function buildFBDescription(event, venue) {
 }
 
 function buildIGCaption(event, venue) {
-  const lines = [event.title, ''];
+  const lines = [];
+  
+  // Title
+  lines.push(event.title);
+  lines.push('');
+  
+  // Date and time
   if (event.date) {
     const d = new Date(event.date + 'T00:00:00');
-    lines.push(`📅 ${d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}${event.time ? ` · ${event.time}` : ''}`);
+    const dateStr = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+    lines.push(`📅 ${dateStr}${event.time ? ` · ${event.time}` : ''}${event.endTime ? ` – ${event.endTime}` : ''}`);
   }
-  if (venue?.name) lines.push(`📍 ${venue.name}`);
-  if (event.isFree) lines.push('🎟️ Free');
-  else if (event.ticketLink) lines.push('🎟️ Link in bio');
-  lines.push('', '#SanAntonio #SATX #LiveMusic #SanAntonioEvents');
-  lines.push('', 'Presented by @goodcreativemedia');
+  
+  // Venue with full address
+  if (venue?.name) {
+    lines.push(`📍 ${venue.name}`);
+    const addr = venue.address || venue.street;
+    if (addr) {
+      lines.push(`   ${addr}${venue.city ? ', ' + venue.city : ', San Antonio'}${venue.state ? ', ' + venue.state : ', TX'}`);
+    }
+  }
+  
+  // Admission
+  if (event.isFree || event.is_free) lines.push('🎟️ Free admission');
+  else if (event.ticketLink || event.ticket_link) lines.push(`🎟️ Tickets: link in bio`);
+  else if (event.ticketPrice || event.ticket_price) lines.push(`🎟️ ${event.ticketPrice || event.ticket_price}`);
+  
+  lines.push('');
+  
+  // Description
+  const desc = event.description || '';
+  if (desc) {
+    // Trim to ~600 chars for IG readability
+    lines.push(desc.length > 600 ? desc.substring(0, 597) + '...' : desc);
+    lines.push('');
+  }
+  
+  // Performers / hosts
+  if (event.performers) lines.push(`🎤 ${event.performers}`);
+  if (event.cast_crew?.length) {
+    const names = event.cast_crew.map(c => c.name).filter(Boolean);
+    if (names.length) lines.push(`🎤 Featuring: ${names.join(', ')}`);
+  }
+  
+  // Venue tag (from venue metadata if available)
+  const venueTags = [];
+  if (venue?.instagram) venueTags.push(`@${venue.instagram.replace('@', '')}`);
+  if (event.venue_instagram) venueTags.push(`@${event.venue_instagram.replace('@', '')}`);
+  if (venueTags.length) {
+    lines.push('');
+    lines.push(`🏠 ${venueTags.join(' ')}`);
+  }
+  
+  lines.push('');
+  lines.push('Presented by @goodcreativemedia');
+  lines.push('');
+  
+  // Hashtags — genre-aware
+  const genre = (event.genre || '').toLowerCase();
+  const baseTags = ['#SanAntonio', '#SATX', '#SanAntonioEvents', '#SATXEvents', '#SanAntonioNightlife'];
+  
+  if (genre.includes('comedy') || genre.includes('open mic')) {
+    baseTags.push('#Comedy', '#OpenMic', '#StandUpComedy', '#SATXComedy', '#FindYourFunny', '#ComedyNight', '#OpenMicNight');
+  } else if (genre.includes('jazz') || genre.includes('music')) {
+    baseTags.push('#LiveMusic', '#Jazz', '#JazzJam', '#SATXMusic', '#LiveJazz', '#SanAntonioMusic', '#SupportLocalMusic');
+  } else if (genre.includes('dance') || genre.includes('belly')) {
+    baseTags.push('#Dance', '#BellyDance', '#LiveDance', '#SATXDance', '#LiveMusic', '#SanAntonioMusic', '#CulturalArts');
+  } else {
+    baseTags.push('#LiveMusic', '#LiveEvents', '#SATXMusic', '#SupportLocal');
+  }
+  
+  // Add venue-specific tags
+  if (venue?.name?.toLowerCase().includes('dakota')) baseTags.push('#TheDakotaSA', '#EastSideSA');
+  if (venue?.name?.toLowerCase().includes('midtown')) baseTags.push('#MidtownSA', '#MidtownMeetup');
+  
+  lines.push(baseTags.join(' '));
+  
   return lines.join('\n').substring(0, 2200);
 }
 
