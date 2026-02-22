@@ -73,6 +73,7 @@ const TABS = [
   { id: 'invites', label: '🎟️ Invites', icon: '🎟️' },
   { id: 'distribution', label: '📡 Distribution', icon: '📡' },
   { id: 'broadcast', label: '📧 Broadcast', icon: '📧' },
+  { id: 'calendar', label: '📅 Event Calendar', icon: '📅' },
 ];
 
 // ═══════════════════════════════════════════════════════════════
@@ -916,6 +917,11 @@ export default function AdminDashboard() {
         <BroadcastTab users={users} />
       )}
 
+      {/* ═══ EVENT CALENDAR TAB ═══ */}
+      {activeTab === 'calendar' && (
+        <EventCalendarTab events={events} users={users} campaigns={campaigns} />
+      )}
+
       {/* Create User Modal */}
       {showCreateUser && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 p-4 overflow-y-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
@@ -1030,6 +1036,282 @@ export default function AdminDashboard() {
 // ═══════════════════════════════════════════════════════════════
 // SUB-COMPONENTS
 // ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
+// EVENT CALENDAR TAB — All events across all venues/users
+// ═══════════════════════════════════════════════════════════════
+
+function EventCalendarTab({ events, users, campaigns }) {
+  const [viewMode, setViewMode] = useState('month'); // month, week, list
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [selectedDay, setSelectedDay] = useState(null);
+
+  // Parse events into a date map
+  const eventsByDate = useMemo(() => {
+    const map = {};
+    (events || []).forEach(e => {
+      if (!e.date) return;
+      const dateKey = e.date.split('T')[0];
+      if (!map[dateKey]) map[dateKey] = [];
+      const owner = e.users || users?.find(u => u.id === e.user_id);
+      map[dateKey].push({ ...e, ownerName: owner?.name || owner?.email || 'Unknown', ownerType: owner?.client_type || 'venue' });
+    });
+    return map;
+  }, [events, users]);
+
+  // Stats
+  const stats = useMemo(() => {
+    const now = new Date();
+    const today = now.toISOString().split('T')[0];
+    const thisWeekEnd = new Date(now.getTime() + 7 * 86400000).toISOString().split('T')[0];
+    const thisMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+
+    const allDates = Object.keys(eventsByDate);
+    const upcoming = allDates.filter(d => d >= today);
+    const thisWeek = upcoming.filter(d => d <= thisWeekEnd);
+    const thisMonth = upcoming.filter(d => d <= thisMonthEnd);
+
+    const totalUpcoming = upcoming.reduce((sum, d) => sum + eventsByDate[d].length, 0);
+    const totalThisWeek = thisWeek.reduce((sum, d) => sum + eventsByDate[d].length, 0);
+    const totalThisMonth = thisMonth.reduce((sum, d) => sum + eventsByDate[d].length, 0);
+
+    // Unique venues
+    const venues = new Set();
+    Object.values(eventsByDate).flat().forEach(e => { if (e.venue_name || e.ownerName) venues.add(e.venue_name || e.ownerName); });
+
+    // Campaigns distributed
+    const distributed = (campaigns || []).filter(c => c.status === 'sent' || c.status === 'published' || c.status === 'created').length;
+
+    return { totalUpcoming, totalThisWeek, totalThisMonth, uniqueVenues: venues.size, distributed };
+  }, [eventsByDate, campaigns]);
+
+  // Calendar grid helpers
+  const year = currentDate.getFullYear();
+  const month = currentDate.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const monthName = currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+  const prevMonth = () => setCurrentDate(new Date(year, month - 1, 1));
+  const nextMonth = () => setCurrentDate(new Date(year, month + 1, 1));
+  const goToday = () => setCurrentDate(new Date());
+
+  const today = new Date().toISOString().split('T')[0];
+
+  // Week view
+  const weekStart = useMemo(() => {
+    const d = new Date(currentDate);
+    d.setDate(d.getDate() - d.getDay());
+    return d;
+  }, [currentDate]);
+
+  const weekDays = useMemo(() => {
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(weekStart);
+      d.setDate(d.getDate() + i);
+      return d.toISOString().split('T')[0];
+    });
+  }, [weekStart]);
+
+  const prevWeek = () => setCurrentDate(new Date(currentDate.getTime() - 7 * 86400000));
+  const nextWeek = () => setCurrentDate(new Date(currentDate.getTime() + 7 * 86400000));
+
+  // Genre color
+  const genreColor = (genre) => {
+    if (!genre) return '#6b7280';
+    const g = genre.toLowerCase();
+    if (g.includes('music') || g.includes('jazz') || g.includes('indie')) return '#2d6a4f';
+    if (g.includes('comedy') || g.includes('speaking')) return '#c8a45e';
+    if (g.includes('theater') || g.includes('play') || g.includes('musical')) return '#7b2cbf';
+    if (g.includes('dance') || g.includes('performance') || g.includes('experimental')) return '#e63946';
+    if (g.includes('orchestra') || g.includes('classical') || g.includes('choral')) return '#457b9d';
+    return '#6b7280';
+  };
+
+  // List view: upcoming events sorted
+  const upcomingList = useMemo(() => {
+    return Object.entries(eventsByDate)
+      .filter(([date]) => date >= today)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(0, 50);
+  }, [eventsByDate, today]);
+
+  return (
+    <div>
+      {/* Stats Row */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+        <div className="card text-center" style={{ borderTop: '3px solid #2d6a4f' }}>
+          <div className="text-2xl font-bold" style={{ color: '#2d6a4f' }}>{stats.totalUpcoming}</div>
+          <div className="text-xs text-gray-600">Upcoming Events</div>
+        </div>
+        <div className="card text-center" style={{ borderTop: '3px solid #c8a45e' }}>
+          <div className="text-2xl font-bold" style={{ color: '#c8a45e' }}>{stats.totalThisWeek}</div>
+          <div className="text-xs text-gray-600">This Week</div>
+        </div>
+        <div className="card text-center" style={{ borderTop: '3px solid #7b2cbf' }}>
+          <div className="text-2xl font-bold" style={{ color: '#7b2cbf' }}>{stats.totalThisMonth}</div>
+          <div className="text-xs text-gray-600">This Month</div>
+        </div>
+        <div className="card text-center" style={{ borderTop: '3px solid #0d1b2a' }}>
+          <div className="text-2xl font-bold" style={{ color: '#0d1b2a' }}>{stats.uniqueVenues}</div>
+          <div className="text-xs text-gray-600">Active Venues</div>
+        </div>
+        <div className="card text-center" style={{ borderTop: '3px solid #e63946' }}>
+          <div className="text-2xl font-bold" style={{ color: '#e63946' }}>{stats.distributed}</div>
+          <div className="text-xs text-gray-600">Campaigns Sent</div>
+        </div>
+      </div>
+
+      {/* View Controls */}
+      <div className="flex justify-between items-center mb-4">
+        <div className="flex gap-2">
+          {['month', 'week', 'list'].map(mode => (
+            <button key={mode} onClick={() => setViewMode(mode)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium border-none cursor-pointer ${viewMode === mode ? 'bg-[#0d1b2a] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+              {mode === 'month' ? '📅 Month' : mode === 'week' ? '📆 Week' : '📋 List'}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-3">
+          <button onClick={viewMode === 'week' ? prevWeek : prevMonth} className="bg-transparent border-none cursor-pointer text-gray-500 hover:text-[#0d1b2a] text-lg">←</button>
+          <span className="font-medium text-sm min-w-[160px] text-center">{monthName}</span>
+          <button onClick={viewMode === 'week' ? nextWeek : nextMonth} className="bg-transparent border-none cursor-pointer text-gray-500 hover:text-[#0d1b2a] text-lg">→</button>
+          <button onClick={goToday} className="px-3 py-1 rounded-lg text-xs bg-[#c8a45e] text-[#0d1b2a] border-none cursor-pointer font-medium">Today</button>
+        </div>
+      </div>
+
+      {/* Month View */}
+      {viewMode === 'month' && (
+        <div className="card p-0 overflow-hidden">
+          <div className="grid grid-cols-7 bg-[#0d1b2a] text-white text-xs text-center">
+            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
+              <div key={d} className="py-2 font-medium">{d}</div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7">
+            {Array.from({ length: firstDay }).map((_, i) => (
+              <div key={`empty-${i}`} className="min-h-[90px] border border-gray-100 bg-gray-50" />
+            ))}
+            {Array.from({ length: daysInMonth }, (_, i) => {
+              const day = i + 1;
+              const dateKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+              const dayEvents = eventsByDate[dateKey] || [];
+              const isToday = dateKey === today;
+              const isSelected = selectedDay === dateKey;
+
+              return (
+                <div key={day}
+                  onClick={() => setSelectedDay(isSelected ? null : dateKey)}
+                  className={`min-h-[90px] border border-gray-100 p-1 cursor-pointer transition-colors ${isToday ? 'bg-[#faf8f3]' : 'hover:bg-gray-50'} ${isSelected ? 'ring-2 ring-[#c8a45e] ring-inset' : ''}`}>
+                  <div className={`text-xs font-medium mb-1 ${isToday ? 'bg-[#c8a45e] text-[#0d1b2a] w-5 h-5 rounded-full flex items-center justify-center' : 'text-gray-500'}`}>{day}</div>
+                  {dayEvents.slice(0, 3).map((e, ei) => (
+                    <div key={ei} className="text-[10px] leading-tight mb-0.5 px-1 py-0.5 rounded truncate" style={{ backgroundColor: genreColor(e.genre) + '15', color: genreColor(e.genre), borderLeft: `2px solid ${genreColor(e.genre)}` }}>
+                      {e.title}
+                    </div>
+                  ))}
+                  {dayEvents.length > 3 && <div className="text-[10px] text-gray-400 px-1">+{dayEvents.length - 3} more</div>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Week View */}
+      {viewMode === 'week' && (
+        <div className="card p-0 overflow-hidden">
+          <div className="grid grid-cols-7 bg-[#0d1b2a] text-white text-xs text-center">
+            {weekDays.map(d => {
+              const date = new Date(d + 'T00:00:00');
+              return (
+                <div key={d} className={`py-2 font-medium ${d === today ? 'bg-[#c8a45e] text-[#0d1b2a]' : ''}`}>
+                  {date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                </div>
+              );
+            })}
+          </div>
+          <div className="grid grid-cols-7">
+            {weekDays.map(dateKey => {
+              const dayEvents = eventsByDate[dateKey] || [];
+              return (
+                <div key={dateKey} className={`min-h-[200px] border border-gray-100 p-2 ${dateKey === today ? 'bg-[#faf8f3]' : ''}`}>
+                  {dayEvents.length === 0 && <p className="text-xs text-gray-300 text-center mt-8">No events</p>}
+                  {dayEvents.map((e, ei) => (
+                    <div key={ei} className="mb-2 p-2 rounded-lg text-xs" style={{ backgroundColor: genreColor(e.genre) + '10', borderLeft: `3px solid ${genreColor(e.genre)}` }}>
+                      <div className="font-semibold truncate" style={{ color: genreColor(e.genre) }}>{e.title}</div>
+                      <div className="text-gray-500 mt-0.5">{e.time || ''}</div>
+                      <div className="text-gray-400 mt-0.5 truncate">{e.venue_name || e.ownerName}</div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* List View */}
+      {viewMode === 'list' && (
+        <div className="card">
+          {upcomingList.length === 0 && <p className="text-gray-400 text-center py-8">No upcoming events.</p>}
+          {upcomingList.map(([dateKey, dayEvents]) => (
+            <div key={dateKey} className="mb-4">
+              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 pb-1 border-b border-gray-100">
+                {new Date(dateKey + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                <span className="ml-2 text-[#c8a45e]">({dayEvents.length} event{dayEvents.length !== 1 ? 's' : ''})</span>
+              </div>
+              {dayEvents.map((e, ei) => (
+                <div key={ei} className="flex items-start gap-3 py-2 px-3 rounded-lg hover:bg-gray-50 mb-1">
+                  <div className="w-1 h-10 rounded-full flex-shrink-0 mt-1" style={{ backgroundColor: genreColor(e.genre) }} />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm truncate">{e.title}</div>
+                    <div className="text-xs text-gray-500">{e.time || 'Time TBD'} · {e.venue_name || e.ownerName} · {e.genre || 'General'}</div>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <div className="text-[10px] px-2 py-0.5 rounded-full" style={{ backgroundColor: e.campaign ? '#2d6a4f15' : '#e6394615', color: e.campaign ? '#2d6a4f' : '#e63946' }}>
+                      {e.campaign ? '✅ Distributed' : '⏳ Pending'}
+                    </div>
+                    <div className="text-[10px] text-gray-400 mt-1">{e.ownerName}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Selected Day Detail */}
+      {selectedDay && eventsByDate[selectedDay] && (
+        <div className="card mt-4">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="text-lg m-0">
+              {new Date(selectedDay + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+              <span className="text-sm text-gray-400 ml-2">({eventsByDate[selectedDay].length} event{eventsByDate[selectedDay].length !== 1 ? 's' : ''})</span>
+            </h3>
+            <button onClick={() => setSelectedDay(null)} className="bg-transparent border-none cursor-pointer text-gray-400 hover:text-gray-600">✕</button>
+          </div>
+          {eventsByDate[selectedDay].map((e, i) => (
+            <div key={i} className="flex items-start gap-3 p-3 rounded-lg mb-2" style={{ backgroundColor: genreColor(e.genre) + '08', borderLeft: `3px solid ${genreColor(e.genre)}` }}>
+              <div className="flex-1">
+                <div className="font-semibold">{e.title}</div>
+                <div className="text-sm text-gray-600 mt-1">
+                  {e.time || 'Time TBD'} · {e.venue_name || e.ownerName}
+                </div>
+                <div className="text-xs text-gray-400 mt-1">{e.genre || 'General'} · {e.ownerName} ({e.ownerType})</div>
+                {e.description && <div className="text-xs text-gray-500 mt-2 line-clamp-2">{e.description}</div>}
+              </div>
+              <div className="text-right">
+                <div className={`text-xs px-2 py-1 rounded-full ${e.campaign ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
+                  {e.campaign ? '✅ Distributed' : '⏳ Not yet'}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function StatCard({ label, value, sub, color }) {
   return (
