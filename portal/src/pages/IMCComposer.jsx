@@ -242,6 +242,7 @@ export default function IMCComposer() {
   const [podcastProgress, setPodcastProgress] = useState(null);
   const [distributing, setDistributing] = useState(false);
   const [distributionResults, setDistributionResults] = useState(null);
+  const [updatingImages, setUpdatingImages] = useState(false);
 
   const handleDistribute = async (channelKey, text) => {
     setDistributed(prev => ({ ...prev, [channelKey]: 'sending' }));
@@ -484,6 +485,52 @@ export default function IMCComposer() {
   };
 // Removed complex tracking for now - focus on core functionality
 
+  // Push generated graphics to already-distributed platforms
+  const handleUpdatePlatformImages = async () => {
+    if (!selectedEvent || images.length === 0) return;
+    setUpdatingImages(true);
+    const eventVenue = getEventVenue(selectedEvent);
+    const publicImage = images.find(img => img.url && !img.url.startsWith('data:'));
+    if (!publicImage) {
+      alert('⚠️ No publicly accessible image found. Images must be uploaded to get a public URL first.');
+      setUpdatingImages(false);
+      return;
+    }
+
+    const results = [];
+    try {
+      // Update Facebook event cover
+      const fbRes = await fetch('/api/distribute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'update-platform-images',
+          event: selectedEvent,
+          venue: eventVenue,
+          images: {
+            fb_event_banner: publicImage.url,
+            fb_post_landscape: publicImage.url,
+            ig_post_square: publicImage.url,
+            linkedin_post: publicImage.url,
+            eventbrite_banner: publicImage.url,
+          },
+          distributionResults: distributionResults
+        }),
+      });
+      const data = await fbRes.json();
+      if (data.success) {
+        const updated = data.results.filter(r => r.success).map(r => r.platform);
+        const failed = data.results.filter(r => !r.success).map(r => `${r.platform}: ${r.error}`);
+        alert(`🎨 Platform Images Updated!\n\n${updated.length ? '✅ ' + updated.join(', ') : ''}${failed.length ? '\n⚠️ ' + failed.join('\n⚠️ ') : ''}`);
+      } else {
+        alert(`⚠️ Image update error: ${data.error}`);
+      }
+    } catch (err) {
+      alert(`⚠️ Image update error: ${err.message}`);
+    }
+    setUpdatingImages(false);
+  };
+
   const handleContentEdit = (channelKey, newContent) => {
     setGenerated(prev => ({ ...prev, [channelKey]: newContent }));
   };
@@ -650,8 +697,8 @@ export default function IMCComposer() {
             <div className="space-y-4 mb-6">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg">✅ Generated Content</h3>
-                <button onClick={handleDistributeAll} disabled={distributing} className="btn-primary text-sm disabled:opacity-50">
-                  {distributing ? '⏳ Distributing...' : '🚀 Distribute All'}
+                <button onClick={handleDistributeAll} disabled={distributing || images.length === 0} className="btn-primary text-sm disabled:opacity-50" title={images.length === 0 ? 'Generate graphics first so images are included in posts' : ''}>
+                  {distributing ? '⏳ Distributing...' : images.length === 0 ? '🚀 Distribute All (generate graphics first)' : '🚀 Distribute All'}
                 </button>
               </div>
               {activeChannels.map(c => (
@@ -676,7 +723,15 @@ export default function IMCComposer() {
           {/* Generated Images */}
           {images.length > 0 && (
             <div className="card">
-              <h3 className="text-lg mb-4">🎨 Generated Graphics</h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg m-0">🎨 Generated Graphics</h3>
+                {Object.keys(distributed).length > 0 && images.some(img => img.url && !img.url.startsWith('data:')) && (
+                  <button onClick={handleUpdatePlatformImages} disabled={updatingImages}
+                    className="btn-secondary text-xs disabled:opacity-50">
+                    {updatingImages ? '⏳ Updating...' : '🔄 Push Images to Platforms'}
+                  </button>
+                )}
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {images.map(img => (
                   <div key={img.id} className="border border-gray-200 rounded-lg overflow-hidden">

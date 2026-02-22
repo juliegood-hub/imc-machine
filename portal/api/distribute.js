@@ -158,6 +158,9 @@ export default async function handler(req, res) {
       case 'send-sms':
         result = await sendSMS(req.body);
         break;
+      case 'update-platform-images':
+        result = await updatePlatformImages(req.body);
+        break;
       case 'submit-calendars':
         result = await submitCalendars(req.body);
         break;
@@ -886,4 +889,102 @@ function buildLinkedInText(event, venue, content) {
   if (event.ticketLink) lines.push(`🎟️ ${event.ticketLink}`, '');
   lines.push('#SanAntonio #LiveEvents #SATX');
   return lines.join('\n').substring(0, 3000);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// UPDATE PLATFORM IMAGES — Push graphics to already-distributed platforms
+// ═══════════════════════════════════════════════════════════════
+
+async function updatePlatformImages({ event, venue, images, distributionResults }) {
+  const results = [];
+
+  // Facebook: Update event cover photo
+  try {
+    const tokenData = await getToken('facebook');
+    if (tokenData?.token) {
+      const token = tokenData.token;
+      let pageId = process.env.FB_PAGE_ID || '522058047815423';
+      if (tokenData.source === 'supabase' && tokenData.metadata?.page_id) pageId = tokenData.metadata.page_id;
+
+      const imageUrl = images?.fb_event_banner || images?.fb_post_landscape;
+      if (imageUrl) {
+        // If we have a Facebook event ID from distribution results, update its cover
+        const fbEventId = distributionResults?.social?.facebook?.event?.eventId;
+        if (fbEventId) {
+          const coverRes = await fetch(`https://graph.facebook.com/v19.0/${fbEventId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ access_token: token, cover: { source: imageUrl } }),
+          });
+          const coverData = await coverRes.json();
+          results.push({ platform: 'Facebook Event Cover', success: !coverData.error, error: coverData.error?.message });
+        }
+
+        // Also post the image to the page feed as an update
+        const postRes = await fetch(`https://graph.facebook.com/v19.0/${pageId}/photos`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ access_token: token, url: imageUrl, message: `🎨 Event graphic for: ${event.title}` }),
+        });
+        const postData = await postRes.json();
+        results.push({ platform: 'Facebook Photo', success: !postData.error, error: postData.error?.message });
+      }
+    }
+  } catch (err) { results.push({ platform: 'Facebook', success: false, error: err.message }); }
+
+  // Eventbrite: Update event logo/image
+  try {
+    const ebToken = process.env.EVENTBRITE_TOKEN;
+    const ebEventId = distributionResults?.calendar?.eventId;
+    const imageUrl = images?.eventbrite_banner || images?.fb_event_banner;
+
+    if (ebToken && ebEventId && imageUrl) {
+      // Eventbrite requires uploading via their media endpoint
+      // First, get an upload token
+      const uploadRes = await fetch(`https://www.eventbriteapi.com/v3/media/upload/?type=image-event-logo`, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${ebToken}` },
+      });
+      const uploadData = await uploadRes.json();
+
+      if (uploadData.upload_url && uploadData.upload_token) {
+        // Download the image
+        const imgRes = await fetch(imageUrl);
+        const imgBuffer = await imgRes.arrayBuffer();
+        const imgBlob = new Blob([imgBuffer], { type: 'image/png' });
+
+        // Upload to Eventbrite
+        const formData = new FormData();
+        formData.append('upload_token', uploadData.upload_token);
+        formData.append('file', imgBlob, 'event-graphic.png');
+
+        const postRes = await fetch(uploadData.upload_url, { method: 'POST', body: formData });
+        const postData = await postRes.json();
+
+        if (postData.id || uploadData.upload_token) {
+          // Now set this as the event logo
+          const logoId = postData.id || uploadData.upload_token;
+          const updateRes = await fetch(`https://www.eventbriteapi.com/v3/events/${ebEventId}/`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${ebToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ event: { logo_id: logoId } }),
+          });
+          const updateData = await updateRes.json();
+          results.push({ platform: 'Eventbrite', success: !updateData.error, error: updateData.error_description });
+        }
+      } else {
+        results.push({ platform: 'Eventbrite', success: false, error: 'Could not get upload token' });
+      }
+    } else {
+      if (!ebEventId) results.push({ platform: 'Eventbrite', success: false, error: 'No Eventbrite event to update (distribute calendar first)' });
+    }
+  } catch (err) { results.push({ platform: 'Eventbrite', success: false, error: err.message }); }
+
+  // Instagram: Can't update existing posts, skip
+  results.push({ platform: 'Instagram', success: false, error: 'Instagram does not allow updating images on existing posts. Next distribution will include the graphic.' });
+
+  // LinkedIn: Can't update existing posts
+  results.push({ platform: 'LinkedIn', success: false, error: 'LinkedIn does not allow updating images on existing posts. Next distribution will include the graphic.' });
+
+  return { success: results.some(r => r.success), results };
 }
