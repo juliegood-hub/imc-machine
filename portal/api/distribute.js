@@ -704,7 +704,7 @@ async function postLinkedIn(event, venue, content, images) {
   if (tokenData.source === 'supabase' && tokenData.metadata?.organizations?.length > 0) {
     author = `urn:li:organization:${tokenData.metadata.organizations[0].id}`;
   } else if (process.env.LINKEDIN_ORG_ID) {
-    author = `urn:li:organization:${process.env.LINKEDIN_ORG_ID}`;
+    author = `urn:li:organization:${process.env.LINKEDIN_ORG_ID.trim()}`;
   } else if (tokenData.source === 'supabase' && tokenData.metadata?.user_id) {
     author = `urn:li:person:${tokenData.metadata.user_id}`;
   } else {
