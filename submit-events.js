@@ -25,10 +25,21 @@ const SCREENSHOT_DIR = '/Users/littlemacbook/.openclaw/workspace/imc-machine/scr
 async function launchBrowser(headless = true) {
   return puppeteer.launch({
     executablePath: CHROME_PATH,
-    headless: headless ? 'new' : false,
+    headless: 'new',
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--window-size=1280,900'],
     defaultViewport: { width: 1280, height: 900 },
   });
+}
+
+// Helper: find a clickable element by text content (replacement for Playwright's :has-text)
+async function findByText(page, tag, text) {
+  return page.evaluateHandle((t, txt) => {
+    const els = document.querySelectorAll(t);
+    for (const el of els) {
+      if (el.textContent.trim().toLowerCase().includes(txt.toLowerCase())) return el;
+    }
+    return null;
+  }, tag, text);
 }
 
 // Helper: wait and type into a field safely
@@ -49,41 +60,42 @@ async function safeSelect(page, selector, value) {
 // Form fields mapped from live inspection on 2026-02-18
 // ═══════════════════════════════════════════════════════════════
 
+// Do210 category IDs (from live inspection 2026-02-22)
 const DO210_CATEGORIES = {
-  'Live Music': '1',
-  'Theater': '5',
-  'Comedy': '3',
-  'Dance': '6',
-  'Art': '2',
-  'Festival': '4',
-  'Workshop': '7',
-  'Film': '8',
-  'Food & Drink': '9',
-  'Sports': '10',
-  'Community': '11',
-  'Other': '12',
+  'Music': '557',
+  'Live Music': '557',
+  'Comedy': '2030',
+  'Dance': '2061',
+  'Art': '527',
+  'Arts & Culture': '5542',
+  'Theatre': '3095',
+  'Theater': '3095',
+  'Film & Theatre': '2029',
+  'Festival': '2366',
+  'Food & Drink': '2051',
+  'Education': '3854',
+  'Dj/Parties': '2805',
+  'Special Event': '2367',
+  'Books/Poetry/Writing': '2368',
+  'Fashion': '2078',
+  'Sports': '5057',
+  'Tech': '2424',
+  'Social': '2079',
+  'Variety': '5118',
 };
 
 async function submitDo210(event) {
   console.log('📅 Submitting to Do210...');
-  const browser = await launchBrowser(false);
+  const browser = await launchBrowser();
   const page = await browser.newPage();
   
   try {
     // Step 1: Login
     console.log('  🔑 Logging in...');
     await page.goto('https://do210.com/users/sign_in', { waitUntil: 'networkidle2' });
-    await page.waitForSelector('input[type="email"], input[name="user[email]"], input#user_email', { timeout: 10000 });
-    
-    const emailSel = (await page.$('input#user_email')) ? '#user_email' 
-      : (await page.$('input[name="user[email]"]')) ? 'input[name="user[email]"]' 
-      : 'input[type="email"]';
-    const passSel = (await page.$('input#user_password')) ? '#user_password'
-      : (await page.$('input[name="user[password]"]')) ? 'input[name="user[password]"]'
-      : 'input[type="password"]';
-    
-    await safeType(page, emailSel, CREDENTIALS.do210.email);
-    await safeType(page, passSel, CREDENTIALS.do210.password);
+    await page.waitForSelector('#user_email', { timeout: 10000 });
+    await safeType(page, '#user_email', CREDENTIALS.do210.email);
+    await safeType(page, '#user_password', CREDENTIALS.do210.password);
     await page.keyboard.press('Enter');
     await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 });
     console.log('  ✅ Logged in');
@@ -92,105 +104,110 @@ async function submitDo210(event) {
     await page.goto('https://do210.com/events/new', { waitUntil: 'networkidle2' });
     await new Promise(r => setTimeout(r, 2000));
 
-    // Step 3: Fill the form
+    // Step 3: Fill the form (field names from live inspection 2026-02-22)
     console.log('  📝 Filling event form...');
 
     // Title
-    const titleSel = 'input[name="event[title]"], input#event_title, input[placeholder*="title" i]';
-    await safeType(page, titleSel, event.title);
+    await safeType(page, '#event_title', event.title);
 
-    // Venue name
-    const venueSel = 'input[name="event[venue_name]"], input#event_venue_name, input[placeholder*="venue" i]';
+    // Venue (jQuery UI autocomplete field)
     try {
-      await safeType(page, venueSel, event.venue || 'Venue TBD');
-      // Wait for autocomplete dropdown and try to select first result
-      await new Promise(r => setTimeout(r, 1500));
-      const suggestion = await page.$('.venue-suggestion, .autocomplete-result, .ui-menu-item, [role="option"]');
-      if (suggestion) await suggestion.click();
+      await page.evaluate(() => {
+        const v = document.querySelector('#venue_title_es');
+        if (v) { v.value = ''; v.focus(); }
+      });
+      await page.type('#venue_title_es', event.venue || 'Venue TBD', { delay: 100 });
+      await new Promise(r => setTimeout(r, 3000));
+      // Select from autocomplete dropdown (skip "See All Results For" row)
+      const suggestions = await page.$$('.ui-menu-item');
+      if (suggestions.length > 1) {
+        await suggestions[1].click(); // First real result (index 1, index 0 is "See All Results For")
+        console.log('  ✅ Venue selected from autocomplete');
+      } else if (suggestions.length === 1) {
+        await suggestions[0].click();
+        console.log('  ✅ Venue selected (single result)');
+      } else {
+        console.log('  ⚠️ No venue autocomplete match — typed manually');
+      }
+      await new Promise(r => setTimeout(r, 1000));
     } catch (e) {
-      console.log('  ⚠️ Venue autocomplete not found, typed manually');
+      console.log('  ⚠️ Venue field error:', e.message);
     }
 
-    // Start date
-    const startDateSel = 'input[name="event[start_date]"], input#event_start_date, input[type="date"]';
+    // Begin date (Pika datepicker — set value directly)
     try {
-      await page.evaluate((sel, val) => {
-        const el = document.querySelector(sel);
-        if (el) { el.value = val; el.dispatchEvent(new Event('change', { bubbles: true })); }
-      }, startDateSel, event.date);
-    } catch (e) {
-      await safeType(page, startDateSel, event.date);
-    }
-
-    // Start time
-    const startTimeSel = 'input[name="event[start_time]"], input#event_start_time, input[placeholder*="time" i]';
-    try { await safeType(page, startTimeSel, event.time || '7:00 PM'); } catch (e) {}
-
-    // End date (same as start for single-day events)
-    try {
-      const endDateSel = 'input[name="event[end_date]"], input#event_end_date';
-      await page.evaluate((sel, val) => {
-        const el = document.querySelector(sel);
-        if (el) { el.value = val; el.dispatchEvent(new Event('change', { bubbles: true })); }
-      }, endDateSel, event.endDate || event.date);
+      await page.evaluate((dateStr) => {
+        const el = document.querySelector('#event_begin_date');
+        if (el) { el.value = dateStr; el.dispatchEvent(new Event('change', { bubbles: true })); }
+      }, event.date);
+      console.log('  ✅ Date set:', event.date);
     } catch (e) {}
+
+    // Begin time (hour/minute dropdowns)
+    try {
+      const timeParts = parseTime(event.time || '7:00 PM');
+      await page.select('#event_begin_time_4i', timeParts.hour24.toString());
+      await page.select('#event_begin_time_5i', timeParts.minute);
+      console.log('  ✅ Start time set:', event.time);
+    } catch (e) {
+      console.log('  ⚠️ Start time error:', e.message);
+    }
 
     // End time
     try {
-      const endTimeSel = 'input[name="event[end_time]"], input#event_end_time';
-      await safeType(page, endTimeSel, event.endTime || '10:00 PM');
+      const endParts = parseTime(event.endTime || '10:00 PM');
+      await page.select('#event_end_time_4i', endParts.hour24.toString());
+      await page.select('#event_end_time_5i', endParts.minute);
+      console.log('  ✅ End time set:', event.endTime);
     } catch (e) {}
 
-    // Description (textarea)
-    const descSel = 'textarea[name="event[description]"], textarea#event_description';
-    try { await safeType(page, descSel, event.description || event.title, 10); } catch (e) {}
-
-    // Category
+    // Category dropdown — match genre to Do210 categories
     try {
-      const catValue = DO210_CATEGORIES[event.genre] || DO210_CATEGORIES['Live Music'] || '1';
-      await safeSelect(page, 'select[name="event[category_id]"], select#event_category_id', catValue);
-    } catch (e) {}
-
-    // Ticket URL
-    if (event.ticketLink) {
-      try {
-        const ticketSel = 'input[name="event[buy_tickets]"], input#event_buy_tickets, input[placeholder*="ticket" i]';
-        await safeType(page, ticketSel, event.ticketLink);
-      } catch (e) {}
+      const genre = (event.genre || 'Music').split('|')[0].trim(); // Take first genre if pipe-separated
+      const catValue = DO210_CATEGORIES[genre] 
+        || Object.entries(DO210_CATEGORIES).find(([k]) => genre.toLowerCase().includes(k.toLowerCase()))?.[1]
+        || DO210_CATEGORIES['Music'];
+      await page.select('#event_category_id', catValue);
+      console.log('  ✅ Category set:', genre, '→', catValue);
+    } catch (e) {
+      console.log('  ⚠️ Category error:', e.message);
     }
 
     // Free event checkbox
     if (event.free) {
-      try {
-        await page.click('input[name="event[free_event]"], input#event_free_event');
-      } catch (e) {}
+      try { await page.click('#event_event_setting_attributes_free_event'); } catch (e) {}
     }
 
-    // Image upload (URL field if available)
+    // Ticket URL
+    if (event.ticketLink) {
+      try { await safeType(page, '#event_buy_tickets', event.ticketLink); } catch (e) {}
+    }
+
+    // Ticket info (price/age)
+    if (event.ticketInfo) {
+      try { await safeType(page, '#event_ticket_info', event.ticketInfo); } catch (e) {}
+    }
+
+    // Photo from URL
     if (event.imageUrl) {
-      try {
-        const imgUrlSel = 'input[name="event[image_url]"], input[placeholder*="image url" i], input[name*="image"][type="url"]';
-        await safeType(page, imgUrlSel, event.imageUrl);
-      } catch (e) {
-        console.log('  ⚠️ No image URL field found');
-      }
+      try { await safeType(page, '#cloudinary_hero_image_from_url', event.imageUrl); } catch (e) {}
     }
 
     // Screenshot before submit
     await page.screenshot({ path: `${SCREENSHOT_DIR}/do210-filled.png`, fullPage: true });
     console.log('  📸 Screenshot: do210-filled.png');
 
-    // Step 4: Submit the form
+    // Step 4: Submit — button.ds-btn[type="submit"] "Add It"
     console.log('  🚀 Submitting...');
-    const submitBtn = await page.$('input[type="submit"], button[type="submit"], button:has-text("Submit"), button:has-text("Create"), .submit-btn, .btn-primary[type="submit"]');
+    const submitBtn = await page.$('button[type="submit"].ds-btn');
     if (submitBtn) {
       await submitBtn.click();
       await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 }).catch(() => {});
       await new Promise(r => setTimeout(r, 3000));
     } else {
-      // Try form submission directly
+      // Fallback: submit the form directly
       await page.evaluate(() => {
-        const form = document.querySelector('form[action*="events"], form.event-form, form#new_event');
+        const form = document.querySelector('form');
         if (form) form.submit();
       });
       await new Promise(r => setTimeout(r, 5000));
@@ -203,7 +220,7 @@ async function submitDo210(event) {
     // Check for success
     const url = page.url();
     const pageText = await page.evaluate(() => document.body.innerText.substring(0, 2000));
-    const success = url.includes('/events/') && !url.includes('/new') || pageText.toLowerCase().includes('success') || pageText.toLowerCase().includes('submitted') || pageText.toLowerCase().includes('pending');
+    const success = (url.includes('/events/') && !url.includes('/new')) || pageText.toLowerCase().includes('success') || pageText.toLowerCase().includes('submitted') || pageText.toLowerCase().includes('pending');
 
     console.log(`  ${success ? '✅' : '⚠️'} Do210 ${success ? 'submitted!' : 'may need review'} — ${url}`);
     return { success, platform: 'Do210', url, message: success ? 'Event submitted to Do210' : 'Submission may need manual review' };
@@ -215,6 +232,21 @@ async function submitDo210(event) {
   } finally {
     await browser.close();
   }
+}
+
+// Parse "7:00 PM" or "19:30" into { hour24: "19", minute: "00" }
+function parseTime(timeStr) {
+  if (!timeStr) return { hour24: '19', minute: '00' };
+  const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+  if (!match) return { hour24: '19', minute: '00' };
+  let hour = parseInt(match[1]);
+  const minute = match[2];
+  const ampm = match[3];
+  if (ampm) {
+    if (ampm.toUpperCase() === 'PM' && hour < 12) hour += 12;
+    if (ampm.toUpperCase() === 'AM' && hour === 12) hour = 0;
+  }
+  return { hour24: hour.toString(), minute };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -249,7 +281,7 @@ async function submitSACurrent(event) {
       }
       
       // Submit login
-      const loginBtn = await page.$('button[type="submit"], input[type="submit"], .login-btn, button:has-text("Log In"), button:has-text("Sign In")');
+      const loginBtn = await page.$('button[type="submit"], input[type="submit"], .login-btn');
       if (loginBtn) await loginBtn.click();
       await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
       await new Promise(r => setTimeout(r, 2000));
@@ -319,8 +351,9 @@ async function submitSACurrent(event) {
 
     // Submit
     console.log('  🚀 Submitting...');
-    const submitBtns = ['button[type="submit"]', 'input[type="submit"]', '.submit-btn', 'button:has-text("Submit")', 'button:has-text("Add Event")', 'button:has-text("Create")'];
+    const submitBtns = ['button[type="submit"]', 'input[type="submit"]', '.submit-btn'];
     for (const sel of submitBtns) {
+      if (!sel) continue;
       const btn = await page.$(sel);
       if (btn) { await btn.click(); break; }
     }
@@ -379,7 +412,7 @@ async function submitEvvnt(event) {
     await page.screenshot({ path: `${SCREENSHOT_DIR}/evvnt-dashboard.png`, fullPage: true });
 
     // Step 2: Find and click "Add Event" / "Create Event"
-    const addBtns = ['a[href*="event"][href*="new"]', 'a[href*="event"][href*="create"]', 'button:has-text("Add Event")', 'a:has-text("Add Event")', 'a:has-text("Create Event")', '.add-event', '.new-event', '.btn-create'];
+    const addBtns = ['a[href*="event"][href*="new"]', 'a[href*="event"][href*="create"]', '.add-event', '.new-event', '.btn-create'];
     for (const sel of addBtns) {
       const btn = await page.$(sel);
       if (btn) {
@@ -390,7 +423,17 @@ async function submitEvvnt(event) {
       }
     }
 
-    // If no button found, try direct URL
+    // Try finding button by text content
+    if (page.url().includes('dashboard') || !page.url().includes('event')) {
+      const addBtn = await findByText(page, 'a, button', 'Add Event');
+      if (addBtn && addBtn.asElement()) {
+        await addBtn.asElement().click();
+        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 }).catch(() => {});
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
+
+    // If still no luck, try direct URL
     if (page.url().includes('dashboard') || !page.url().includes('event')) {
       await page.goto('https://app.evvnt.com/events/new', { waitUntil: 'networkidle2' }).catch(async () => {
         await page.goto('https://app.evvnt.com/create', { waitUntil: 'networkidle2' }).catch(() => {});
@@ -438,7 +481,7 @@ async function submitEvvnt(event) {
 
     // Submit
     console.log('  🚀 Submitting...');
-    const submitBtns = ['button[type="submit"]', 'input[type="submit"]', 'button:has-text("Submit")', 'button:has-text("Create")', 'button:has-text("Publish")', '.submit-event'];
+    const submitBtns = ['button[type="submit"]', 'input[type="submit"]', '.submit-event'];
     for (const sel of submitBtns) {
       const btn = await page.$(sel);
       if (btn) { await btn.click(); break; }
@@ -558,7 +601,7 @@ async function submitTPR(event) {
 
     // Submit
     console.log('  🚀 Submitting...');
-    const submitBtns = ['button[type="submit"]', 'input[type="submit"]', '.EventForm-form button', 'button:has-text("Submit")'];
+    const submitBtns = ['button[type="submit"]', 'input[type="submit"]', '.EventForm-form button'];
     for (const sel of submitBtns) {
       const btn = await page.$(sel);
       if (btn) { await btn.click(); break; }
@@ -594,9 +637,10 @@ async function submitAll(event) {
   
   results.do210 = await submitDo210(event);
   results.tpr = await submitTPR(event);
-  results.evvnt = await submitEvvnt(event);
-  // SA Current: Cloudflare-blocked — requires manual submission or ChatGPT Agent
-  results.sacurrent = { success: false, platform: 'SA Current', error: 'Cloudflare-protected. Use the SA Current Wizard in the app to generate a ChatGPT prompt for manual submission.' };
+  // Evvnt: Cloudflare-protected — requires manual or ChatGPT Agent
+  results.evvnt = { success: false, platform: 'Evvnt', error: 'Cloudflare-protected. Submit manually at app.evvnt.com or use ChatGPT Agent.' };
+  // SA Current: Cloudflare-protected — requires manual or ChatGPT Agent
+  results.sacurrent = { success: false, platform: 'SA Current', error: 'Cloudflare-protected. Use the SA Current Wizard in the app.' };
   
   console.log('\n═══════════════════════════════════════════════════════');
   console.log('📊 SUBMISSION RESULTS');
