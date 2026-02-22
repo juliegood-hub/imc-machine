@@ -33,7 +33,12 @@ export default function Login() {
             <span className="text-[#0d1b2a] font-bold text-xl">IMC</span>
           </div>
           <h1 className="text-white text-3xl mb-1">Good Creative Media</h1>
-          <p className="text-[#c8a45e] text-lg font-light tracking-wide">The IMC Machine — Integrated Marketing Communications</p>
+          <div className="text-[#c8a45e] text-lg font-bold tracking-widest leading-relaxed uppercase">
+            <p className="m-0">The</p>
+            <p className="m-0">IMC</p>
+            <p className="m-0">Machine</p>
+            <p className="m-0 text-sm mt-2 tracking-wide font-light normal-case opacity-80">Integrated Marketing Communications</p>
+          </div>
         </div>
 
         <form onSubmit={handleSubmit} className="bg-white rounded-xl p-8">

@@ -2,6 +2,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { useVenue } from '../context/VenueContext';
 import { getEventCampaigns, deleteEvent } from '../lib/supabase';
+import { parseLocalDate } from '../lib/dateUtils';
 
 export default function EventDetail() {
   const { id } = useParams();
