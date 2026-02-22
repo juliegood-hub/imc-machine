@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { upsertCampaign } from '../lib/supabase';
 import ChannelToggle from '../components/ChannelToggle';
 import GeneratedContent from '../components/GeneratedContent';
+import FacebookEventWizard from '../components/FacebookEventWizard';
 
 const CHANNELS = [
   { key: 'press', label: 'Press Release', icon: '📰' },
@@ -841,6 +842,16 @@ export default function IMCComposer() {
                 </div>
               )}
             </div>
+          )}
+
+          {/* Facebook Event Wizard */}
+          {selectedEvent && Object.keys(generated).length > 0 && (
+            <FacebookEventWizard
+              event={selectedEvent}
+              venue={getEventVenue(selectedEvent)}
+              generatedContent={generated}
+              images={images}
+            />
           )}
 
           {/* Media Distribution Info */}
