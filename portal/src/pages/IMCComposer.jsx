@@ -385,7 +385,7 @@ export default function IMCComposer() {
         setDistributionResults(prev => ({ ...prev, social: results }));
 
         const summary = [
-          results.facebook?.success ? '✅ Facebook: Posted' : `⚠️ Facebook: ${results.facebook?.error || 'Not connected'}`,
+          results.facebook?.feedPost?.success ? '✅ Facebook: Feed post published (create Event manually at fb.com/goodcreativemedia/events)' : `⚠️ Facebook: ${results.facebook?.feedPost?.error || results.facebook?.error || 'Not connected'}`,
           results.instagram?.success ? '✅ Instagram: Posted' : `⚠️ Instagram: ${results.instagram?.error || 'Not connected'}`,
           results.linkedin?.success ? '✅ LinkedIn: Posted' : `⚠️ LinkedIn: ${results.linkedin?.error || 'Not connected'}`,
           results.twitter?.success ? '✅ Twitter/X: Tweeted' : `⚠️ Twitter/X: ${results.twitter?.error || 'Not connected'}`,
@@ -394,8 +394,8 @@ export default function IMCComposer() {
         alert(`📱 Social Distribution:\n\n${summary}`);
 
         // Track each social platform
-        if (results.facebook?.success) trackCampaign('social_facebook', 'published', results.facebook.event?.eventUrl || results.facebook.feedPost?.postId ? `https://facebook.com/${results.facebook.feedPost.postId}` : null);
-        else trackCampaign('social_facebook', 'failed', null, { error: results.facebook?.error });
+        if (results.facebook?.feedPost?.success) trackCampaign('social_facebook', 'published', results.facebook.feedPost?.postId ? `https://facebook.com/${results.facebook.feedPost.postId}` : null);
+        else trackCampaign('social_facebook', 'failed', null, { error: results.facebook?.feedPost?.error || results.facebook?.error });
         if (results.instagram?.success) trackCampaign('social_instagram', 'published', null);
         else trackCampaign('social_instagram', 'failed', null, { error: results.instagram?.error });
         if (results.linkedin?.success) trackCampaign('social_linkedin', 'published', results.linkedin.postUrl);
@@ -822,9 +822,10 @@ export default function IMCComposer() {
               {distributionResults.social && (
                 <div className="mt-3 p-3 bg-gray-50 rounded-lg text-sm space-y-1">
                   <p className="font-semibold text-gray-700 m-0">📱 Social Distribution</p>
-                  {distributionResults.social.facebook && (
-                    <p className="m-0 ml-2">{distributionResults.social.facebook.success ? '✅' : '⚠️'} Facebook: {distributionResults.social.facebook.success ? `Posted${distributionResults.social.facebook.event?.eventUrl ? ` · ${distributionResults.social.facebook.event.eventUrl}` : ''}` : distributionResults.social.facebook.error || 'Not connected'}</p>
-                  )}
+                  {distributionResults.social.facebook && (<>
+                    <p className="m-0 ml-2">{distributionResults.social.facebook.feedPost?.success ? '✅' : '⚠️'} Facebook: {distributionResults.social.facebook.feedPost?.success ? `Feed post published · ${distributionResults.social.facebook.feedPost.postId ? `Post ID: ${distributionResults.social.facebook.feedPost.postId}` : ''}` : distributionResults.social.facebook.feedPost?.error || distributionResults.social.facebook.error || 'Not connected'}</p>
+                    <p className="m-0 ml-4 text-[10px] text-gray-400">⚠️ FB Events API deprecated. <a href="https://www.facebook.com/goodcreativemedia/events" target="_blank" className="text-[#c8a45e]">Create event manually →</a></p>
+                  </>)}
                   {distributionResults.social.instagram && (
                     <p className="m-0 ml-2">{distributionResults.social.instagram.success ? '✅' : '⚠️'} Instagram: {distributionResults.social.instagram.success ? 'Posted' : distributionResults.social.instagram.error || 'Not connected'}</p>
                   )}

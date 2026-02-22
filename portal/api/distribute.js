@@ -451,46 +451,16 @@ async function postFacebook(event, venue, content, images) {
 
   const results = { event: null, feedPost: null };
 
-  // Create Facebook Event
-  try {
-    const startDatetime = new Date(`${event.date}T${convertTo24h(event.time || '19:00')}:00-06:00`);
-    const endDatetime = event.endTime
-      ? new Date(`${event.endDate || event.date}T${convertTo24h(event.endTime)}:00-06:00`)
-      : new Date(startDatetime.getTime() + 3 * 3600000);
+  // NOTE: Facebook deprecated the Page Events API (/{page-id}/events) in 2020.
+  // Events CANNOT be created via the Graph API anymore.
+  // We create a rich feed post instead and note that the event must be created manually.
+  results.event = { 
+    success: false, 
+    error: 'Facebook Events API is deprecated. Create the event manually at facebook.com/goodcreativemedia/events. The feed post below includes all event details.',
+    manualUrl: 'https://www.facebook.com/goodcreativemedia/events'
+  };
 
-    const evtRes = await fetch(`https://graph.facebook.com/v19.0/${pageId}/events`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        access_token: token,
-        name: event.title,
-        description: buildFBDescription(event, venue),
-        start_time: startDatetime.toISOString(),
-        end_time: endDatetime.toISOString(),
-        place: {
-          name: venue?.name || 'Venue TBD',
-          location: {
-            street: venue?.address || '',
-            city: venue?.city || 'San Antonio',
-            state: venue?.state || 'TX',
-            country: 'US',
-          },
-        },
-        ticket_uri: event.ticketLink || '',
-      }),
-    });
-    const evtData = await evtRes.json();
-    if (evtData.error) throw new Error(evtData.error.message);
-    results.event = {
-      success: true,
-      eventId: evtData.id,
-      eventUrl: `https://www.facebook.com/events/${evtData.id}`,
-    };
-  } catch (err) {
-    results.event = { success: false, error: err.message };
-  }
-
-  // Feed post with image
+  // Feed post with image (this is what actually works)
   try {
     const imageUrl = images?.fb_post_landscape || images?.fb_event_banner;
     const message = content?.socialFacebook || content?.pressRelease?.substring(0, 500) || event.title;
@@ -605,7 +575,7 @@ async function postLinkedIn(event, venue, content, images) {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
         'X-Restli-Protocol-Version': '2.0.0',
-        'LinkedIn-Version': '202401',
+        'LinkedIn-Version': '202502',
       },
       body: JSON.stringify({ initializeUploadRequest: { owner: author } }),
     });
@@ -640,7 +610,7 @@ async function postLinkedIn(event, venue, content, images) {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json',
       'X-Restli-Protocol-Version': '2.0.0',
-      'LinkedIn-Version': '202401',
+      'LinkedIn-Version': '202502',
     },
     body: JSON.stringify(postBody),
   });
