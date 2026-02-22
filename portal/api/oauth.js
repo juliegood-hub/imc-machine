@@ -361,7 +361,10 @@ async function getLinkedInAuthUrl() {
     'openid',
     'profile', 
     'email',
-    'w_member_social'
+    'w_member_social',
+    'w_organization_social',
+    'r_organization_social',
+    'rw_organization_admin'
   ].join(' ');
   
   // Generate CSRF state parameter
