@@ -102,7 +102,7 @@ async function submitDo210(event) {
     // Venue name
     const venueSel = 'input[name="event[venue_name]"], input#event_venue_name, input[placeholder*="venue" i]';
     try {
-      await safeType(page, venueSel, event.venue || 'The Dakota East Side Ice House');
+      await safeType(page, venueSel, event.venue || 'Venue TBD');
       // Wait for autocomplete dropdown and try to select first result
       await new Promise(r => setTimeout(r, 1500));
       const suggestion = await page.$('.venue-suggestion, .autocomplete-result, .ui-menu-item, [role="option"]');
@@ -268,8 +268,8 @@ async function submitSACurrent(event) {
     // Common Evvnt-powered form selectors
     const formFields = [
       { sel: 'input[name="Title"], input#Title, input[name="EventTitle"], input[placeholder*="title" i]', val: event.title },
-      { sel: 'input[name="VenueName"], input#VenueName, input[name="Venue"], input[placeholder*="venue" i]', val: event.venue || 'The Dakota East Side Ice House' },
-      { sel: 'input[name="Address"], input#Address, input[name="VenueAddress"], input[placeholder*="address" i]', val: event.address || '433 S. Hackberry St, San Antonio, TX 78203' },
+      { sel: 'input[name="VenueName"], input#VenueName, input[name="Venue"], input[placeholder*="venue" i]', val: event.venue || 'Venue TBD' },
+      { sel: 'input[name="Address"], input#Address, input[name="VenueAddress"], input[placeholder*="address" i]', val: event.address || '' },
       { sel: 'input[name="StartDate"], input#StartDate, input[name="startDate"]', val: event.date },
       { sel: 'input[name="StartTime"], input#StartTime, input[name="startTime"]', val: event.time || '7:00 PM' },
       { sel: 'input[name="EndDate"], input#EndDate, input[name="endDate"]', val: event.endDate || event.date },
@@ -405,8 +405,8 @@ async function submitEvvnt(event) {
 
     const evvntFields = [
       { sels: ['input[name*="title" i]', 'input#event_title', 'input[placeholder*="title" i]', 'input[name="event[title]"]'], val: event.title },
-      { sels: ['input[name*="venue" i]', 'input#venue_name', 'input[placeholder*="venue" i]', 'input[name="event[venue_name]"]'], val: event.venue || 'The Dakota East Side Ice House' },
-      { sels: ['input[name*="address" i]', 'input#address', 'input[placeholder*="address" i]'], val: event.address || '433 S. Hackberry St, San Antonio, TX 78203' },
+      { sels: ['input[name*="venue" i]', 'input#venue_name', 'input[placeholder*="venue" i]', 'input[name="event[venue_name]"]'], val: event.venue || 'Venue TBD' },
+      { sels: ['input[name*="address" i]', 'input#address', 'input[placeholder*="address" i]'], val: event.address || '' },
       { sels: ['input[name*="start_date" i]', 'input#start_date', 'input[type="date"]'], val: event.date },
       { sels: ['input[name*="start_time" i]', 'input#start_time'], val: event.time || '7:00 PM' },
       { sels: ['input[name*="ticket" i]', 'input[placeholder*="ticket" i]', 'input[name*="url" i]'], val: event.ticketLink || '' },
@@ -501,8 +501,8 @@ async function main() {
     endTime: '10:00 PM',
     genre: 'Live Music',
     description: 'A test event submission from the IMC Machine by Good Creative Media.',
-    venue: 'The Dakota East Side Ice House',
-    address: '433 S. Hackberry St, San Antonio, TX 78203',
+    venue: 'Venue TBD',
+    address: '',
     ticketLink: 'https://goodcreativemedia.com',
     free: false,
   };

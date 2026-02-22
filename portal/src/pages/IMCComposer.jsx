@@ -46,6 +46,30 @@ export default function IMCComposer() {
     };
   }
 
+  function parseSocialContent(socialText) {
+    if (!socialText) return {};
+    const sections = {};
+    const regex = /(?:^|\n)\s*(?:\*{1,2}|#{1,3}\s*)?(?:(\d+)\.\s*)?(?:\*{0,2})(Facebook|Instagram(?:\s+Caption)?|LinkedIn|Twitter(?:\/X)?)\s*(?:\*{0,2})\s*:?\s*\n/gi;
+    let lastPlatform = null;
+    let lastIndex = 0;
+    const matches = [...socialText.matchAll(regex)];
+    matches.forEach((match) => {
+      if (lastPlatform) {
+        sections[lastPlatform] = socialText.substring(lastIndex, match.index).trim();
+      }
+      const name = match[2].toLowerCase();
+      lastPlatform = name.includes('facebook') ? 'facebook'
+        : name.includes('instagram') ? 'instagram'
+        : name.includes('linkedin') ? 'linkedin'
+        : name.includes('twitter') ? 'twitter' : null;
+      lastIndex = match.index + match[0].length;
+    });
+    if (lastPlatform) {
+      sections[lastPlatform] = socialText.substring(lastIndex).trim();
+    }
+    return sections;
+  }
+
   const handleGenerate = async () => {
     if (!selectedEvent) return;
     setGenerating(true);
@@ -246,34 +270,151 @@ export default function IMCComposer() {
           throw new Error(data.error);
         }
       } else if (channelKey === 'social') {
-        // Post to Facebook via API
-        const res = await fetch('/api/distribute', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'post-facebook',
-            event: selectedEvent,
-            venue: getEventVenue(selectedEvent),
-            content: { socialFacebook: text || generated.social }
-          }),
-        });
+        const parsed = parseSocialContent(text || generated.social);
+        const results = {};
+        const errors = [];
+        const eventVenue = getEventVenue(selectedEvent);
 
-        const data = await res.json();
-        setDistributed(prev => ({ ...prev, [channelKey]: true }));
-        setDistributionResults(prev => ({ ...prev, social: data }));
-        
-        if (data.success) {
-          const fbResult = data.event?.success ? 'Event created' : 'Post only';
-          alert(`📱 Facebook: ${fbResult}\n\n• Instagram: Copy/paste (manual for now)\n• LinkedIn: Copy/paste (manual for now)`);
+        try {
+          const fbRes = await fetch('/api/distribute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'post-facebook',
+              event: selectedEvent,
+              venue: eventVenue,
+              content: { socialFacebook: parsed.facebook || text || generated.social },
+              images: images?.length ? { fb_post_landscape: images[0]?.url, fb_event_banner: images[0]?.url } : undefined
+            }),
+          });
+          results.facebook = await fbRes.json();
+        } catch (err) { errors.push(`Facebook: ${err.message}`); results.facebook = { success: false, error: err.message }; }
+
+        await new Promise(r => setTimeout(r, 500));
+
+        if (images?.length && images[0]?.url && !images[0]?.url.startsWith('data:')) {
+          try {
+            const igRes = await fetch('/api/distribute', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                action: 'post-instagram',
+                event: selectedEvent,
+                venue: eventVenue,
+                content: { instagramCaption: parsed.instagram || '' },
+                images: { ig_post_square: images[0]?.url, ig_post_portrait: images[0]?.url }
+              }),
+            });
+            results.instagram = await igRes.json();
+          } catch (err) { errors.push(`Instagram: ${err.message}`); results.instagram = { success: false, error: err.message }; }
         } else {
-          alert(`📱 Social ready for manual posting:\n\nContent: ${text || generated.social}`);
+          results.instagram = { success: false, error: 'No public image URL. Generate graphics first.' };
         }
+
+        await new Promise(r => setTimeout(r, 500));
+
+        try {
+          const liRes = await fetch('/api/distribute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'post-linkedin',
+              event: selectedEvent,
+              venue: eventVenue,
+              content: { linkedinPost: parsed.linkedin || parsed.facebook || text || generated.social },
+              images: images?.length ? { linkedin_post: images[0]?.url } : undefined
+            }),
+          });
+          results.linkedin = await liRes.json();
+        } catch (err) { errors.push(`LinkedIn: ${err.message}`); results.linkedin = { success: false, error: err.message }; }
+
+        await new Promise(r => setTimeout(r, 500));
+
+        try {
+          const twRes = await fetch('/api/distribute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'post-twitter',
+              event: selectedEvent,
+              content: { twitterPost: parsed.twitter || '' }
+            }),
+          });
+          results.twitter = await twRes.json();
+        } catch (err) { errors.push(`Twitter: ${err.message}`); results.twitter = { success: false, error: err.message }; }
+
+        try {
+          const calRes = await fetch('/api/distribute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'submit-calendars',
+              event: selectedEvent,
+              venue: eventVenue,
+              content: { calendarListing: generated.calendar || '' }
+            }),
+          });
+          results.calendars = await calRes.json();
+        } catch (err) { results.calendars = { success: false, error: err.message }; }
+
+        setDistributed(prev => ({ ...prev, [channelKey]: true }));
+        setDistributionResults(prev => ({ ...prev, social: results }));
+
+        const summary = [
+          results.facebook?.success ? '✅ Facebook: Posted' : `⚠️ Facebook: ${results.facebook?.error || 'Not connected'}`,
+          results.instagram?.success ? '✅ Instagram: Posted' : `⚠️ Instagram: ${results.instagram?.error || 'Not connected'}`,
+          results.linkedin?.success ? '✅ LinkedIn: Posted' : `⚠️ LinkedIn: ${results.linkedin?.error || 'Not connected'}`,
+          results.twitter?.success ? '✅ Twitter/X: Tweeted' : `⚠️ Twitter/X: ${results.twitter?.error || 'Not connected'}`,
+          results.calendars?.success ? '✅ Calendars: Queued' : `⚠️ Calendars: ${results.calendars?.error || 'Not connected'}`,
+        ].join('\n');
+        alert(`📱 Social Distribution:\n\n${summary}`);
       } else if (channelKey === 'email') {
-        setDistributed(prev => ({ ...prev, [channelKey]: 'ready' }));
-        alert('📧 Email copy is ready.\n\nTo send: Connect email service in Settings or copy/paste into your email tool.');
+        const eventVenue = getEventVenue(selectedEvent);
+        try {
+          const res = await fetch('/api/distribute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'send-email-blast',
+              event: selectedEvent,
+              venue: eventVenue,
+              content: text || generated.email
+            }),
+          });
+          const data = await res.json();
+          if (data.success) {
+            setDistributed(prev => ({ ...prev, [channelKey]: true }));
+            alert(`📧 Email blast sent to ${data.sent} subscribers!`);
+          } else {
+            throw new Error(data.error);
+          }
+        } catch (err) {
+          alert(`📧 Email error: ${err.message}`);
+          setDistributed(prev => ({ ...prev, [channelKey]: false }));
+        }
       } else if (channelKey === 'sms') {
-        setDistributed(prev => ({ ...prev, [channelKey]: 'ready' }));
-        alert('💬 SMS text is ready.\n\nTo send: Connect Twilio in Settings or send manually.');
+        try {
+          const res = await fetch('/api/distribute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'send-sms',
+              event: selectedEvent,
+              content: { smsText: text || generated.sms }
+            }),
+          });
+          const data = await res.json();
+          if (data.success) {
+            setDistributed(prev => ({ ...prev, [channelKey]: true }));
+            alert(`💬 SMS sent to ${data.sent} recipients!`);
+          } else {
+            alert(`💬 SMS: ${data.error}`);
+            setDistributed(prev => ({ ...prev, [channelKey]: 'ready' }));
+          }
+        } catch (err) {
+          alert(`💬 SMS error: ${err.message}`);
+          setDistributed(prev => ({ ...prev, [channelKey]: false }));
+        }
       } else {
         setDistributed(prev => ({ ...prev, [channelKey]: true }));
       }
@@ -569,6 +710,26 @@ export default function IMCComposer() {
                       <p className="m-0">⚠️ {distributionResults.eventbrite.error}</p>
                     )}
                   </div>
+                </div>
+              )}
+              {distributionResults.social && (
+                <div className="mt-3 p-3 bg-gray-50 rounded-lg text-sm space-y-1">
+                  <p className="font-semibold text-gray-700 m-0">📱 Social Distribution</p>
+                  {distributionResults.social.facebook && (
+                    <p className="m-0 ml-2">{distributionResults.social.facebook.success ? '✅' : '⚠️'} Facebook: {distributionResults.social.facebook.success ? `Posted${distributionResults.social.facebook.event?.eventUrl ? ` · ${distributionResults.social.facebook.event.eventUrl}` : ''}` : distributionResults.social.facebook.error || 'Not connected'}</p>
+                  )}
+                  {distributionResults.social.instagram && (
+                    <p className="m-0 ml-2">{distributionResults.social.instagram.success ? '✅' : '⚠️'} Instagram: {distributionResults.social.instagram.success ? 'Posted' : distributionResults.social.instagram.error || 'Not connected'}</p>
+                  )}
+                  {distributionResults.social.linkedin && (
+                    <p className="m-0 ml-2">{distributionResults.social.linkedin.success ? '✅' : '⚠️'} LinkedIn: {distributionResults.social.linkedin.success ? `Posted${distributionResults.social.linkedin.postUrl ? ` · ${distributionResults.social.linkedin.postUrl}` : ''}` : distributionResults.social.linkedin.error || 'Not connected'}</p>
+                  )}
+                  {distributionResults.social.twitter && (
+                    <p className="m-0 ml-2">{distributionResults.social.twitter.success ? '✅' : '⚠️'} Twitter/X: {distributionResults.social.twitter.success ? `Tweeted${distributionResults.social.twitter.tweetUrl ? ` · ${distributionResults.social.twitter.tweetUrl}` : ''}` : distributionResults.social.twitter.error || 'Not connected'}</p>
+                  )}
+                  {distributionResults.social.calendars && (
+                    <p className="m-0 ml-2">{distributionResults.social.calendars.success ? '✅' : '⚠️'} Do210/SA Current/Evvnt: {distributionResults.social.calendars.success ? distributionResults.social.calendars.message : distributionResults.social.calendars.error || 'Not connected'}</p>
+                  )}
                 </div>
               )}
             </div>

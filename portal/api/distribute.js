@@ -149,6 +149,18 @@ export default async function handler(req, res) {
       case 'post-linkedin':
         result = await postLinkedIn(event, venue, content, images);
         break;
+      case 'post-twitter':
+        result = await postTwitter(req.body);
+        break;
+      case 'send-email-blast':
+        result = await sendEmailBlast(req.body);
+        break;
+      case 'send-sms':
+        result = await sendSMS(req.body);
+        break;
+      case 'submit-calendars':
+        result = await submitCalendars(req.body);
+        break;
       case 'distribute-all':
         result = await distributeAll(event, venue, content, images, channels);
         break;
@@ -633,6 +645,110 @@ async function postLinkedIn(event, venue, content, images) {
   }
   const err = await postRes.json().catch(() => ({}));
   throw new Error(`LinkedIn post failed (${postRes.status}): ${err.message || JSON.stringify(err)}`);
+}
+
+async function postTwitter({ event, content }) {
+  const apiKey = process.env.TWITTER_API_KEY;
+  const apiSecret = process.env.TWITTER_API_SECRET;
+  const accessToken = process.env.TWITTER_ACCESS_TOKEN;
+  const accessSecret = process.env.TWITTER_ACCESS_TOKEN_SECRET;
+  if (!apiKey || !accessToken) {
+    return { success: false, error: 'Twitter API not configured. Add TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_TOKEN_SECRET to Vercel env vars.' };
+  }
+  const text = (content?.twitterPost || content?.socialFacebook || event.title).substring(0, 280);
+  try {
+    const { TwitterApi } = await import('twitter-api-v2');
+    const client = new TwitterApi({ appKey: apiKey, appSecret: apiSecret, accessToken, accessSecret });
+    const { data } = await client.v2.tweet(text);
+    return { success: true, tweetId: data.id, tweetUrl: `https://twitter.com/i/status/${data.id}` };
+  } catch (err) {
+    return { success: false, error: `Twitter: ${err.message}` };
+  }
+}
+
+async function sendEmailBlast({ event, venue, content }) {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) throw new Error('RESEND_API_KEY not configured');
+  const emailText = typeof content === 'string' ? content : (content.emailBlast || content.email || '');
+  const subjectMatch = emailText.match(/subject\s*(?:line)?[:\s]*(.+)/i);
+  const subject = subjectMatch ? subjectMatch[1].trim().replace(/^["']|["']$/g, '') : `${event.title} — Event Announcement`;
+  const previewMatch = emailText.match(/preview\s*(?:text)?[:\s]*(.+)/i);
+  const preview = previewMatch ? previewMatch[1].trim().replace(/^["']|["']$/g, '') : '';
+  let body = emailText.replace(/subject\s*(?:line)?[:\s]*.+/i, '').replace(/preview\s*(?:text)?[:\s]*.+/i, '').trim();
+
+  const { data: subscribers } = await supabase.from('profiles').select('email').not('email', 'is', null).eq('email_opt_in', true);
+  const recipients = subscribers?.map(s => s.email).filter(Boolean) || [];
+  if (recipients.length === 0) return { success: false, error: 'No email subscribers. Users must opt in via profile settings.' };
+
+  const venueName = venue?.name || 'San Antonio Venue';
+  const eventDate = event.date ? new Date(event.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : 'TBD';
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{font-family:Inter,Helvetica,sans-serif;line-height:1.6;color:#333;margin:0;padding:0;background:#f5f5f5}.container{max-width:600px;margin:0 auto;background:#fff}.header{background:#0d1b2a;color:#c8a45e;padding:30px;text-align:center}.header h1{margin:0;font-size:24px;color:#c8a45e}.body{padding:30px;white-space:pre-line}.event-card{background:#faf8f3;border-left:4px solid #c8a45e;padding:20px;margin:20px 0;border-radius:4px}.cta{display:inline-block;background:#c8a45e;color:#0d1b2a;padding:14px 28px;text-decoration:none;font-weight:bold;border-radius:6px;margin:20px 0}.footer{background:#0d1b2a;color:#888;padding:20px;text-align:center;font-size:12px}.footer a{color:#c8a45e}</style></head><body><div class="container"><div class="header"><h1>${event.title}</h1><p style="color:#aaa;margin:5px 0 0">Presented by Good Creative Media</p></div><div class="body"><div class="event-card"><strong>📅 ${eventDate}${event.time ? ' · ' + event.time : ''}</strong><br><strong>📍 ${venueName}</strong>${venue?.address ? '<br>' + venue.address + ', ' + (venue.city || 'San Antonio') + ', ' + (venue.state || 'TX') : ''}</div>${body}${event.ticketLink ? `<p style="text-align:center"><a href="${event.ticketLink}" class="cta">Get Tickets</a></p>` : ''}</div><div class="footer"><p>Good Creative Media · San Antonio, TX<br><a href="https://goodcreativemedia.com">goodcreativemedia.com</a></p><p style="font-size:10px">You opted in to event announcements.</p></div></div></body></html>`;
+
+  let sent = 0;
+  const batchSize = 50;
+  for (let i = 0; i < recipients.length; i += batchSize) {
+    const batch = recipients.slice(i, i + batchSize);
+    try {
+      const fromAddr = process.env.RESEND_FROM_EMAIL || 'Good Creative Media <events@goodcreativemedia.com>';
+      const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: fromAddr, to: batch, subject, html, reply_to: 'thisisthegoodlife@juliegood.com' }),
+      });
+      const data = await response.json();
+      if (data.id) { sent += batch.length; }
+      else if (data.error?.message?.includes('not verified')) {
+        const retryRes = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from: 'Good Creative Media <onboarding@resend.dev>', to: batch, subject, html, reply_to: 'thisisthegoodlife@juliegood.com' }),
+        });
+        const retryData = await retryRes.json();
+        if (retryData.id) sent += batch.length;
+      }
+    } catch (err) { /* continue */ }
+    await new Promise(r => setTimeout(r, 200));
+  }
+  return { success: sent > 0, sent, total: recipients.length };
+}
+
+async function sendSMS({ event, content, recipients }) {
+  const sid = process.env.TWILIO_ACCOUNT_SID;
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  const from = process.env.TWILIO_PHONE_NUMBER;
+  if (!sid || !token || !from) return { success: false, error: 'Twilio not configured. Add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER to Vercel env vars.' };
+
+  const message = content?.smsText || (typeof content === 'string' ? content : event.title);
+  const { data: smsUsers } = await supabase.from('profiles').select('phone').not('phone', 'is', null).eq('sms_opt_in', true);
+  const phones = recipients || smsUsers?.map(u => u.phone).filter(Boolean) || [];
+  if (phones.length === 0) return { success: false, error: 'No SMS recipients. Users must add phone and opt in.' };
+
+  let sent = 0;
+  for (const phone of phones) {
+    try {
+      const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Authorization': 'Basic ' + Buffer.from(`${sid}:${token}`).toString('base64') },
+        body: new URLSearchParams({ To: phone, From: from, Body: message })
+      });
+      const data = await res.json();
+      if (data.sid) sent++;
+    } catch (err) { /* continue */ }
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return { success: sent > 0, sent, total: phones.length };
+}
+
+async function submitCalendars({ event, venue }) {
+  const { data, error } = await supabase.from('calendar_submissions').insert({
+    event_id: event.id,
+    event_data: { ...event, venue: venue?.name, address: venue?.address, city: venue?.city, state: venue?.state },
+    platforms: ['do210', 'sacurrent', 'evvnt'],
+    status: 'pending',
+    created_at: new Date().toISOString()
+  }).select().single();
+  if (error) throw new Error(`Queue failed: ${error.message}`);
+  return { success: true, message: 'Calendar submissions queued for Do210, SA Current, Evvnt.', submissionId: data.id };
 }
 
 // ═══════════════════════════════════════════════════════════════
