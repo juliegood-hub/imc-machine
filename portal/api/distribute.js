@@ -378,12 +378,28 @@ async function createEventbrite(event, venue, options = {}) {
   if (!token) throw new Error('EVENTBRITE_TOKEN not configured');
 
   const orgId = process.env.EVENTBRITE_ORG_ID || '276674179461';
-  const venueId = process.env.EVENTBRITE_VENUE_ID || '296501198';
+  const venueId = options.venueId || process.env.EVENTBRITE_VENUE_ID || '296501198';
 
   const startLocal = `${event.date}T${convertTo24h(event.time || '19:00')}:00`;
   const endLocal = event.endTime
     ? `${event.endDate || event.date}T${convertTo24h(event.endTime)}:00`
     : `${event.date}T${convertTo24h(event.time || '19:00', 3)}:00`;
+
+  // Build rich HTML description
+  const venueName = venue?.name || event.venue || '';
+  const venueAddr = [venue?.address, venue?.city || 'San Antonio', venue?.state || 'TX', venue?.zip].filter(Boolean).join(', ');
+  const performers = event.performers ? `<p><strong>Featuring:</strong> ${event.performers}</p>` : '';
+  const ticketInfo = event.isFree || !event.ticketPrice
+    ? '<p><strong>Free admission.</strong> All ages welcome.</p>'
+    : `<p><strong>Tickets:</strong> $${event.ticketPrice}</p>`;
+
+  const htmlDescription = options.description || `<h2>${event.title}</h2>
+<p>${event.description || event.title}</p>
+${performers}
+${ticketInfo}
+<h3>Venue</h3>
+<p><strong>${venueName}</strong><br>${venueAddr}</p>
+<p><em>Presented by Good Creative Media.</em></p>`;
 
   // Create event
   const createRes = await fetch(`https://www.eventbriteapi.com/v3/organizations/${orgId}/events/`, {
@@ -392,11 +408,11 @@ async function createEventbrite(event, venue, options = {}) {
     body: JSON.stringify({
       event: {
         name: { html: event.title },
-        description: { html: event.description || event.title },
+        description: { html: htmlDescription },
         start: { timezone: 'America/Chicago', utc: localToUTC(startLocal) },
         end: { timezone: 'America/Chicago', utc: localToUTC(endLocal) },
         currency: 'USD',
-        venue_id: options.venueId || venueId,
+        venue_id: venueId,
         listed: true,
         shareable: true,
         online_event: false,
@@ -423,6 +439,17 @@ async function createEventbrite(event, venue, options = {}) {
   });
   const ticket = await ticketRes.json();
 
+  // Upload banner image if provided
+  let logoUrl = null;
+  const bannerImage = options.bannerImage || options.imageUrl;
+  if (bannerImage) {
+    try {
+      logoUrl = await uploadEventbriteBanner(token, eventId, bannerImage);
+    } catch (err) {
+      console.warn('[Eventbrite] Banner upload failed:', err.message);
+    }
+  }
+
   // Publish
   const pubRes = await fetch(`https://www.eventbriteapi.com/v3/events/${eventId}/publish/`, {
     method: 'POST',
@@ -431,11 +458,75 @@ async function createEventbrite(event, venue, options = {}) {
   const pub = await pubRes.json();
 
   return {
+    success: true,
     eventId,
     eventUrl: `https://www.eventbrite.com/e/${eventId}`,
     ticketClassId: ticket.id,
     published: pub.published || false,
+    logoUrl,
   };
+}
+
+// Upload banner to Eventbrite via their S3 media upload flow
+async function uploadEventbriteBanner(token, eventId, imageSource) {
+  // Step 1: Get upload token
+  const uploadInfoRes = await fetch('https://www.eventbriteapi.com/v3/media/upload/?type=image-event-logo', {
+    headers: { 'Authorization': `Bearer ${token}` },
+  });
+  const uploadInfo = await uploadInfoRes.json();
+  if (!uploadInfo.upload_url || !uploadInfo.upload_token) throw new Error('No upload token received');
+
+  // Step 2: Get image buffer
+  let imgBuffer;
+  if (imageSource.startsWith('data:')) {
+    const b64 = imageSource.split(',')[1];
+    imgBuffer = Buffer.from(b64, 'base64');
+  } else if (imageSource.startsWith('http')) {
+    const imgRes = await fetch(imageSource);
+    imgBuffer = Buffer.from(await imgRes.arrayBuffer());
+  } else {
+    imgBuffer = Buffer.from(imageSource, 'base64');
+  }
+
+  // Step 3: Upload to S3 with raw multipart (FormData doesn't work reliably on serverless)
+  const boundary = '----EBUpload' + Date.now();
+  const fields = uploadInfo.upload_data || {};
+  let parts = [];
+  for (const [key, val] of Object.entries(fields)) {
+    parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="${key}"\r\n\r\n${val}`);
+  }
+  parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="banner.png"\r\nContent-Type: image/png\r\n\r\n`);
+  const preFile = Buffer.from(parts.join('\r\n') + '\r\n');
+  const postFile = Buffer.from(`\r\n--${boundary}--\r\n`);
+  const fullBody = Buffer.concat([preFile, imgBuffer, postFile]);
+
+  const s3Res = await fetch(uploadInfo.upload_url, {
+    method: 'POST',
+    headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+    body: fullBody,
+  });
+  // S3 returns 204 on success
+
+  // Step 4: Notify Eventbrite upload is complete
+  const notifyRes = await fetch('https://www.eventbriteapi.com/v3/media/upload/', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      upload_token: uploadInfo.upload_token,
+      crop_mask: { top_left: { x: 0, y: 0 }, width: 2160, height: 1080 },
+    }),
+  });
+  const mediaData = await notifyRes.json();
+  if (!mediaData.id) throw new Error('Media upload notification failed');
+
+  // Step 5: Set as event logo
+  const logoRes = await fetch(`https://www.eventbriteapi.com/v3/events/${eventId}/`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ event: { logo_id: mediaData.id } }),
+  });
+  const logoData = await logoRes.json();
+  return logoData.logo?.url || mediaData.url;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -771,13 +862,18 @@ async function sendSMS({ event, content, recipients }) {
 async function submitCalendars({ event, venue }) {
   const { data, error } = await supabase.from('calendar_submissions').insert({
     event_id: event.id,
-    event_data: { ...event, venue: venue?.name, address: venue?.address, city: venue?.city, state: venue?.state },
-    platforms: ['do210', 'sacurrent', 'evvnt'],
+    event_data: {
+      ...event,
+      venue: venue?.name, address: venue?.address,
+      city: venue?.city || 'San Antonio', state: venue?.state || 'TX',
+      zip: venue?.zip, venuePhone: venue?.phone, venueWebsite: venue?.website,
+    },
+    platforms: ['do210', 'tpr'],  // Auto-submittable platforms (SA Current + Evvnt are Cloudflare-blocked → use wizards)
     status: 'pending',
     created_at: new Date().toISOString()
   }).select().single();
   if (error) throw new Error(`Queue failed: ${error.message}`);
-  return { success: true, message: 'Calendar submissions queued for Do210, SA Current, Evvnt.', submissionId: data.id };
+  return { success: true, message: 'Calendar submissions queued for Do210 + TPR (auto). SA Current + Evvnt: use wizards in Composer.', submissionId: data.id };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -796,7 +892,9 @@ async function distributeAll(event, venue, content, images, channels = []) {
           results.email = await sendPressRelease(event, venue, content, { recipients: content.recipients || [] });
           break;
         case 'eventbrite':
-          results.eventbrite = await createEventbrite(event, venue, {});
+          results.eventbrite = await createEventbrite(event, venue, {
+            bannerImage: images?.eventbrite_banner || images?.fb_event_banner || images?.fb_post_landscape,
+          });
           break;
         case 'facebook':
           results.facebook = await postFacebook(event, venue, content, images);
@@ -958,49 +1056,15 @@ async function updatePlatformImages({ event, venue, images, distributionResults 
     }
   } catch (err) { results.push({ platform: 'Facebook', success: false, error: err.message }); }
 
-  // Eventbrite: Update event logo/image
+  // Eventbrite: Update event logo/image using working S3 multipart upload
   try {
     const ebToken = process.env.EVENTBRITE_TOKEN;
     const ebEventId = distributionResults?.calendar?.eventId;
     const imageUrl = images?.eventbrite_banner || images?.fb_event_banner;
 
     if (ebToken && ebEventId && imageUrl) {
-      // Eventbrite requires uploading via their media endpoint
-      // First, get an upload token
-      const uploadRes = await fetch(`https://www.eventbriteapi.com/v3/media/upload/?type=image-event-logo`, {
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${ebToken}` },
-      });
-      const uploadData = await uploadRes.json();
-
-      if (uploadData.upload_url && uploadData.upload_token) {
-        // Download the image
-        const imgRes = await fetch(imageUrl);
-        const imgBuffer = await imgRes.arrayBuffer();
-        const imgBlob = new Blob([imgBuffer], { type: 'image/png' });
-
-        // Upload to Eventbrite
-        const formData = new FormData();
-        formData.append('upload_token', uploadData.upload_token);
-        formData.append('file', imgBlob, 'event-graphic.png');
-
-        const postRes = await fetch(uploadData.upload_url, { method: 'POST', body: formData });
-        const postData = await postRes.json();
-
-        if (postData.id || uploadData.upload_token) {
-          // Now set this as the event logo
-          const logoId = postData.id || uploadData.upload_token;
-          const updateRes = await fetch(`https://www.eventbriteapi.com/v3/events/${ebEventId}/`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${ebToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ event: { logo_id: logoId } }),
-          });
-          const updateData = await updateRes.json();
-          results.push({ platform: 'Eventbrite', success: !updateData.error, error: updateData.error_description });
-        }
-      } else {
-        results.push({ platform: 'Eventbrite', success: false, error: 'Could not get upload token' });
-      }
+      const logoUrl = await uploadEventbriteBanner(ebToken, ebEventId, imageUrl);
+      results.push({ platform: 'Eventbrite', success: true, logoUrl });
     } else {
       if (!ebEventId) results.push({ platform: 'Eventbrite', success: false, error: 'No Eventbrite event to update (distribute calendar first)' });
     }

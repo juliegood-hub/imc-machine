@@ -275,14 +275,20 @@ export default function IMCComposer() {
           throw new Error(data.error);
         }
       } else if (channelKey === 'calendar') {
-        // Submit to calendar platforms via API
+        // Submit to Eventbrite with full description + banner image
+        const eventVenue = getEventVenue(selectedEvent);
+        const bannerImage = images?.length ? images[0]?.url : null;
         const res = await fetch('/api/distribute', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: 'create-eventbrite',
             event: selectedEvent,
-            venue: getEventVenue(selectedEvent)
+            venue: eventVenue,
+            options: {
+              description: generated.press || null,
+              bannerImage,
+            }
           }),
         });
 
@@ -290,7 +296,7 @@ export default function IMCComposer() {
         if (data.success) {
           setDistributed(prev => ({ ...prev, [channelKey]: true }));
           setDistributionResults(prev => ({ ...prev, calendar: data }));
-          alert(`📅 Calendar listing created!\n\n• Eventbrite: ${data.eventUrl || 'CREATED'}\n• Do210 & SA Current: Submit manually for now`);
+          alert(`📅 Calendar listing created!\n\n• Eventbrite: ${data.eventUrl || 'CREATED'}${data.logoUrl ? ' (with banner!)' : ''}\n• Do210 & TPR: Auto-submit via calendar worker\n• SA Current & Evvnt: Use wizards below (Cloudflare-protected)`);
           trackCampaign('eventbrite', 'created', data.eventUrl);
         } else {
           throw new Error(data.error);
@@ -318,8 +324,9 @@ export default function IMCComposer() {
 
         await new Promise(r => setTimeout(r, 500));
 
-        if (images?.length && images[0]?.url && !images[0]?.url.startsWith('data:')) {
+        if (images?.length && images[0]?.url) {
           try {
+            // Server-side auto-uploads base64/data URLs to Supabase Storage for Instagram
             const igRes = await fetch('/api/distribute', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -334,7 +341,7 @@ export default function IMCComposer() {
             results.instagram = await igRes.json();
           } catch (err) { errors.push(`Instagram: ${err.message}`); results.instagram = { success: false, error: err.message }; }
         } else {
-          results.instagram = { success: false, error: 'No public image URL. Generate graphics first.' };
+          results.instagram = { success: false, error: 'No image available. Generate graphics first.' };
         }
 
         await new Promise(r => setTimeout(r, 500));
