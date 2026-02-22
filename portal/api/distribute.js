@@ -158,6 +158,9 @@ export default async function handler(req, res) {
       case 'send-sms':
         result = await sendSMS(req.body);
         break;
+      case 'notify-admin-distribution':
+        result = await notifyAdminDistribution(req.body);
+        break;
       case 'update-platform-images':
         result = await updatePlatformImages(req.body);
         break;
@@ -987,4 +990,143 @@ async function updatePlatformImages({ event, venue, images, distributionResults 
   results.push({ platform: 'LinkedIn', success: false, error: 'LinkedIn does not allow updating images on existing posts. Next distribution will include the graphic.' });
 
   return { success: results.some(r => r.success), results };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ADMIN NOTIFICATION — Email Julie with distribution results + URLs
+// ═══════════════════════════════════════════════════════════════
+
+async function notifyAdminDistribution({ event, venue, distributionResults, channels, distributedBy }) {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) return { success: false, error: 'RESEND_API_KEY not configured' };
+
+  const adminEmail = 'thisisthegoodlife@juliegood.com';
+  const eventDate = event.date ? new Date(event.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : 'TBD';
+  const venueName = venue?.name || event.venue || 'Unknown venue';
+
+  // Build the results summary
+  const lines = [];
+
+  // Press
+  if (distributionResults?.press) {
+    const pressCount = distributionResults.press.count || distributionResults.press.length || 0;
+    lines.push(`<tr><td style="padding:8px;border-bottom:1px solid #eee">📰 Press Release</td><td style="padding:8px;border-bottom:1px solid #eee">✅ Sent to ${pressCount} media contacts</td><td style="padding:8px;border-bottom:1px solid #eee">—</td></tr>`);
+  }
+
+  // Calendar / Eventbrite
+  if (distributionResults?.calendar) {
+    const ebUrl = distributionResults.calendar.eventUrl;
+    lines.push(`<tr><td style="padding:8px;border-bottom:1px solid #eee">🎟️ Eventbrite</td><td style="padding:8px;border-bottom:1px solid #eee">${ebUrl ? '✅ Created' : '⚠️ Error'}</td><td style="padding:8px;border-bottom:1px solid #eee">${ebUrl ? `<a href="${ebUrl}" style="color:#c8a45e">${ebUrl}</a>` : '—'}</td></tr>`);
+  }
+
+  // Social platforms
+  if (distributionResults?.social) {
+    const social = distributionResults.social;
+
+    // Facebook
+    if (social.facebook) {
+      const fbEventUrl = social.facebook.event?.eventUrl;
+      const fbPostId = social.facebook.feedPost?.postId;
+      const fbUrl = fbEventUrl || (fbPostId ? `https://facebook.com/${fbPostId}` : null);
+      lines.push(`<tr><td style="padding:8px;border-bottom:1px solid #eee">📱 Facebook</td><td style="padding:8px;border-bottom:1px solid #eee">${social.facebook.success ? '✅ Posted' : '⚠️ ' + (social.facebook.error || 'Failed')}</td><td style="padding:8px;border-bottom:1px solid #eee">${fbUrl ? `<a href="${fbUrl}" style="color:#c8a45e">${fbUrl}</a>` : '—'}</td></tr>`);
+    }
+
+    // Instagram
+    if (social.instagram) {
+      lines.push(`<tr><td style="padding:8px;border-bottom:1px solid #eee">📸 Instagram</td><td style="padding:8px;border-bottom:1px solid #eee">${social.instagram.success ? '✅ Posted' : '⚠️ ' + (social.instagram.error || 'Failed')}</td><td style="padding:8px;border-bottom:1px solid #eee">—</td></tr>`);
+    }
+
+    // LinkedIn
+    if (social.linkedin) {
+      const liUrl = social.linkedin.postUrl;
+      lines.push(`<tr><td style="padding:8px;border-bottom:1px solid #eee">💼 LinkedIn</td><td style="padding:8px;border-bottom:1px solid #eee">${social.linkedin.success ? '✅ Posted' : '⚠️ ' + (social.linkedin.error || 'Failed')}</td><td style="padding:8px;border-bottom:1px solid #eee">${liUrl ? `<a href="${liUrl}" style="color:#c8a45e">${liUrl}</a>` : '—'}</td></tr>`);
+    }
+
+    // Twitter
+    if (social.twitter) {
+      const twUrl = social.twitter.tweetUrl;
+      lines.push(`<tr><td style="padding:8px;border-bottom:1px solid #eee">🐦 Twitter/X</td><td style="padding:8px;border-bottom:1px solid #eee">${social.twitter.success ? '✅ Tweeted' : '⚠️ ' + (social.twitter.error || 'Failed')}</td><td style="padding:8px;border-bottom:1px solid #eee">${twUrl ? `<a href="${twUrl}" style="color:#c8a45e">${twUrl}</a>` : '—'}</td></tr>`);
+    }
+
+    // Calendars (Do210/SA Current/Evvnt)
+    if (social.calendars) {
+      lines.push(`<tr><td style="padding:8px;border-bottom:1px solid #eee">📅 Do210/SA Current/Evvnt</td><td style="padding:8px;border-bottom:1px solid #eee">${social.calendars.success ? '✅ Queued' : '⚠️ ' + (social.calendars.error || 'Failed')}</td><td style="padding:8px;border-bottom:1px solid #eee">—</td></tr>`);
+    }
+  }
+
+  // Email blast
+  if (channels?.includes('email')) {
+    lines.push(`<tr><td style="padding:8px;border-bottom:1px solid #eee">📧 Email Blast</td><td style="padding:8px;border-bottom:1px solid #eee">Attempted</td><td style="padding:8px;border-bottom:1px solid #eee">—</td></tr>`);
+  }
+
+  // SMS
+  if (channels?.includes('sms')) {
+    lines.push(`<tr><td style="padding:8px;border-bottom:1px solid #eee">💬 SMS</td><td style="padding:8px;border-bottom:1px solid #eee">Attempted</td><td style="padding:8px;border-bottom:1px solid #eee">—</td></tr>`);
+  }
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{font-family:Inter,Helvetica,sans-serif;line-height:1.6;color:#333;margin:0;padding:0;background:#f5f5f5}
+.container{max-width:650px;margin:0 auto;background:#fff}
+.header{background:#0d1b2a;color:#c8a45e;padding:24px 30px}
+.header h1{margin:0;font-size:20px;color:#c8a45e}
+.header p{margin:4px 0 0;color:#aaa;font-size:13px}
+.body{padding:24px 30px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:10px 8px;background:#faf8f3;color:#0d1b2a;font-weight:600;border-bottom:2px solid #c8a45e}
+.meta{background:#faf8f3;border-left:4px solid #c8a45e;padding:16px;margin:0 0 20px;border-radius:4px;font-size:13px}
+.footer{background:#0d1b2a;color:#888;padding:16px 30px;text-align:center;font-size:11px}
+.footer a{color:#c8a45e}</style></head>
+<body><div class="container">
+<div class="header"><h1>🚀 Distribution Complete</h1><p>IMC Machine Notification</p></div>
+<div class="body">
+<div class="meta">
+<strong>${event.title}</strong><br>
+📅 ${eventDate}${event.time ? ' · ' + event.time : ''}<br>
+📍 ${venueName}${venue?.address ? ', ' + venue.address : ''}<br>
+👤 Distributed by: ${distributedBy || 'Unknown'}
+</div>
+<table>
+<tr><th>Channel</th><th>Status</th><th>URL</th></tr>
+${lines.join('\n')}
+</table>
+<p style="margin-top:20px;font-size:12px;color:#888">Review each URL for accuracy. <a href="https://imc.goodcreativemedia.com" style="color:#c8a45e">Open IMC Machine →</a></p>
+</div>
+<div class="footer">The IMC Machine · Good Creative Media · San Antonio, TX<br><a href="https://imc.goodcreativemedia.com">imc.goodcreativemedia.com</a></div>
+</div></body></html>`;
+
+  try {
+    const fromAddr = process.env.RESEND_FROM_EMAIL || 'Good Creative Media <events@goodcreativemedia.com>';
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: fromAddr,
+        to: [adminEmail],
+        subject: `🚀 IMC Distribution: ${event.title} — ${venueName}`,
+        html,
+        reply_to: 'thisisthegoodlife@juliegood.com',
+      }),
+    });
+    const data = await response.json();
+    if (data.id) return { success: true, emailId: data.id };
+
+    // Retry with Resend test domain if not verified
+    if (data.error?.message?.includes('not verified')) {
+      const retryRes = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: 'Good Creative Media <onboarding@resend.dev>',
+          to: [adminEmail],
+          subject: `🚀 IMC Distribution: ${event.title} — ${venueName}`,
+          html,
+          reply_to: 'thisisthegoodlife@juliegood.com',
+        }),
+      });
+      const retryData = await retryRes.json();
+      if (retryData.id) return { success: true, emailId: retryData.id };
+    }
+    return { success: false, error: data.error?.message || 'Send failed' };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 }

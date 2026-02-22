@@ -1,6 +1,7 @@
 import { parseLocalDate } from '../lib/dateUtils';
 import { useState } from 'react';
 import { useVenue } from '../context/VenueContext';
+import { useAuth } from '../context/AuthContext';
 import { upsertCampaign } from '../lib/supabase';
 import ChannelToggle from '../components/ChannelToggle';
 import GeneratedContent from '../components/GeneratedContent';
@@ -15,6 +16,7 @@ const CHANNELS = [
 
 export default function IMCComposer() {
   const { events, venue, updateEvent } = useVenue();
+  const { user } = useAuth();
   const [selectedEventId, setSelectedEventId] = useState('');
   const [channels, setChannels] = useState({ press: true, calendar: true, email: true, sms: true, social: true });
   const [generated, setGenerated] = useState({});
@@ -476,6 +478,24 @@ export default function IMCComposer() {
       }
       
       alert(`🚀 Distribution initiated for ${activeKeys.length} channels!\n\nCheck individual channel status above.`);
+
+      // Send admin notification email with all distribution URLs
+      try {
+        await fetch('/api/distribute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'notify-admin-distribution',
+            event: selectedEvent,
+            venue: getEventVenue(selectedEvent),
+            distributionResults: distributionResults,
+            channels: activeKeys,
+            distributedBy: user?.email || user?.name || 'Unknown user',
+          }),
+        });
+      } catch (notifyErr) {
+        console.warn('Admin notification failed:', notifyErr.message);
+      }
     } catch (err) {
       console.error('Distribution error:', err);
       alert('Distribution error: ' + err.message);
@@ -483,7 +503,6 @@ export default function IMCComposer() {
       setDistributing(false);
     }
   };
-// Removed complex tracking for now - focus on core functionality
 
   // Push generated graphics to already-distributed platforms
   const handleUpdatePlatformImages = async () => {
