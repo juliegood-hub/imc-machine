@@ -1,0 +1,16 @@
+node_modules
+dist
+.env
+.env*.local
+service-account.json
+.vercel
+screenshots/
+test-*.png
+portal/node_modules
+portal/dist
+portal/.vercel
+portal/.env
+portal/.env*.local
+portal/service-account.json
+portal/.env.prod
+deploy-production.sh
