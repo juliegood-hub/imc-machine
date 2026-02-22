@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 const { createClient } = require('@supabase/supabase-js');
-const { submitDo210, submitSACurrent, submitEvvnt } = require('../submit-events.js');
+const { submitDo210, submitSACurrent, submitEvvnt, submitTPR } = require('../submit-events.js');
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL,
@@ -8,6 +8,13 @@ const supabase = createClient(
 );
 
 const POLL_INTERVAL = 30000;
+
+const HANDLERS = {
+  do210: submitDo210,
+  sacurrent: submitSACurrent,
+  evvnt: submitEvvnt,
+  tpr: submitTPR,
+};
 
 async function processPending() {
   const { data: pending } = await supabase
@@ -26,9 +33,12 @@ async function processPending() {
 
     for (const platform of submission.platforms) {
       try {
-        if (platform === 'do210') results.do210 = await submitDo210(event);
-        else if (platform === 'sacurrent') results.sacurrent = await submitSACurrent(event);
-        else if (platform === 'evvnt') results.evvnt = await submitEvvnt(event);
+        const handler = HANDLERS[platform];
+        if (handler) {
+          results[platform] = await handler(event);
+        } else {
+          results[platform] = { success: false, error: `Unknown platform: ${platform}` };
+        }
       } catch (err) {
         results[platform] = { success: false, error: err.message };
       }
@@ -37,12 +47,13 @@ async function processPending() {
     await supabase.from('calendar_submissions').update({
       status: 'completed', results, processed_at: new Date().toISOString()
     }).eq('id', submission.id);
-    console.log(`Done ${submission.id}`);
+    console.log(`Done ${submission.id}:`, Object.entries(results).map(([k, v]) => `${k}=${v.success ? '✅' : '❌'}`).join(' '));
   }
 }
 
 async function main() {
-  console.log('Calendar worker started');
+  console.log('Calendar worker started (Do210 + TPR + Evvnt + SA Current)');
+  console.log('⚠️  SA Current is Cloudflare-protected — may need manual intervention');
   while (true) {
     try { await processPending(); } catch (err) { console.error(err.message); }
     await new Promise(r => setTimeout(r, POLL_INTERVAL));

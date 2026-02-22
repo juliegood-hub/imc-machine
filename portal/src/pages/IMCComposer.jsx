@@ -6,10 +6,11 @@ import { upsertCampaign } from '../lib/supabase';
 import ChannelToggle from '../components/ChannelToggle';
 import GeneratedContent from '../components/GeneratedContent';
 import FacebookEventWizard from '../components/FacebookEventWizard';
+import SACurrentWizard from '../components/SACurrentWizard';
 
 const CHANNELS = [
   { key: 'press', label: 'Press Release', icon: '📰' },
-  { key: 'calendar', label: 'Calendar (Do210 / Current / Evvnt)', icon: '📅' },
+  { key: 'calendar', label: 'Calendar (Do210 / TPR / Evvnt / SA Current)', icon: '📅' },
   { key: 'email', label: 'Email', icon: '📧' },
   { key: 'sms', label: 'SMS', icon: '💬' },
   { key: 'social', label: 'Social (FB / IG / X / LinkedIn)', icon: '📱' },
@@ -844,14 +845,21 @@ export default function IMCComposer() {
             </div>
           )}
 
-          {/* Facebook Event Wizard */}
+          {/* Platform Wizards — ChatGPT Agent prompts for manual submission */}
           {selectedEvent && Object.keys(generated).length > 0 && (
-            <FacebookEventWizard
-              event={selectedEvent}
-              venue={getEventVenue(selectedEvent)}
-              generatedContent={generated}
-              images={images}
-            />
+            <>
+              <FacebookEventWizard
+                event={selectedEvent}
+                venue={getEventVenue(selectedEvent)}
+                generatedContent={generated}
+                images={images}
+              />
+              <SACurrentWizard
+                event={selectedEvent}
+                venue={getEventVenue(selectedEvent)}
+                generatedContent={generated}
+              />
+            </>
           )}
 
           {/* Media Distribution Info */}
@@ -859,7 +867,8 @@ export default function IMCComposer() {
             <h4 className="text-sm font-semibold text-gray-700 mb-2">📋 Media Distribution</h4>
             <p className="text-xs text-gray-600">
               Press releases are automatically sent to 17 SA media contacts including KSAT 12, KENS 5, TPR, 
-              Express-News, SA Current, SA Report, and more. Calendar listings go to Do210, SA Current, and Eventbrite.
+              Express-News, SA Current, SA Report, and more. Calendar listings go to Do210, TPR Community Calendar, 
+              Evvnt (→ Express-News/MySA/100+ sites), SA Current (via wizard), and Eventbrite.
             </p>
           </div>
         </>

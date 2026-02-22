@@ -170,6 +170,9 @@ export default async function handler(req, res) {
       case 'distribute-all':
         result = await distributeAll(event, venue, content, images, channels);
         break;
+      case 'upload-image':
+        result = await uploadImageToStorage(req.body);
+        break;
       case 'check-status':
         result = await checkAllStatus();
         break;
@@ -492,6 +495,47 @@ async function postFacebook(event, venue, content, images) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// IMAGE UPLOAD — Supabase Storage for public HTTPS URLs (needed by Instagram)
+// ═══════════════════════════════════════════════════════════════
+
+async function uploadImageToStorage({ imageData, filename, contentType }) {
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !supabaseKey) throw new Error('Supabase not configured for image upload');
+
+  // imageData can be a base64 string or a data URL
+  let buffer;
+  let mime = contentType || 'image/png';
+  if (imageData.startsWith('data:')) {
+    const [header, b64] = imageData.split(',');
+    mime = header.match(/data:(.*?);/)?.[1] || mime;
+    buffer = Buffer.from(b64, 'base64');
+  } else {
+    buffer = Buffer.from(imageData, 'base64');
+  }
+
+  const path = `distribution/${Date.now()}-${filename || 'image.png'}`;
+  
+  const uploadRes = await fetch(`${supabaseUrl}/storage/v1/object/media/${path}`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${supabaseKey}`,
+      'Content-Type': mime,
+      'x-upsert': 'true',
+    },
+    body: buffer,
+  });
+
+  if (!uploadRes.ok) {
+    const err = await uploadRes.text();
+    throw new Error(`Storage upload failed: ${err}`);
+  }
+
+  const publicUrl = `${supabaseUrl}/storage/v1/object/public/media/${path}`;
+  return { success: true, url: publicUrl, path };
+}
+
+
 // INSTAGRAM
 // ═══════════════════════════════════════════════════════════════
 
@@ -521,8 +565,17 @@ async function postInstagram(event, venue, content, images) {
     igId = igData.instagram_business_account.id;
   }
 
-  const imageUrl = images?.ig_post_square || images?.ig_post_portrait;
-  if (!imageUrl) throw new Error('No Instagram image URL provided. Images must be publicly accessible HTTPS URLs.');
+  let imageUrl = images?.ig_post_square || images?.ig_post_portrait || images?.fb_post_landscape;
+  if (!imageUrl) throw new Error('No Instagram image provided. Generate graphics first via the Image Formatter.');
+
+  // If image is base64/data URL, upload to Supabase Storage to get a public HTTPS URL
+  if (imageUrl.startsWith('data:') || !imageUrl.startsWith('http')) {
+    const uploaded = await uploadImageToStorage({
+      imageData: imageUrl,
+      filename: `ig-${event.id || Date.now()}.png`,
+    });
+    imageUrl = uploaded.url;
+  }
 
   const caption = buildIGCaption(event, venue);
 
@@ -575,7 +628,7 @@ async function postLinkedIn(event, venue, content, images) {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
         'X-Restli-Protocol-Version': '2.0.0',
-        'LinkedIn-Version': '202502',
+        'LinkedIn-Version': '202602',
       },
       body: JSON.stringify({ initializeUploadRequest: { owner: author } }),
     });
@@ -610,7 +663,7 @@ async function postLinkedIn(event, venue, content, images) {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json',
       'X-Restli-Protocol-Version': '2.0.0',
-      'LinkedIn-Version': '202502',
+      'LinkedIn-Version': '202602',
     },
     body: JSON.stringify(postBody),
   });

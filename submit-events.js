@@ -465,6 +465,127 @@ async function submitEvvnt(event) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// TPR (Texas Public Radio) — Community Calendar Form Submission
+// Form: https://www.tpr.org/community-calendar-event-submission
+// Posts to: https://www.tpr.org/form/submit
+// Note: TPR only accepts FREE events from nonprofits, colleges, fundraisers
+// ═══════════════════════════════════════════════════════════════
+
+async function submitTPR(event) {
+  console.log('📅 Submitting to TPR Community Calendar...');
+  const browser = await launchBrowser(false);
+  const page = await browser.newPage();
+
+  try {
+    await page.goto('https://www.tpr.org/community-calendar-event-submission', { waitUntil: 'networkidle2' });
+    await new Promise(r => setTimeout(r, 3000));
+
+    console.log('  📝 Filling TPR event form...');
+
+    // Event basics
+    const fields = [
+      { sel: 'input[name="event-title"]', val: event.title },
+      { sel: 'input[name="event-date"], input[name="start-date"]', val: event.date },
+      { sel: 'input[name="start-time"]', val: event.time || '7:00 PM' },
+      { sel: 'input[name="end-date"]', val: event.endDate || event.date },
+      { sel: 'input[name="end-time"]', val: event.endTime || '10:00 PM' },
+      { sel: 'input[name="ticketing-website"]', val: event.ticketLink || '' },
+      { sel: 'input[name="artist-name"]', val: event.performers || '' },
+      { sel: 'input[name="artist-email"]', val: '' },
+      { sel: 'input[name="artist-website"]', val: '' },
+      // Venue
+      { sel: 'input[name="venue-name"]', val: event.venue || 'Venue TBD' },
+      { sel: 'input[name="venue-street-address"]', val: event.address || '' },
+      { sel: 'input[name="venue-city"]', val: event.city || 'San Antonio' },
+      { sel: 'input[name="venue-state"]', val: event.state || 'TX' },
+      { sel: 'input[name="venue-zip"]', val: event.zip || '' },
+      { sel: 'input[name="venue-phone"]', val: event.venuePhone || '' },
+      { sel: 'input[name="venue-website"]', val: event.venueWebsite || '' },
+      { sel: 'input[name="venue-email"]', val: '' },
+      // Submitter info
+      { sel: 'input[name="your-information-name"]', val: 'Julie Good' },
+      { sel: 'input[name="your-information-email"]', val: 'juliegood@goodcreativemedia.com' },
+    ];
+
+    for (const field of fields) {
+      if (!field.val) continue;
+      const sels = field.sel.split(', ');
+      for (const sel of sels) {
+        try { await safeType(page, sel.trim(), field.val); break; } catch (e) {}
+      }
+    }
+
+    // Description textarea
+    try {
+      const descSels = ['textarea[name="event-description"]', 'textarea[name="description"]'];
+      for (const sel of descSels) {
+        try { await safeType(page, sel, event.description || event.title, 10); break; } catch (e) {}
+      }
+    } catch (e) {}
+
+    // Event category dropdown
+    try {
+      const catSel = 'select[name="event-category"]';
+      const options = await page.$$eval(`${catSel} option`, opts => opts.map(o => ({ value: o.value, text: o.textContent.trim().toLowerCase() })));
+      const genre = (event.genre || 'music').toLowerCase();
+      const match = options.find(o => o.text.includes(genre)) || options.find(o => o.text.includes('music')) || options[1];
+      if (match) await safeSelect(page, catSel, match.value);
+    } catch (e) {}
+
+    // Free event checkbox
+    try {
+      const freeCheck = await page.$('input[name="this-is-a-free-event"]');
+      if (freeCheck && event.free) await freeCheck.click();
+    } catch (e) {}
+
+    // Submitting as dropdown
+    try {
+      await safeSelect(page, 'select[name="your-information-submitting-as"]', 'Promoter');
+    } catch (e) {
+      try { await safeSelect(page, 'select[name="your-information-submitting-as"]', 'Other'); } catch (e2) {}
+    }
+
+    // Image upload
+    if (event.imagePath) {
+      try {
+        const fileInput = await page.$('input[name="event-image"]');
+        if (fileInput) await fileInput.uploadFile(event.imagePath);
+      } catch (e) { console.log('  ⚠️ Image upload failed'); }
+    }
+
+    await page.screenshot({ path: `${SCREENSHOT_DIR}/tpr-filled.png`, fullPage: true });
+    console.log('  📸 Screenshot: tpr-filled.png');
+
+    // Submit
+    console.log('  🚀 Submitting...');
+    const submitBtns = ['button[type="submit"]', 'input[type="submit"]', '.EventForm-form button', 'button:has-text("Submit")'];
+    for (const sel of submitBtns) {
+      const btn = await page.$(sel);
+      if (btn) { await btn.click(); break; }
+    }
+    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 }).catch(() => {});
+    await new Promise(r => setTimeout(r, 3000));
+
+    await page.screenshot({ path: `${SCREENSHOT_DIR}/tpr-submitted.png`, fullPage: true });
+
+    const url = page.url();
+    const pageText = await page.evaluate(() => document.body.innerText.substring(0, 2000));
+    const success = pageText.toLowerCase().includes('thank') || pageText.toLowerCase().includes('success') || pageText.toLowerCase().includes('submitted');
+
+    console.log(`  ${success ? '✅' : '⚠️'} TPR ${success ? 'submitted!' : 'may need review'}`);
+    return { success, platform: 'TPR', url, message: success ? 'Event submitted to TPR Community Calendar' : 'Submission may need manual review' };
+
+  } catch (err) {
+    console.error('  ❌ TPR error:', err.message);
+    await page.screenshot({ path: `${SCREENSHOT_DIR}/tpr-error.png` }).catch(() => {});
+    return { success: false, platform: 'TPR', error: err.message };
+  } finally {
+    await browser.close();
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════
 // SUBMIT ALL — Run all platforms and return combined results
 // ═══════════════════════════════════════════════════════════════
 
@@ -472,8 +593,10 @@ async function submitAll(event) {
   const results = {};
   
   results.do210 = await submitDo210(event);
-  results.sacurrent = await submitSACurrent(event);
+  results.tpr = await submitTPR(event);
   results.evvnt = await submitEvvnt(event);
+  // SA Current: Cloudflare-blocked — requires manual submission or ChatGPT Agent
+  results.sacurrent = { success: false, platform: 'SA Current', error: 'Cloudflare-protected. Use the SA Current Wizard in the app to generate a ChatGPT prompt for manual submission.' };
   
   console.log('\n═══════════════════════════════════════════════════════');
   console.log('📊 SUBMISSION RESULTS');
@@ -512,9 +635,10 @@ async function main() {
   if (platform === 'do210') return submitDo210(event);
   if (platform === 'sacurrent') return submitSACurrent(event);
   if (platform === 'evvnt') return submitEvvnt(event);
+  if (platform === 'tpr') return submitTPR(event);
   return submitAll(event);
 }
 
 main().catch(console.error);
 
-module.exports = { submitDo210, submitSACurrent, submitEvvnt, submitAll };
+module.exports = { submitDo210, submitSACurrent, submitEvvnt, submitTPR, submitAll };
