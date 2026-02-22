@@ -1,6 +1,7 @@
 import { parseLocalDate } from '../lib/dateUtils';
 import { useState } from 'react';
 import { useVenue } from '../context/VenueContext';
+import { upsertCampaign } from '../lib/supabase';
 import ChannelToggle from '../components/ChannelToggle';
 import GeneratedContent from '../components/GeneratedContent';
 
@@ -44,6 +45,24 @@ export default function IMCComposer() {
       phone: event.venuePhone || venue?.phone || '',
       website: event.venueWebsite || venue?.website || '',
     };
+  }
+
+  // Track distribution results in campaigns table
+  async function trackCampaign(channel, status, externalUrl, extra = {}) {
+    if (!selectedEventId) return;
+    try {
+      await upsertCampaign({
+        event_id: selectedEventId,
+        channel,
+        status,
+        external_url: externalUrl || null,
+        sent_at: status === 'sent' || status === 'published' || status === 'created' ? new Date().toISOString() : null,
+        recipients: extra.recipients || null,
+        error_message: extra.error || null,
+      });
+    } catch (err) {
+      console.warn(`[Campaign Track] ${channel}:`, err.message);
+    }
   }
 
   function parseSocialContent(socialText) {
@@ -246,6 +265,7 @@ export default function IMCComposer() {
           setDistributed(prev => ({ ...prev, [channelKey]: true }));
           setDistributionResults(prev => ({ ...prev, press: data.results }));
           alert(`📰 Press release SENT to ${data.sent} media contacts!\n\nSent from: events@goodcreativemedia.com\nRecipients: KSAT 12, KENS 5, TPR, Express-News, SA Current...`);
+          trackCampaign('press', 'sent', null, { recipients: data.sent });
         } else {
           throw new Error(data.error);
         }
@@ -266,6 +286,7 @@ export default function IMCComposer() {
           setDistributed(prev => ({ ...prev, [channelKey]: true }));
           setDistributionResults(prev => ({ ...prev, calendar: data }));
           alert(`📅 Calendar listing created!\n\n• Eventbrite: ${data.eventUrl || 'CREATED'}\n• Do210 & SA Current: Submit manually for now`);
+          trackCampaign('eventbrite', 'created', data.eventUrl);
         } else {
           throw new Error(data.error);
         }
@@ -368,6 +389,16 @@ export default function IMCComposer() {
           results.calendars?.success ? '✅ Calendars: Queued' : `⚠️ Calendars: ${results.calendars?.error || 'Not connected'}`,
         ].join('\n');
         alert(`📱 Social Distribution:\n\n${summary}`);
+
+        // Track each social platform
+        if (results.facebook?.success) trackCampaign('social_facebook', 'published', results.facebook.event?.eventUrl || results.facebook.feedPost?.postId ? `https://facebook.com/${results.facebook.feedPost.postId}` : null);
+        else trackCampaign('social_facebook', 'failed', null, { error: results.facebook?.error });
+        if (results.instagram?.success) trackCampaign('social_instagram', 'published', null);
+        else trackCampaign('social_instagram', 'failed', null, { error: results.instagram?.error });
+        if (results.linkedin?.success) trackCampaign('social_linkedin', 'published', results.linkedin.postUrl);
+        else trackCampaign('social_linkedin', 'failed', null, { error: results.linkedin?.error });
+        if (results.twitter?.success) trackCampaign('social_twitter', 'published', results.twitter.tweetUrl);
+        if (results.calendars?.success) trackCampaign('calendar_do210', 'queued', null);
       } else if (channelKey === 'email') {
         const eventVenue = getEventVenue(selectedEvent);
         try {
@@ -385,6 +416,7 @@ export default function IMCComposer() {
           if (data.success) {
             setDistributed(prev => ({ ...prev, [channelKey]: true }));
             alert(`📧 Email blast sent to ${data.sent} subscribers!`);
+          trackCampaign('email_campaign', 'sent', null, { recipients: data.sent });
           } else {
             throw new Error(data.error);
           }
@@ -407,6 +439,7 @@ export default function IMCComposer() {
           if (data.success) {
             setDistributed(prev => ({ ...prev, [channelKey]: true }));
             alert(`💬 SMS sent to ${data.sent} recipients!`);
+          trackCampaign('sms_blast', 'sent', null, { recipients: data.sent });
           } else {
             alert(`💬 SMS: ${data.error}`);
             setDistributed(prev => ({ ...prev, [channelKey]: 'ready' }));
