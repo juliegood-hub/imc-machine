@@ -102,7 +102,10 @@ async function getFacebookAuthUrl() {
   const redirectUri = 'https://imc.goodcreativemedia.com/api/oauth?action=fb-callback';
   const scopes = [
     'pages_show_list',
-    'pages_read_engagement'
+    'pages_read_engagement',
+    'pages_manage_posts',
+    'instagram_basic',
+    'instagram_content_publish'
   ].join(',');
   
   // Generate CSRF state parameter
@@ -213,6 +216,15 @@ async function handleFacebookCallback({ code, state, error, error_description })
     };
     
     await storeConnection(connectionData);
+    
+    // Also store as instagram connection so getToken('instagram') works
+    if (instagramAccount) {
+      await storeConnection({
+        ...connectionData,
+        platform: 'instagram',
+        token_type: 'instagram_via_facebook'
+      });
+    }
     
     return {
       redirect: `https://imc.goodcreativemedia.com/settings?connected=facebook&status=success`
