@@ -2,7 +2,8 @@ import { parseLocalDate } from '../lib/dateUtils';
 import { useState } from 'react';
 import { useVenue } from '../context/VenueContext';
 import { useAuth } from '../context/AuthContext';
-import { upsertCampaign } from '../lib/supabase';
+import { upsertCampaign, saveGeneratedContent } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 import ChannelToggle from '../components/ChannelToggle';
 import GeneratedContent from '../components/GeneratedContent';
 import FacebookEventWizard from '../components/FacebookEventWizard';
@@ -32,6 +33,25 @@ export default function IMCComposer() {
 
   const selectedEvent = events.find(e => e.id === selectedEventId);
   const activeChannels = CHANNELS.filter(c => channels[c.key]);
+
+  // Load previously generated content when event changes
+  useEffect(() => {
+    if (!selectedEventId) return;
+    (async () => {
+      try {
+        const { data } = await supabase.from('generated_content')
+          .select('content_type, content')
+          .eq('event_id', selectedEventId);
+        if (data?.length) {
+          const saved = {};
+          data.forEach(row => { saved[row.content_type] = row.content; });
+          setGenerated(saved);
+        } else {
+          setGenerated({});
+        }
+      } catch (e) { console.warn('Could not load saved content:', e); }
+    })();
+  }, [selectedEventId]);
 
   // Build venue object from the event's own venue fields (not the logged-in user's profile)
   function getEventVenue(event) {
@@ -170,6 +190,21 @@ export default function IMCComposer() {
 
       setGenerated(results);
       updateEvent(selectedEventId, { campaign: true });
+
+      // Persist generated content to Supabase (delete old, insert new)
+      for (const [key, content] of Object.entries(results)) {
+        try {
+          await supabase.from('generated_content')
+            .delete()
+            .eq('event_id', selectedEventId)
+            .eq('content_type', key);
+          await supabase.from('generated_content').insert({
+            event_id: selectedEventId,
+            content_type: key,
+            content: content,
+          });
+        } catch (e) { console.warn('Could not save generated content:', e); }
+      }
     } catch (err) {
       console.error('Generation error:', err);
       alert('Error generating content: ' + err.message);
@@ -561,6 +596,12 @@ export default function IMCComposer() {
 
   const handleContentEdit = (channelKey, newContent) => {
     setGenerated(prev => ({ ...prev, [channelKey]: newContent }));
+    // Auto-save edit to Supabase
+    if (selectedEventId) {
+      supabase.from('generated_content').delete().eq('event_id', selectedEventId).eq('content_type', channelKey)
+        .then(() => supabase.from('generated_content').insert({ event_id: selectedEventId, content_type: channelKey, content: newContent }))
+        .catch(e => console.warn('Could not save edit:', e));
+    }
   };
 
   // Generate all at once
