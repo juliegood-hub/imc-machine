@@ -22,6 +22,11 @@ import { CLIENT_TYPES, getClientTypeColors } from '../constants/clientTypes';
 
 const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || 'juliegood@goodcreativemedia.com';
 
+// Local date string (YYYY-MM-DD) — avoids UTC timezone shift
+function localDateStr(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
 function generateInviteCode(name) {
   const now = new Date();
   const mmdd = String(now.getMonth() + 1).padStart(2, '0') + String(now.getDate()).padStart(2, '0');
@@ -94,6 +99,7 @@ export default function AdminDashboard() {
   const [editingUser, setEditingUser] = useState(null);
   const [editingProfile, setEditingProfile] = useState(null);
   const [events, setEvents] = useState([]);
+  const [channelStatuses, setChannelStatuses] = useState(null);
 
   // Filters
   const [userFilter, setUserFilter] = useState('all'); // all, expanded client types
@@ -125,6 +131,17 @@ export default function AdminDashboard() {
       setActivities(activitiesData || []);
       setCampaigns(campaignsData || []);
       setEvents(eventsData || []);
+
+      // Fetch live channel connection status
+      try {
+        const statusRes = await fetch('/api/distribute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'check-status' })
+        });
+        const statusData = await statusRes.json();
+        if (statusData.success) setChannelStatuses(statusData);
+      } catch (e) { console.warn('Could not fetch channel status:', e); }
     } catch (error) {
       console.error('Failed to load admin data:', error);
     }
@@ -133,7 +150,7 @@ export default function AdminDashboard() {
   // ─── Computed Stats ───
   const stats = useMemo(() => {
     const now = new Date();
-    const today = now.toISOString().split('T')[0];
+    const today = localDateStr(now);
     const weekAgo = new Date(now - 7 * 86400000).toISOString();
     const monthAgo = new Date(now - 30 * 86400000).toISOString();
 
@@ -202,7 +219,7 @@ export default function AdminDashboard() {
     let result = [...activities]; // already sorted by created_at desc from query
 
     if (dateRange === 'today') {
-      const today = new Date().toISOString().split('T')[0];
+      const today = localDateStr();
       result = result.filter(a => a.created_at?.startsWith(today));
     } else if (dateRange === '7d') {
       const cutoff = new Date(Date.now() - 7 * 86400000).toISOString();
@@ -464,7 +481,7 @@ export default function AdminDashboard() {
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `imc-users-${new Date().toISOString().split('T')[0]}.csv`;
+    a.href = url; a.download = `imc-users-${localDateStr()}.csv`;
     a.click(); URL.revokeObjectURL(url);
   };
 
@@ -629,7 +646,7 @@ export default function AdminDashboard() {
                 </div>
               ) : filteredUsers.map(u => {
                 const ct = getClientTypeColors(u.client_type || u.clientType);
-                const userCampaigns = Object.values(campaigns).filter(c => c.userId === u.id);
+                const userEvents = events.filter(e => e.user_id === u.id);
                 return (
                   <div key={u.id} className="card flex flex-col md:flex-row md:items-center gap-3 cursor-pointer hover:border-[#c8a45e] transition-colors"
                     onClick={() => setSelectedUser(u)} style={{ borderLeft: `4px solid ${u.disabled ? '#ef4444' : '#22c55e'}` }}>
@@ -644,7 +661,7 @@ export default function AdminDashboard() {
                     </div>
                     <div className="flex gap-6 text-xs text-gray-400">
                       <div className="text-center">
-                        <div className="text-lg font-bold text-gray-700">{userCampaigns.length}</div>
+                        <div className="text-lg font-bold text-gray-700">{userEvents.length}</div>
                         <div>events</div>
                       </div>
                       <div className="text-center">
@@ -895,18 +912,18 @@ export default function AdminDashboard() {
           <div className="card mb-6">
             <h3 className="text-lg mb-4">Distribution Channel Status</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              <ChannelStatusCard name="Facebook Events" icon="📘" status="ready" detail="Page: Good Creative Media (522058047815423)" />
-              <ChannelStatusCard name="Facebook Feed" icon="📱" status="ready" detail="Same token as Events" />
-              <ChannelStatusCard name="Instagram" icon="📸" status="setup" detail="IG scopes needed on token" />
-              <ChannelStatusCard name="LinkedIn" icon="💼" status="setup" detail="App creation needed at linkedin.com/developers" />
-              <ChannelStatusCard name="Eventbrite" icon="🎟️" status="ready" detail="Org: The Dakota (276674179461)" />
-              <ChannelStatusCard name="Email (Resend)" icon="📧" status="ready" detail="Sender: events@goodcreativemedia.com" />
-              <ChannelStatusCard name="Do210" icon="📅" status="ready" detail="Puppeteer automation ready" />
-              <ChannelStatusCard name="SA Current" icon="📰" status="blocked" detail="Cloudflare blocks automation" />
-              <ChannelStatusCard name="Evvnt" icon="🌐" status="setup" detail="API key needed from dashboard" />
-              <ChannelStatusCard name="YouTube Podcasts" icon="🎙️" status="ready" detail="OAuth configured, uploads private" />
-              <ChannelStatusCard name="Google Drive" icon="📁" status="ready" detail="3 venue folders created" />
-              <ChannelStatusCard name="Bilingual (Spanish)" icon="🇲🇽" status="ready" detail="La Prensa Texas distribution" />
+              <ChannelStatusCard name="Facebook Feed" icon="📱" status={channelStatuses?.facebook?.ready ? 'ready' : 'setup'} detail={channelStatuses?.facebook?.ready ? 'Page: Good Creative Media ✅' : 'Connect at Settings → Facebook'} />
+              <ChannelStatusCard name="Facebook Events" icon="📘" status={channelStatuses?.facebook?.ready ? 'ready' : 'setup'} detail={channelStatuses?.facebook?.ready ? 'Same token as Feed ✅' : 'Connect Facebook first'} />
+              <ChannelStatusCard name="Instagram" icon="📸" status={channelStatuses?.instagram?.ready ? 'ready' : 'setup'} detail={channelStatuses?.instagram?.ready ? '@goodcreativemedia ✅' : 'Connect at Settings → Facebook (includes IG)'} />
+              <ChannelStatusCard name="LinkedIn" icon="💼" status={channelStatuses?.linkedin?.ready ? 'ready' : 'setup'} detail={channelStatuses?.linkedin?.ready ? 'Connected ✅' : 'Connect at Settings → LinkedIn'} />
+              <ChannelStatusCard name="Eventbrite" icon="🎟️" status={channelStatuses?.eventbrite?.ready ? 'ready' : 'setup'} detail={channelStatuses?.eventbrite?.ready ? 'Org: Good Creative Media ✅' : 'API key needed'} />
+              <ChannelStatusCard name="Email (Resend)" icon="📧" status={channelStatuses?.email?.ready ? 'ready' : 'setup'} detail={channelStatuses?.email?.ready ? 'events@goodcreativemedia.com ✅' : 'RESEND_API_KEY needed'} />
+              <ChannelStatusCard name="Do210" icon="📅" status="ready" detail="Puppeteer automation ✅" />
+              <ChannelStatusCard name="TPR" icon="📻" status="ready" detail="Community calendar submissions ✅" />
+              <ChannelStatusCard name="SA Current" icon="📰" status="blocked" detail="Cloudflare — use ChatGPT Agent wizard" />
+              <ChannelStatusCard name="Evvnt" icon="🌐" status="blocked" detail="Cloudflare — use ChatGPT Agent wizard" />
+              <ChannelStatusCard name="YouTube Podcasts" icon="🎙️" status={channelStatuses?.youtube?.ready ? 'ready' : 'setup'} detail={channelStatuses?.youtube?.ready ? 'OAuth connected ✅' : 'Connect at Settings → YouTube'} />
+              <ChannelStatusCard name="Bilingual (Spanish)" icon="🇲🇽" status="ready" detail="La Prensa Texas distribution ✅" />
             </div>
           </div>
         </div>
@@ -1062,9 +1079,9 @@ function EventCalendarTab({ events, users, campaigns }) {
   // Stats
   const stats = useMemo(() => {
     const now = new Date();
-    const today = now.toISOString().split('T')[0];
-    const thisWeekEnd = new Date(now.getTime() + 7 * 86400000).toISOString().split('T')[0];
-    const thisMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+    const today = localDateStr(now);
+    const thisWeekEnd = localDateStr(new Date(now.getTime() + 7 * 86400000));
+    const thisMonthEnd = localDateStr(new Date(now.getFullYear(), now.getMonth() + 1, 0));
 
     const allDates = Object.keys(eventsByDate);
     const upcoming = allDates.filter(d => d >= today);
@@ -1096,7 +1113,7 @@ function EventCalendarTab({ events, users, campaigns }) {
   const nextMonth = () => setCurrentDate(new Date(year, month + 1, 1));
   const goToday = () => setCurrentDate(new Date());
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = localDateStr();
 
   // Week view
   const weekStart = useMemo(() => {
@@ -1109,7 +1126,7 @@ function EventCalendarTab({ events, users, campaigns }) {
     return Array.from({ length: 7 }, (_, i) => {
       const d = new Date(weekStart);
       d.setDate(d.getDate() + i);
-      return d.toISOString().split('T')[0];
+      return localDateStr(d);
     });
   }, [weekStart]);
 
@@ -2043,7 +2060,7 @@ function UserEditModal({ user, profile, events, onSave, onClose, onUpdateUser, o
                             <div>
                               <h4 className="font-semibold text-sm">{evt.title || 'Untitled Event'}</h4>
                               <p className="text-xs text-gray-500 mt-1">
-                                📅 {evt.date || 'No date'} {evt.time ? `at ${evt.time}` : ''} · {evt.genre || 'No genre'}
+                                📅 {evt.date ? new Date(evt.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : 'No date'} {evt.time ? `at ${evt.time}` : ''} · {evt.genre || 'No genre'}
                               </p>
                               {evt.description && <p className="text-xs text-gray-600 mt-2 line-clamp-2">{evt.description}</p>}
                             </div>
