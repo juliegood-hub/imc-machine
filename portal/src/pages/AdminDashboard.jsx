@@ -231,7 +231,7 @@ export default function AdminDashboard() {
   // ─── Campaign list ───
   const campaignList = useMemo(() => {
     return Object.entries(campaigns)
-      .map(([id, c]) => ({ id, ...c, summary: getCampaignSummary(id) }))
+      .map(([id, c]) => ({ id, ...c }))
       .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   }, [campaigns]);
 
