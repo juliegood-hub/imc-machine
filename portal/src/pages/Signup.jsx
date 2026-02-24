@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { CLIENT_TYPES, isVenueRole, isArtistRole } from '../constants/clientTypes';
+import FormAIAssist from '../components/FormAIAssist';
 
 export default function Signup() {
   const [searchParams] = useSearchParams();
@@ -134,6 +135,16 @@ export default function Signup() {
     performer: 'Sarah Chen (Broadway)',
   }[clientType] || 'Your organization';
 
+  const applySignupPatch = (fields) => {
+    if (fields.firstName !== undefined) setFirstName(fields.firstName);
+    if (fields.lastName !== undefined) setLastName(fields.lastName);
+    if (fields.email !== undefined) setEmail(fields.email);
+    if (fields.cellPhone !== undefined) setCellPhone(fields.cellPhone);
+    if (fields.clientType !== undefined) setClientType(fields.clientType);
+    if (fields.clientName !== undefined) setClientName(fields.clientName);
+    if (fields.inviteCode !== undefined) setInviteCode(fields.inviteCode);
+  };
+
   return (
     <div className="min-h-screen bg-[#0d1b2a] flex items-center justify-center p-4">
       <div className="w-full max-w-md">
@@ -150,6 +161,14 @@ export default function Signup() {
           <p className="text-xs text-gray-400 text-center mb-4">* Required fields</p>
 
           {error && <div className="bg-red-50 text-red-600 text-sm p-3 rounded-lg mb-4">{error}</div>}
+
+          <FormAIAssist
+            formType="signup"
+            currentForm={{ firstName, lastName, email, cellPhone, clientType, clientName, inviteCode }}
+            onApply={applySignupPatch}
+            title="Signup AI Assistant"
+            description="Speak or type your details once, and AI will place them into the signup fields."
+          />
 
           {/* Client Type Selection */}
           <div className="mb-5">

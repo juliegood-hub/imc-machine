@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useVenue } from '../context/VenueContext';
 import CompletionBar from '../components/CompletionBar';
 import SponsorEditor from '../components/SponsorEditor';
+import FormAIAssist from '../components/FormAIAssist';
 import { extractFromImages, extractionToEventForm, openCamera, openFileUpload } from '../services/photo-to-form';
 
 const GENRES = [
@@ -92,6 +93,9 @@ export default function EventCreate() {
   const [extracting, setExtracting] = useState({});
 
   const update = (field) => (e) => setForm({ ...form, [field]: e.target.value });
+  const applyEventPatch = (fields) => {
+    setForm(prev => ({ ...prev, ...fields }));
+  };
 
   const availableRoles = useMemo(() => {
     if (!form.genre) return UNIVERSAL_ROLES;
@@ -657,6 +661,14 @@ export default function EventCreate() {
   return (
     <div className="p-4 md:p-8 max-w-3xl">
       <h1 className="text-3xl mb-2" style={{ fontFamily: "'Playfair Display', serif" }}>Create Event</h1>
+
+      <FormAIAssist
+        formType="event"
+        currentForm={form}
+        onApply={applyEventPatch}
+        title="Event AI Assistant"
+        description="Speak event details once and AI will map them into basics, venue, ticketing, and brand fields."
+      />
 
       <CompletionBar completed={step + 1} total={STEP_LABELS.length} label={`Step ${step + 1}: ${STEP_LABELS[step]}`} />
 

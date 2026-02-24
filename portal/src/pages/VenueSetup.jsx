@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useVenue } from '../context/VenueContext';
 import { useAuth } from '../context/AuthContext';
 import CompletionBar from '../components/CompletionBar';
+import FormAIAssist from '../components/FormAIAssist';
 import { extractFromImages, extractionToVenueForm, openCamera, openFileUpload } from '../services/photo-to-form';
 import { isVenueRole } from '../constants/clientTypes';
 
@@ -223,10 +224,22 @@ export default function VenueSetup() {
     </button>
   );
 
+  const applyVenuePatch = (fields) => {
+    setForm(prev => ({ ...prev, ...fields }));
+  };
+
   return (
     <div className="p-4 md:p-8 max-w-3xl">
       <h1 className="text-3xl mb-2">Venue Setup</h1>
       <p className="text-gray-500 mb-6">Tell us about your venue to personalize your experience.</p>
+
+      <FormAIAssist
+        formType="venue"
+        currentForm={form}
+        onApply={applyVenuePatch}
+        title="Venue AI Assistant"
+        description="Speak venue details once and AI will distribute them into contact, business, address, social, and venue fields."
+      />
 
       {/* Photo-to-Form: AI Data Extraction for Venue */}
       <div className="card mb-6 border-2 border-dashed border-[#c8a45e] bg-[#faf8f3]">

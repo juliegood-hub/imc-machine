@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useVenue } from '../context/VenueContext';
 import { useAuth } from '../context/AuthContext';
 import CompletionBar from '../components/CompletionBar';
+import FormAIAssist from '../components/FormAIAssist';
 import { extractFromImages, openCamera, openFileUpload } from '../services/photo-to-form';
 import { isArtistRole } from '../constants/clientTypes';
 
@@ -391,6 +392,10 @@ export default function ArtistSetup() {
     </button>
   );
 
+  const applyArtistPatch = (fields) => {
+    setForm(prev => ({ ...prev, ...fields }));
+  };
+
   return (
     <div className="p-4 md:p-8 max-w-3xl">
       <h1 className="text-3xl mb-2" style={{ fontFamily: "'Playfair Display', serif" }}>{isArtisanUser ? 'Artisan Setup' : 'Artist / Band Setup'}</h1>
@@ -401,6 +406,14 @@ export default function ArtistSetup() {
             ? 'Tell us about your voice, topics, and professional focus so we can personalize your profile and campaigns.'
             : 'Tell us about you so we can personalize your press and promo.'}
       </p>
+
+      <FormAIAssist
+        formType="artist"
+        currentForm={form}
+        onApply={applyArtistPatch}
+        title={isArtisanUser ? 'Artisan AI Assistant' : isKnowledgeCreatorUser ? 'Professional AI Assistant' : 'Artist AI Assistant'}
+        description="Speak your profile details and AI will map them into contact, address, professional, social, and profile fields."
+      />
 
       {/* Photo-to-Form */}
       <div className="card mb-6 border-2 border-dashed border-[#c8a45e] bg-[#faf8f3]">

@@ -12,6 +12,7 @@
 //   podcast-script    → Gemini podcast script generation
 //   extract-photo     → Gemini Vision photo-to-form extraction
 //   research          → Gemini research (venue, artist, context)
+//   form-assist       → AI-assisted structured form filling
 // ═══════════════════════════════════════════════════════════════
 
 export default async function handler(req, res) {
@@ -69,6 +70,9 @@ export default async function handler(req, res) {
       case 'podcast-source':
         result = await generatePodcastSource(req.body);
         break;
+      case 'form-assist':
+        result = await formAssist(req.body);
+        break;
       default:
         return res.status(400).json({ error: `Unknown action: ${action}` });
     }
@@ -83,7 +87,7 @@ export default async function handler(req, res) {
 // OPENAI CONTENT GENERATION
 // ═══════════════════════════════════════════════════════════════
 
-async function openaiChat(systemPrompt, userPrompt, model = 'gpt-4o') {
+async function openaiChat(systemPrompt, userPrompt, model = 'gpt-4o', temperature = 0.8) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error('OPENAI_API_KEY not configured');
 
@@ -96,7 +100,7 @@ async function openaiChat(systemPrompt, userPrompt, model = 'gpt-4o') {
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      temperature: 0.8,
+      temperature,
     }),
   });
   const data = await r.json();
@@ -256,6 +260,303 @@ ${researchContext || ''}`.replace(/\n{3,}/g, '\n\n');
     default:
       return `Write marketing content for:\n\n${eventInfo}`;
   }
+}
+
+const FORM_ASSIST_SCHEMAS = {
+  signup: {
+    firstName: { type: 'string' },
+    lastName: { type: 'string' },
+    email: { type: 'string' },
+    cellPhone: { type: 'string' },
+    clientType: { type: 'string', enum: ['venue_owner', 'venue_manager', 'venue_marketing', 'venue_staff', 'restaurant', 'festival_organizer', 'artist', 'promoter', 'manager', 'booking_agent', 'producer', 'dj', 'vendor', 'artisan', 'attorney', 'educator', 'professor', 'doctor', 'speaker', 'author', 'writer', 'journalist', 'editor', 'poet', 'playwright', 'podcaster', 'moderator', 'coach', 'consultant', 'comedian', 'activist', 'politician', 'chef', 'k12_school', 'conservatory', 'childrens_theater', 'youth_program', 'media', 'sponsor', 'admin'] },
+    clientName: { type: 'string' },
+    inviteCode: { type: 'string' },
+  },
+  venue: {
+    firstName: { type: 'string' },
+    lastName: { type: 'string' },
+    title: { type: 'string' },
+    workPhone: { type: 'string' },
+    cellPhone: { type: 'string' },
+    email: { type: 'string' },
+    preferredContact: { type: 'string', enum: ['email', 'phone', 'text'] },
+    businessName: { type: 'string' },
+    dbaName: { type: 'string' },
+    businessType: { type: 'string', enum: ['venue', 'bar_restaurant', 'theater', 'gallery', 'church', 'outdoor', 'other'] },
+    taxId: { type: 'string' },
+    yearEstablished: { type: 'number' },
+    streetNumber: { type: 'string' },
+    streetName: { type: 'string' },
+    suiteNumber: { type: 'string' },
+    city: { type: 'string' },
+    state: { type: 'string' },
+    zipCode: { type: 'string' },
+    country: { type: 'string', enum: ['US', 'CA', 'MX'] },
+    website: { type: 'string' },
+    facebook: { type: 'string' },
+    facebookPageId: { type: 'string' },
+    instagram: { type: 'string' },
+    linkedin: { type: 'string' },
+    twitter: { type: 'string' },
+    tiktok: { type: 'string' },
+    spotify: { type: 'string' },
+    youtube: { type: 'string' },
+    yelp: { type: 'string' },
+    googleBusiness: { type: 'string' },
+    onlineMenu: { type: 'string' },
+    squareStore: { type: 'string' },
+    shopifyStore: { type: 'string' },
+    amazonStore: { type: 'string' },
+    etsyStore: { type: 'string' },
+    merchStore: { type: 'string' },
+    otherStore: { type: 'string' },
+    capacity: { type: 'number' },
+    hasStage: { type: 'boolean' },
+    hasSound: { type: 'boolean' },
+    hasLighting: { type: 'boolean' },
+    parkingType: { type: 'string', enum: ['street', 'lot', 'valet', 'none'] },
+    adaAccessible: { type: 'boolean' },
+    ageRestriction: { type: 'string', enum: ['all_ages', '18_plus', '21_plus'] },
+    liquorLicense: { type: 'boolean' },
+    brandPrimary: { type: 'string' },
+    brandSecondary: { type: 'string' },
+  },
+  artist: {
+    firstName: { type: 'string' },
+    lastName: { type: 'string' },
+    stageName: { type: 'string' },
+    managerName: { type: 'string' },
+    managerEmail: { type: 'string' },
+    managerPhone: { type: 'string' },
+    bookingName: { type: 'string' },
+    bookingEmail: { type: 'string' },
+    bookingPhone: { type: 'string' },
+    cellPhone: { type: 'string' },
+    preferredContact: { type: 'string', enum: ['email', 'phone', 'text'] },
+    streetNumber: { type: 'string' },
+    streetName: { type: 'string' },
+    suiteNumber: { type: 'string' },
+    city: { type: 'string' },
+    state: { type: 'string' },
+    zipCode: { type: 'string' },
+    country: { type: 'string', enum: ['US', 'CA', 'MX'] },
+    hometown: { type: 'string' },
+    genre: { type: 'string' },
+    subgenres: { type: 'array' },
+    yearsActive: { type: 'number' },
+    recordLabel: { type: 'string' },
+    performingRightsOrg: { type: 'string' },
+    unionMember: { type: 'string' },
+    bio: { type: 'string' },
+    website: { type: 'string' },
+    facebook: { type: 'string' },
+    instagram: { type: 'string' },
+    tiktok: { type: 'string' },
+    youtube: { type: 'string' },
+    spotify: { type: 'string' },
+    appleMusic: { type: 'string' },
+    soundcloud: { type: 'string' },
+    bandcamp: { type: 'string' },
+    linkedin: { type: 'string' },
+    onlineMenu: { type: 'string' },
+    squareStore: { type: 'string' },
+    shopifyStore: { type: 'string' },
+    amazonStore: { type: 'string' },
+    etsyStore: { type: 'string' },
+    merchStore: { type: 'string' },
+    otherStore: { type: 'string' },
+    hasOwnSound: { type: 'boolean' },
+    hasOwnLighting: { type: 'boolean' },
+    typicalSetLength: { type: 'string', enum: ['30min', '45min', '1hr', '1_5hr', '2hr', '2_5hr', '3hr'] },
+    riderRequirements: { type: 'string' },
+    techRiderUrl: { type: 'string' },
+    brandPrimary: { type: 'string' },
+    brandSecondary: { type: 'string' },
+  },
+  event: {
+    title: { type: 'string' },
+    description: { type: 'string' },
+    genre: { type: 'string' },
+    date: { type: 'date' },
+    time: { type: 'time' },
+    ticketLink: { type: 'string' },
+    ticketPrice: { type: 'string' },
+    venue: { type: 'string' },
+    venueStreetNumber: { type: 'string' },
+    venueStreetName: { type: 'string' },
+    venueSuite: { type: 'string' },
+    venueCity: { type: 'string' },
+    venueState: { type: 'string' },
+    venueZip: { type: 'string' },
+    venuePhone: { type: 'string' },
+    venueWebsite: { type: 'string' },
+    brandColors: { type: 'string' },
+    writingTone: { type: 'string', enum: ['Professional yet approachable', 'Casual and fun', 'Formal and elegant', 'Edgy and bold', 'Warm and community-focused'] },
+    specialInstructions: { type: 'string' },
+    detectedFonts: { type: 'string' },
+  },
+};
+
+async function formAssist({ formType, inputText, currentForm = {} }) {
+  if (!formType) throw new Error('formType is required');
+  if (!inputText || !inputText.trim()) throw new Error('inputText is required');
+
+  const schema = FORM_ASSIST_SCHEMAS[formType];
+  if (!schema) throw new Error(`Unsupported formType: ${formType}`);
+
+  const schemaSummary = Object.entries(schema).map(([key, meta]) => {
+    const base = `${key}: ${meta.type}`;
+    if (meta.enum) return `${base} (${meta.enum.join(', ')})`;
+    return base;
+  }).join('\n');
+
+  const model = process.env.OPENAI_FORM_ASSIST_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini';
+  const systemPrompt = `You extract form fields from user notes/transcripts. Return ONLY valid JSON.
+Output shape:
+{
+  "fields": { "<fieldKey>": <value> },
+  "missing": ["<requiredOrusefulFieldKey>"],
+  "notes": "short clarification note"
+}
+Rules:
+- Only include keys from allowed schema.
+- Only include fields you are confident about.
+- Use ISO date: YYYY-MM-DD.
+- Use 24-hour time: HH:MM.
+- For arrays, return an array of strings.
+- If useful facts appear that are not schema fields (for example ISBN, extra contacts, sponsor names), include them briefly in "notes".
+- Do not include markdown, comments, or extra keys.`;
+
+  const userPrompt = `FORM TYPE: ${formType}
+
+ALLOWED FIELDS:
+${schemaSummary}
+
+CURRENT FORM (context only):
+${JSON.stringify(currentForm, null, 2)}
+
+USER INPUT TO PARSE:
+${inputText}`;
+
+  const raw = await openaiChat(systemPrompt, userPrompt, model, 0.2);
+  let parsed;
+  try {
+    parsed = parseJSON(raw);
+  } catch {
+    throw new Error('AI form parsing returned invalid JSON');
+  }
+
+  const fields = sanitizeFormPatch(formType, parsed?.fields || {});
+  const missing = Array.isArray(parsed?.missing)
+    ? parsed.missing.filter(k => schema[k])
+    : [];
+  const notes = typeof parsed?.notes === 'string' ? parsed.notes.trim() : '';
+
+  return { fields, missing, notes, modelUsed: model };
+}
+
+function sanitizeFormPatch(formType, patch) {
+  const schema = FORM_ASSIST_SCHEMAS[formType];
+  const out = {};
+  if (!schema || !patch || typeof patch !== 'object') return out;
+
+  for (const [key, rawValue] of Object.entries(patch)) {
+    const meta = schema[key];
+    if (!meta) continue;
+
+    let value = null;
+    switch (meta.type) {
+      case 'boolean':
+        value = normalizeBoolean(rawValue);
+        break;
+      case 'number':
+        value = normalizeNumber(rawValue);
+        break;
+      case 'array':
+        value = normalizeStringArray(rawValue);
+        break;
+      case 'date':
+        value = normalizeDate(rawValue);
+        break;
+      case 'time':
+        value = normalizeTime(rawValue);
+        break;
+      default:
+        value = normalizeString(rawValue);
+    }
+
+    if (meta.enum && value && !meta.enum.includes(value)) continue;
+    if (value === null) continue;
+    if (typeof value === 'string' && !value.trim()) continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    out[key] = value;
+  }
+
+  return out;
+}
+
+function normalizeString(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return null;
+}
+
+function normalizeStringArray(value) {
+  if (Array.isArray(value)) {
+    return value.map(v => normalizeString(v)).filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    return value
+      .split(/[\n,;|]+/)
+      .map(v => v.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function normalizeNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(String(value).replace(/[^\d.-]/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value > 0;
+  if (typeof value === 'string') {
+    const v = value.trim().toLowerCase();
+    if (['yes', 'true', 'y', '1'].includes(v)) return true;
+    if (['no', 'false', 'n', '0'].includes(v)) return false;
+  }
+  return null;
+}
+
+function normalizeDate(value) {
+  if (typeof value !== 'string') return null;
+  const s = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d = new Date(s);
+  if (!Number.isFinite(d.getTime())) return null;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function normalizeTime(value) {
+  if (typeof value !== 'string') return null;
+  const s = value.trim();
+  if (/^\d{2}:\d{2}$/.test(s)) return s;
+  const match = s.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/i);
+  if (!match) return null;
+  let hour = Number(match[1]);
+  const minute = match[2] || '00';
+  const ampm = match[3].toLowerCase();
+  if (ampm === 'pm' && hour < 12) hour += 12;
+  if (ampm === 'am' && hour === 12) hour = 0;
+  if (hour < 0 || hour > 23) return null;
+  return `${String(hour).padStart(2, '0')}:${minute}`;
 }
 
 // ═══════════════════════════════════════════════════════════════
