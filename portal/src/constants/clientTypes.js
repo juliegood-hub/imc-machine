@@ -19,13 +19,24 @@ export const CLIENT_TYPES = [
   { key: 'producer', icon: '🎬', label: 'Producer', desc: 'Event producer, show producer' },
   { key: 'dj', icon: '🎧', label: 'DJ / Electronic / Pop Act', desc: 'DJ, electronic, pop, hip-hop, solo recording artist' },
   { key: 'vendor', icon: '🛍️', label: 'Vendor / Retail Artist', desc: 'Art vendor, retail booth, merch seller, craft market' },
+  { key: 'artisan', icon: '🎨', label: 'Artisan / Visual Artist', desc: 'Painter, sculptor, ceramicist, printmaker, designer, maker' },
   
   // Speaker / Professional roles
   { key: 'attorney', icon: '⚖️', label: 'Attorney / Lawyer', desc: 'Attorney, lawyer, legal professional' },
   { key: 'educator', icon: '📚', label: 'Educator / Professor', desc: 'Teacher, professor, lecturer, academic' },
+  { key: 'professor', icon: '🎓', label: 'Professor / Researcher', desc: 'Professor, researcher, academic expert' },
   { key: 'doctor', icon: '🩺', label: 'Doctor / Medical Professional', desc: 'Physician, medical professional, healthcare' },
   { key: 'speaker', icon: '🎤', label: 'Speaker / Panelist', desc: 'Keynote speaker, panelist, moderator' },
   { key: 'author', icon: '📖', label: 'Author / Writer', desc: 'Author, writer, poet, playwright' },
+  { key: 'writer', icon: '✍️', label: 'Writer / Copywriter', desc: 'Writer, essayist, copywriter, columnist' },
+  { key: 'journalist', icon: '🗞️', label: 'Journalist / Reporter', desc: 'Reporter, journalist, correspondent, critic' },
+  { key: 'editor', icon: '📝', label: 'Editor / Publisher', desc: 'Editor, publication lead, publishing professional' },
+  { key: 'poet', icon: '🖋️', label: 'Poet / Spoken Word', desc: 'Poet, spoken word artist, literary performer' },
+  { key: 'playwright', icon: '🎭', label: 'Playwright / Dramaturg', desc: 'Playwright, scriptwriter, dramaturg' },
+  { key: 'podcaster', icon: '🎙️', label: 'Podcaster / Host', desc: 'Podcast host, interviewer, broadcast personality' },
+  { key: 'moderator', icon: '🎛️', label: 'Moderator / MC', desc: 'Moderator, emcee, host, facilitator' },
+  { key: 'coach', icon: '🏋️', label: 'Coach / Trainer', desc: 'Coach, trainer, workshop leader' },
+  { key: 'consultant', icon: '💡', label: 'Consultant / Advisor', desc: 'Consultant, strategist, advisor' },
   { key: 'comedian', icon: '😂', label: 'Comedian', desc: 'Stand-up comedian, improv performer' },
   { key: 'activist', icon: '✊', label: 'Activist / Community Leader', desc: 'Activist, organizer, community leader' },
   { key: 'politician', icon: '🏛️', label: 'Elected Official / Politician', desc: 'Elected official, political figure, candidate' },
@@ -63,11 +74,11 @@ export function isVenueRole(clientType) {
 }
 
 export function isArtistRole(clientType) {
-  return ['artist', 'promoter', 'manager', 'booking_agent', 'producer', 'dj', 'performer', 'vendor'].includes(clientType);
+  return ['artist', 'promoter', 'manager', 'booking_agent', 'producer', 'dj', 'performer', 'vendor', 'artisan'].includes(clientType);
 }
 
 export function isSpeakerRole(clientType) {
-  return ['attorney', 'educator', 'doctor', 'speaker', 'author', 'comedian', 'activist', 'politician', 'chef'].includes(clientType);
+  return ['attorney', 'educator', 'professor', 'doctor', 'speaker', 'author', 'writer', 'journalist', 'editor', 'poet', 'playwright', 'podcaster', 'moderator', 'coach', 'consultant', 'comedian', 'activist', 'politician', 'chef'].includes(clientType);
 }
 
 export function isYouthRole(clientType) {

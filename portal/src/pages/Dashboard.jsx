@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useVenue } from '../context/VenueContext';
 import EventCard from '../components/EventCard';
 import CompletionBar from '../components/CompletionBar';
+import { isVenueRole } from '../constants/clientTypes';
 
 const VENUE_FIELDS = ['name', 'logo', 'address', 'city', 'state', 'zip', 'brandPrimary', 'brandSecondary', 'website'];
 const SOCIAL_FIELDS = ['facebook', 'instagram', 'twitter', 'tiktok', 'youtube', 'spotify', 'linkedin'];
@@ -50,7 +51,7 @@ export default function Dashboard() {
           {venue.name ? 'Your marketing command center is right here. What are we working on today?' : 'First things first: let\'s set up your profile so we can start getting the word out.'}
         </p>
         {!venue.name && (
-          <Link to={user?.clientType && ['artist','dj','vendor','promoter','manager','booking_agent','producer'].includes(user.clientType) ? '/artist-setup' : '/venue-setup'} 
+          <Link to={!isVenueRole(user?.clientType || '') ? '/artist-setup' : '/venue-setup'} 
             className="btn-primary inline-block mt-4 no-underline">Set Up Profile →</Link>
         )}
       </div>

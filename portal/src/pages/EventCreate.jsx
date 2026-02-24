@@ -9,6 +9,7 @@ const GENRES = [
   { key: 'Theater | Plays | Musicals', icon: '🎭', color: '#8B5CF6', desc: 'Plays, musicals, theatrical performances' },
   { key: 'Live Music | Contemporary | Jazz | Electronic | Indie', icon: '🎵', color: '#EC4899', desc: 'Concerts, bands, DJs, live music' },
   { key: 'Orchestral | Classical | Choral', icon: '🎻', color: '#3B82F6', desc: 'Orchestra, symphony, choir' },
+  { key: 'Literary | Poetry | Book Signings', icon: '📚', color: '#7C3AED', desc: 'Book signings, poetry readings, author talks, literary events' },
   { key: 'Comedy | Speaking | Lectures | Workshops', icon: '🎤', color: '#F59E0B', desc: 'Comedy, talks, workshops, panels' },
   { key: 'Dance | Performance Art | Experimental', icon: '💃', color: '#10B981', desc: 'Dance, performance art, installations' },
 ];
@@ -17,6 +18,7 @@ const GENRE_ROLES = {
   'Theater | Plays | Musicals': ['Director', 'Playwright', 'Lead Actor', 'Supporting Actor', 'Understudy', 'Choreographer', 'Musical Director', 'Costume Designer', 'Set Designer', 'Props Master', 'Hair & Makeup Artist', 'Dramaturg'],
   'Live Music | Contemporary | Jazz | Electronic | Indie': ['Lead Vocalist', 'Guitarist', 'Bassist', 'Drummer', 'Keyboardist', 'Saxophonist', 'DJ', 'Music Producer', 'Tour Manager', 'Backing Vocalist'],
   'Orchestral | Classical | Choral': ['Conductor', 'Concertmaster', 'Choir Director', 'Music Director', 'Guest Soloist', 'Soprano', 'Alto', 'Tenor', 'Baritone'],
+  'Literary | Poetry | Book Signings': ['Author', 'Poet', 'Spoken Word Artist', 'Moderator', 'Interviewer', 'Editor', 'Publisher', 'Bookseller', 'Host/Emcee'],
   'Comedy | Speaking | Lectures | Workshops': ['Comedian/Comic', 'Host/Emcee', 'Keynote Speaker', 'Panelist', 'Moderator', 'Workshop Facilitator', 'Opening Act', 'Headliner'],
   'Dance | Performance Art | Experimental': ['Choreographer', 'Lead Dancer', 'Performance Artist', 'Movement Director', 'Aerialist', 'Puppeteer'],
 };

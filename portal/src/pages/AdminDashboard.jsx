@@ -18,7 +18,7 @@ import {
   createProfile
 } from '../lib/supabase';
 import { supabase } from '../lib/supabase';
-import { CLIENT_TYPES, getClientTypeColors } from '../constants/clientTypes';
+import { CLIENT_TYPES, getClientTypeColors, isArtistRole } from '../constants/clientTypes';
 
 const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || 'juliegood@goodcreativemedia.com';
 
@@ -168,7 +168,7 @@ export default function AdminDashboard() {
 
     const byClientType = {
       venue: users.filter(u => u.client_type === 'venue').length,
-      artist: users.filter(u => u.client_type === 'artist').length,
+      artist: users.filter(u => ['artist', 'artisan'].includes(u.client_type)).length,
       performer: users.filter(u => u.client_type === 'performer').length,
       producer: users.filter(u => u.client_type === 'producer').length,
     };
@@ -2130,7 +2130,7 @@ function BroadcastTab({ users }) {
   const activeUsers = users.filter(u => !u.disabled);
   const filteredUsers = filter === 'all' ? activeUsers :
     filter === 'venue' ? activeUsers.filter(u => ['venue_owner','venue_manager','venue_marketing','venue_staff','restaurant','festival_organizer'].includes(u.client_type)) :
-    filter === 'artist' ? activeUsers.filter(u => ['artist','dj','vendor','promoter','manager','booking_agent','producer'].includes(u.client_type)) :
+    filter === 'artist' ? activeUsers.filter(u => isArtistRole(u.client_type)) :
     activeUsers;
 
   const TEMPLATES = [

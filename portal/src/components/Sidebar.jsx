@@ -1,14 +1,15 @@
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { isVenueRole } from '../constants/clientTypes';
 
 export default function Sidebar() {
   const { user, isAdmin } = useAuth();
   const clientType = user?.clientType || 'venue';
-  const isArtist = ['artist', 'performer'].includes(clientType);
+  const isNonVenueProfile = !isVenueRole(clientType);
 
   const links = [
     { to: '/', label: 'Dashboard', icon: '📊' },
-    isArtist
+    isNonVenueProfile
       ? { to: '/artist-setup', label: 'Artist Profile', icon: '🎵' }
       : { to: '/venue-setup', label: 'Venue Setup', icon: '🏛️' },
     { to: '/events/create', label: 'Create Event', icon: '🎪' },

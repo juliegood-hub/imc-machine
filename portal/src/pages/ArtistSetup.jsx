@@ -6,12 +6,149 @@ import CompletionBar from '../components/CompletionBar';
 import { extractFromImages, openCamera, openFileUpload } from '../services/photo-to-form';
 import { isArtistRole } from '../constants/clientTypes';
 
-const GENRES = [
+const PERFORMANCE_GENRES = [
   'Theater | Plays | Musicals',
   'Live Music | Contemporary | Jazz | Electronic | Indie',
   'Orchestral | Classical | Choral',
   'Comedy | Speaking | Lectures | Workshops',
   'Dance | Performance Art | Experimental',
+];
+
+const ARTISAN_MEDIA = [
+  'Painting: Oil',
+  'Painting: Acrylic',
+  'Painting: Watercolor',
+  'Painting: Gouache',
+  'Drawing: Graphite',
+  'Drawing: Charcoal',
+  'Drawing: Ink',
+  'Pastel',
+  'Printmaking: Relief',
+  'Printmaking: Intaglio',
+  'Printmaking: Lithography',
+  'Printmaking: Screenprint',
+  'Printmaking: Monotype',
+  'Ceramics: Wheel-thrown',
+  'Ceramics: Handbuilt',
+  'Sculpture: Stone',
+  'Sculpture: Wood',
+  'Sculpture: Metal',
+  'Sculpture: Mixed Media',
+  'Welding / Metal Fabrication',
+  'Woodworking',
+  'Furniture Design',
+  'Jewelry / Metalsmithing',
+  'Glass: Blown',
+  'Glass: Fused / Kiln-formed',
+  'Textiles / Fiber Art',
+  'Weaving',
+  'Embroidery',
+  'Fashion / Wearable Art',
+  'Leatherwork',
+  'Book Arts',
+  'Calligraphy / Lettering',
+  'Illustration',
+  'Mural Art',
+  'Street Art',
+  'Digital Art',
+  'Graphic Design',
+  'Photography',
+  'Film / Video Art',
+  'Installation Art',
+  'Performance Art',
+  'Collage',
+  'Assemblage',
+  'Mosaic',
+  'Resin Art',
+  'Culinary Arts',
+  'Floral Design',
+  'Paper Art',
+  '3D Printing / Digital Fabrication',
+  'Other',
+];
+
+const ARTISAN_ASSOCIATIONS = [
+  { value: '', label: 'None' },
+  { value: 'AIGA', label: 'AIGA' },
+  { value: 'NCECA', label: 'NCECA' },
+  { value: 'SNAG', label: 'SNAG' },
+  { value: 'SculptorsGuild', label: 'Sculptors Guild' },
+  { value: 'WoodworkersGuild', label: 'Woodworkers Guild' },
+  { value: 'ArtLeague', label: 'Art League / Collective' },
+  { value: 'Other', label: 'Other' },
+];
+
+const KNOWLEDGE_CREATOR_TOPICS = [
+  'Books and Publishing',
+  'Book Signings and Author Talks',
+  'Poetry Readings and Literary Performance',
+  'Journalism and News',
+  'Arts and Culture Criticism',
+  'Creative Writing',
+  'Poetry and Spoken Word',
+  'Playwriting and Theater Writing',
+  'Education: K-12',
+  'Education: Higher Education',
+  'Research and Academia',
+  'Public Policy and Government',
+  'Community Organizing',
+  'Legal Education',
+  'Health and Medicine',
+  'Business and Entrepreneurship',
+  'Leadership and Management',
+  'Marketing and Communications',
+  'Technology and AI',
+  'Science and Environment',
+  'History and Humanities',
+  'Career Development',
+  'Personal Development',
+  'Faith and Spirituality',
+  'Food and Culinary',
+  'Comedy and Storytelling',
+  'Podcasting and Media Hosting',
+  'Interviewing and Moderation',
+  'Workshop Facilitation',
+  'Social Impact',
+  'Local San Antonio Culture',
+  'Other',
+];
+
+const PROFESSIONAL_ASSOCIATIONS = [
+  { value: '', label: 'None' },
+  { value: 'GeminiInk', label: 'Gemini Ink (San Antonio)' },
+  { value: 'TrinityUniversityPress', label: 'Trinity University Press' },
+  { value: 'SanAntonioBookFestival', label: 'San Antonio Book Festival' },
+  { value: 'TexasBookFestival', label: 'Texas Book Festival' },
+  { value: 'SPJ', label: 'Society of Professional Journalists (SPJ)' },
+  { value: 'NABJ', label: 'National Association of Black Journalists (NABJ)' },
+  { value: 'NAHJ', label: 'National Association of Hispanic Journalists (NAHJ)' },
+  { value: 'AAJA', label: 'Asian American Journalists Association (AAJA)' },
+  { value: 'AuthorsGuild', label: 'The Authors Guild' },
+  { value: 'PEN', label: 'PEN America' },
+  { value: 'NCTE', label: 'National Council of Teachers of English (NCTE)' },
+  { value: 'TESOL', label: 'TESOL' },
+  { value: 'APA', label: 'American Psychological Association (APA)' },
+  { value: 'AMA', label: 'American Marketing Association (AMA)' },
+  { value: 'SHRM', label: 'SHRM' },
+  { value: 'PMI', label: 'PMI' },
+  { value: 'Other', label: 'Other' },
+];
+
+const KNOWLEDGE_CREATOR_ROLES = [
+  'author',
+  'writer',
+  'journalist',
+  'editor',
+  'poet',
+  'playwright',
+  'podcaster',
+  'speaker',
+  'moderator',
+  'educator',
+  'professor',
+  'coach',
+  'consultant',
+  'media',
 ];
 
 const REQUIRED_FIELDS = ['firstName', 'lastName', 'stageName', 'email', 'city', 'state'];
@@ -23,6 +160,9 @@ export default function ArtistSetup() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const isArtistUser = isArtistRole(user?.clientType || 'artist');
+  const isArtisanUser = user?.clientType === 'artisan';
+  const isKnowledgeCreatorUser = KNOWLEDGE_CREATOR_ROLES.includes(user?.clientType || '');
+  const showTechnicalSection = isArtistUser && !isArtisanUser;
   const [form, setForm] = useState({
     // Contact Info
     firstName: venue.firstName || '',
@@ -253,15 +393,21 @@ export default function ArtistSetup() {
 
   return (
     <div className="p-4 md:p-8 max-w-3xl">
-      <h1 className="text-3xl mb-2" style={{ fontFamily: "'Playfair Display', serif" }}>Artist / Band Setup</h1>
-      <p className="text-gray-500 mb-6">Tell us about you so we can personalize your press and promo.</p>
+      <h1 className="text-3xl mb-2" style={{ fontFamily: "'Playfair Display', serif" }}>{isArtisanUser ? 'Artisan Setup' : 'Artist / Band Setup'}</h1>
+      <p className="text-gray-500 mb-6">
+        {isArtisanUser
+          ? 'Tell us about your art practice so we can personalize your profile, press, and event promotions.'
+          : isKnowledgeCreatorUser
+            ? 'Tell us about your voice, topics, and professional focus so we can personalize your profile and campaigns.'
+            : 'Tell us about you so we can personalize your press and promo.'}
+      </p>
 
       {/* Photo-to-Form */}
       <div className="card mb-6 border-2 border-dashed border-[#c8a45e] bg-[#faf8f3]">
         <div className="flex items-center justify-between mb-3">
           <div>
             <h3 className="text-lg">📸 Snap & Auto-Fill</h3>
-            <p className="text-xs text-gray-500 m-0">Photo a press kit, one-sheet, business card, or album cover : AI extracts your info</p>
+            <p className="text-xs text-gray-500 m-0">Photo a press kit, one-sheet, business card, portfolio page, or studio card : AI extracts your info</p>
           </div>
           {extracting && <span className="text-sm text-[#c8a45e] animate-pulse">🔍 Extracting...</span>}
         </div>
@@ -273,7 +419,7 @@ export default function ArtistSetup() {
         </div>
       </div>
 
-      <CompletionBar completed={completed} total={total} label="Artist Profile" />
+      <CompletionBar completed={completed} total={total} label={isArtisanUser ? 'Artisan Profile' : isKnowledgeCreatorUser ? 'Professional Profile' : 'Artist Profile'} />
 
       {saved && (
         <div className="bg-green-50 text-green-700 p-4 rounded-lg mb-6 font-medium">✓ Artist profile saved! Redirecting to dashboard...</div>
@@ -291,7 +437,13 @@ export default function ArtistSetup() {
                 {fieldInput("First Name", "firstName", "text", "Julie", true)}
                 {fieldInput("Last Name", "lastName", "text", "Good", true)}
                 <div className="md:col-span-2">
-                  {fieldInput("Stage Name / Band Name", "stageName", "text", "Julie Good and A Dog Named Mike", true)}
+                  {fieldInput(
+                    isArtisanUser ? "Artist / Studio Name" : isKnowledgeCreatorUser ? "Professional Name / Brand Name" : "Stage Name / Band Name",
+                    "stageName",
+                    "text",
+                    isArtisanUser ? "Blue Heron Ceramics Studio" : isKnowledgeCreatorUser ? "Julie Good Media" : "Julie Good and A Dog Named Mike",
+                    true
+                  )}
                 </div>
                 {fieldInput("Manager Name", "managerName", "text", "Jane Smith")}
                 {fieldInput("Manager Email", "managerEmail", "email", "manager@email.com")}
@@ -345,26 +497,28 @@ export default function ArtistSetup() {
 
         {/* Professional */}
         <div>
-          <SectionHeader title="Professional Details" section="professional" count={7} />
+          <SectionHeader title={isArtisanUser ? 'Professional Art Details' : 'Professional Details'} section="professional" count={7} />
           {expandedSections.professional && (
             <div className="card">
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Genre</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    {isArtisanUser ? 'Primary Medium' : isKnowledgeCreatorUser ? 'Primary Topic / Focus' : 'Genre'}
+                  </label>
                   <select value={form.genre} onChange={update('genre')}
                     className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-[#c8a45e] bg-white">
-                    <option value="">Select genre...</option>
-                    {GENRES.map(g => <option key={g} value={g}>{g}</option>)}
+                    <option value="">{isArtisanUser ? 'Select primary medium...' : isKnowledgeCreatorUser ? 'Select primary topic...' : 'Select genre...'}</option>
+                    {(isArtisanUser ? ARTISAN_MEDIA : isKnowledgeCreatorUser ? KNOWLEDGE_CREATOR_TOPICS : PERFORMANCE_GENRES).map(g => <option key={g} value={g}>{g}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Subgenres</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{isArtisanUser ? 'Additional Media / Techniques' : isKnowledgeCreatorUser ? 'Topics / Niches' : 'Subgenres'}</label>
                   <div className="flex gap-2 mb-2">
                     <input 
                       type="text" 
                       value={subgenreInput} 
                       onChange={e => setSubgenreInput(e.target.value)}
-                      placeholder="Add subgenre tag"
+                      placeholder={isArtisanUser ? 'Add medium, style, or technique' : isKnowledgeCreatorUser ? 'Add topic, beat, or niche' : 'Add subgenre tag'}
                       className="flex-1 px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-[#c8a45e]"
                       onKeyPress={e => e.key === 'Enter' && (e.preventDefault(), addSubgenre())}
                     />
@@ -383,20 +537,25 @@ export default function ArtistSetup() {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {fieldInput("Years Active", "yearsActive", "number", "2015")}
-                  {fieldInput("Record Label", "recordLabel", "text", "Independent / Label name")}
-                  {selectInput("ASCAP/BMI/SESAC Member", "performingRightsOrg", [
+                  {fieldInput(
+                    isArtisanUser ? "Studio / Collective Name" : isKnowledgeCreatorUser ? "Publication / Organization" : "Record Label",
+                    "recordLabel",
+                    "text",
+                    isArtisanUser ? "Studio name or collective" : isKnowledgeCreatorUser ? "Publisher, outlet, school, or brand" : "Independent / Label name"
+                  )}
+                  {selectInput(isArtisanUser ? "Association / Guild Membership" : isKnowledgeCreatorUser ? "Professional Association" : "ASCAP/BMI/SESAC Member", "performingRightsOrg", isArtisanUser ? ARTISAN_ASSOCIATIONS : isKnowledgeCreatorUser ? PROFESSIONAL_ASSOCIATIONS : [
                     { value: '', label: 'None' },
                     { value: 'ASCAP', label: 'ASCAP' },
                     { value: 'BMI', label: 'BMI' },
                     { value: 'SESAC', label: 'SESAC' }
                   ])}
-                  {fieldInput("Union Member", "unionMember", "text", "SAG-AFTRA, AFM, etc.")}
+                  {fieldInput(isArtisanUser ? "League / Guild / Chapter" : isKnowledgeCreatorUser ? "Affiliations / Credentials" : "Union Member", "unionMember", "text", isArtisanUser ? "Guild name, league, chapter, or collective" : isKnowledgeCreatorUser ? "Degrees, certifications, fellowships, memberships" : "SAG-AFTRA, AFM, etc.")}
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Bio</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{isArtisanUser ? 'Artist Statement / Bio' : isKnowledgeCreatorUser ? 'Professional Bio' : 'Bio'}</label>
                   <textarea value={form.bio} onChange={update('bio')} rows={4}
                     className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-[#c8a45e] resize-y"
-                    placeholder="Tell us about yourself or your band... This will be used in press releases and bios." />
+                    placeholder={isArtisanUser ? 'Tell us about your artistic practice, materials, and themes. This will be used in press releases and bios.' : isKnowledgeCreatorUser ? 'Tell us about your work, expertise, and audience. This will be used in bios and media copy.' : 'Tell us about yourself or your band... This will be used in press releases and bios.'} />
                 </div>
               </div>
             </div>
@@ -446,7 +605,7 @@ export default function ArtistSetup() {
         </div>
 
         {/* Technical */}
-        {isArtistUser && (
+        {showTechnicalSection && (
         <div>
           <SectionHeader title="Technical Requirements" section="technical" count={5} />
           {expandedSections.technical && (
@@ -484,14 +643,16 @@ export default function ArtistSetup() {
 
         {/* Band Members */}
         <div>
-          <SectionHeader title="Band Members / Collaborators" section="band" count="variable" />
+          <SectionHeader title={isArtisanUser ? "Team Members / Collaborators" : "Band Members / Collaborators"} section="band" count="variable" />
           {expandedSections.band && (
             <div className="card">
-              <p className="text-xs text-gray-500 mb-4">Add your band members, frequent collaborators, or touring musicians.</p>
+              <p className="text-xs text-gray-500 mb-4">
+                {isArtisanUser ? 'Add studio assistants, collaborators, curators, fabricators, or other contributors.' : 'Add your band members, frequent collaborators, or touring musicians.'}
+              </p>
               <div className="flex flex-col md:flex-row gap-3 mb-4">
                 <input type="text" value={memberName} onChange={e => setMemberName(e.target.value)} placeholder="Name"
                   className="flex-1 px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-[#c8a45e]" />
-                <input type="text" value={memberRole} onChange={e => setMemberRole(e.target.value)} placeholder="Instrument / Role"
+                <input type="text" value={memberRole} onChange={e => setMemberRole(e.target.value)} placeholder={isArtisanUser ? 'Role (Assistant, Curator, Fabricator)' : 'Instrument / Role'}
                   className="flex-1 px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-[#c8a45e]" />
                 <button type="button" onClick={addMember} className="btn-primary whitespace-nowrap">+ Add</button>
               </div>
@@ -508,7 +669,7 @@ export default function ArtistSetup() {
                   ))}
                 </div>
               ) : (
-                <p className="text-gray-400 text-center py-4 text-sm">No members added. Solo artists can skip this.</p>
+                <p className="text-gray-400 text-center py-4 text-sm">{isArtisanUser ? 'No team members added yet. Solo studio artists can skip this.' : 'No members added. Solo artists can skip this.'}</p>
               )}
             </div>
           )}
