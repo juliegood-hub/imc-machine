@@ -401,9 +401,15 @@ export default function AdminDashboard() {
     if (!newInviteName) return;
     setInviteLoading(true);
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) throw new Error('No active admin session token.');
       const resp = await fetch('/api/invites', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({ action: 'generate-invite', name: newInviteName, email: newInviteEmail || null, role: newInviteType }),
       });
       const data = await resp.json();
@@ -427,9 +433,15 @@ export default function AdminDashboard() {
   const handleRevokeInvite = async (inviteId) => {
     if (!confirm('Revoke this invite now?')) return;
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) throw new Error('No active admin session token.');
       const resp = await fetch('/api/invites', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({ action: 'revoke-invite', id: inviteId }),
       });
       const data = await resp.json();
