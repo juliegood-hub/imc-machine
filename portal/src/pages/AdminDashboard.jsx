@@ -350,7 +350,7 @@ export default function AdminDashboard() {
       setShowEditUser(false);
     } catch (error) {
       console.error('Error saving user:', error);
-      alert('Error saving user: ' + error.message);
+      alert('I hit a snag saving that user: ' + error.message);
     }
   };
 
@@ -392,7 +392,7 @@ export default function AdminDashboard() {
       setShowCreateUser(false);
     } catch (error) {
       console.error('Error creating user:', error);
-      alert('Error creating user: ' + error.message);
+      alert('I hit a snag creating that user: ' + error.message);
     }
   };
 
@@ -412,7 +412,7 @@ export default function AdminDashboard() {
       setNewInviteName('');
       setNewInviteEmail('');
     } catch (err) {
-      alert('Error creating invite: ' + err.message);
+      alert('I hit a snag creating that invite: ' + err.message);
     } finally {
       setInviteLoading(false);
     }
@@ -425,7 +425,7 @@ export default function AdminDashboard() {
   };
 
   const handleRevokeInvite = async (inviteId) => {
-    if (!confirm('Revoke this invite?')) return;
+    if (!confirm('Revoke this invite now?')) return;
     try {
       const resp = await fetch('/api/invites', {
         method: 'POST',
@@ -436,12 +436,12 @@ export default function AdminDashboard() {
       if (!data.success) throw new Error(data.error);
       setInvites(prev => prev.filter(i => i.id !== inviteId));
     } catch (err) {
-      alert('Error revoking invite: ' + err.message);
+      alert('I hit a snag revoking that invite: ' + err.message);
     }
   };
 
   const handleSendInviteEmail = async (invite) => {
-    if (!invite.email) { alert('No email address for this invite'); return; }
+    if (!invite.email) { alert('I need an email address on this invite before I can send it.'); return; }
     try {
       const emailBody = getEmailTemplate(invite.venue_name || 'Friend', invite.code);
       const resp = await fetch('/api/distribute', {
@@ -455,10 +455,10 @@ export default function AdminDashboard() {
         }),
       });
       const data = await resp.json();
-      if (data.success) alert('Email sent!');
-      else alert('Email send failed: ' + (data.error || 'Unknown error'));
+      if (data.success) alert('Perfect. Invite email sent.');
+      else alert('I could not send that email yet: ' + (data.error || 'Unknown error'));
     } catch (err) {
-      alert('Error sending email: ' + err.message);
+      alert('I hit a snag sending that email: ' + err.message);
     }
   };
 
@@ -576,7 +576,7 @@ export default function AdminDashboard() {
               <button onClick={() => setActiveTab('activity')} className="text-xs text-[#c8a45e] hover:underline bg-transparent border-none cursor-pointer">View All →</button>
             </div>
             {activities.length === 0 ? (
-              <p className="text-gray-400 text-center py-6">No activity recorded yet. Activity tracking starts when users create events, generate content, or distribute campaigns.</p>
+              <p className="text-gray-400 text-center py-6">No activity recorded yet. It starts as soon as users create events, generate content, or distribute campaigns.</p>
             ) : (
               <div className="space-y-2">
                 {[...activities].reverse().slice(0, 8).map(a => (
@@ -837,7 +837,7 @@ export default function AdminDashboard() {
           <div className="card">
             <h3 className="text-lg mb-4">Invites ({invites.length})</h3>
             {invites.length === 0 ? (
-              <p className="text-gray-400 text-center py-8">No invites yet. Generate one above.</p>
+              <p className="text-gray-400 text-center py-8">No invites yet. Generate one above and I will track it here.</p>
             ) : (
               <div className="space-y-3">
                 {invites.map(inv => {
@@ -945,7 +945,7 @@ export default function AdminDashboard() {
           <div className="bg-white rounded-xl max-w-md w-full overflow-y-auto my-4" style={{ maxHeight: '85vh' }}>
             <div className="p-6">
               <h3 className="text-xl font-bold mb-4">Create New User</h3>
-              <p className="text-xs text-gray-400 mb-4">* Required fields</p>
+              <p className="text-xs text-gray-400 mb-4">* Fill the required fields so I can create this user cleanly.</p>
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -1585,7 +1585,7 @@ function UserEditModal({ user, profile, events, onSave, onClose, onUpdateUser, o
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6">
-          <p className="text-xs text-gray-400 mb-4">* Required fields</p>
+          <p className="text-xs text-gray-400 mb-4">* Fill the required fields so this invite is valid.</p>
           {activeTab === "contact" && (
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2153,7 +2153,7 @@ function BroadcastTab({ users }) {
 
   const handleSend = async () => {
     if (!subject.trim() || !body.trim()) {
-      alert('Subject and body are required.');
+      alert('I need both a subject and body before I can send this.');
       return;
     }
     if (!confirm(`Send this email to ${filteredUsers.length} user${filteredUsers.length !== 1 ? 's' : ''}?`)) return;

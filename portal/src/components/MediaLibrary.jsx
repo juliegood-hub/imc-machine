@@ -56,14 +56,14 @@ export default function MediaLibrary({ eventId, onSelect, selectable = false }) 
       await loadMedia();
       setShowUpload(false);
     } catch (err) {
-      alert('Upload failed: ' + err.message);
+      alert('I hit a snag uploading that image: ' + err.message);
     } finally {
       setUploading(false);
     }
   };
 
   const handleDelete = async (id) => {
-    if (!confirm('Delete this image?')) return;
+    if (!confirm('Delete this image now?')) return;
     await fetch('/api/media', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

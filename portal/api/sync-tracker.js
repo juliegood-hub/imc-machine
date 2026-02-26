@@ -19,7 +19,7 @@ const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://qavrufepvcihklypxb
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseKey) {
-  console.error('SUPABASE_SERVICE_ROLE_KEY not configured');
+  console.error('SUPABASE_SERVICE_ROLE_KEY is missing');
 }
 
 const supabase = supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
@@ -33,7 +33,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   
   if (!supabase) {
-    return res.status(500).json({ error: 'Supabase not configured' });
+    return res.status(500).json({ error: 'I need Supabase credentials before I can track campaigns.' });
   }
 
   const { action = 'update', eventId, eventTitle, eventDate, venueName, channels, venue_id } = req.body;
@@ -51,7 +51,7 @@ export default async function handler(req, res) {
       case 'delete':
         return await deleteCampaign(req, res);
       default:
-        return res.status(400).json({ error: `Unknown action: ${action}` });
+        return res.status(400).json({ error: `I do not recognize "${action}" yet. Use create, update, read, list, or delete.` });
     }
   } catch (err) {
     console.error('[sync-tracker] Error:', err);
@@ -67,7 +67,7 @@ async function createCampaign(req, res) {
   const { eventId, eventTitle, eventDate, venueName, venue_id, channels = {} } = req.body;
   
   if (!eventId || !eventTitle) {
-    return res.status(400).json({ error: 'eventId and eventTitle required' });
+    return res.status(400).json({ error: 'I need both eventId and eventTitle to create a campaign.' });
   }
 
   const campaignData = {
@@ -94,7 +94,7 @@ async function createCampaign(req, res) {
   return res.status(201).json({ 
     success: true, 
     campaign: data,
-    message: `Campaign created for ${eventTitle}` 
+    message: `Perfect. I created the campaign for ${eventTitle}.` 
   });
 }
 
@@ -106,7 +106,7 @@ async function updateCampaign(req, res) {
   const { eventId, channels, eventTitle, eventDate, venueName } = req.body;
   
   if (!eventId) {
-    return res.status(400).json({ error: 'eventId required' });
+    return res.status(400).json({ error: 'I need eventId before I can update this campaign.' });
   }
 
   // Calculate completion percentage
@@ -155,7 +155,7 @@ async function updateCampaign(req, res) {
     success: true, 
     campaign: data,
     completion: `${completionPct}%`,
-    message: `Campaign updated: ${completedCount}/${channelKeys.length} channels complete`
+    message: `I updated the campaign: ${completedCount}/${channelKeys.length} channels complete.`
   });
 }
 
@@ -167,7 +167,7 @@ async function readCampaign(req, res) {
   const { eventId } = req.body;
   
   if (!eventId) {
-    return res.status(400).json({ error: 'eventId required' });
+    return res.status(400).json({ error: 'I need eventId before I can look up this campaign.' });
   }
 
   const { data, error } = await supabase
@@ -181,7 +181,7 @@ async function readCampaign(req, res) {
   }
 
   if (!data) {
-    return res.status(404).json({ error: 'Campaign not found' });
+    return res.status(404).json({ error: 'I could not find that campaign yet.' });
   }
 
   return res.status(200).json({ 
@@ -228,7 +228,7 @@ async function deleteCampaign(req, res) {
   const { eventId } = req.body;
   
   if (!eventId) {
-    return res.status(400).json({ error: 'eventId required' });
+    return res.status(400).json({ error: 'I need eventId before I can delete this campaign.' });
   }
 
   const { data, error } = await supabase
@@ -244,7 +244,7 @@ async function deleteCampaign(req, res) {
 
   return res.status(200).json({ 
     success: true, 
-    message: `Campaign ${eventId} deleted`,
+    message: `Done. Campaign ${eventId} is deleted.`,
     deleted: data
   });
 }

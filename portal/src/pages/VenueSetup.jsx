@@ -1,20 +1,24 @@
-import { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useMemo, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useVenue } from '../context/VenueContext';
 import { useAuth } from '../context/AuthContext';
 import CompletionBar from '../components/CompletionBar';
 import FormAIAssist from '../components/FormAIAssist';
+import PerformanceZonesManager from '../components/PerformanceZonesManager';
+import VenueOperationsManager from '../components/VenueOperationsManager';
 import { extractFromImages, extractionToVenueForm, openCamera, openFileUpload } from '../services/photo-to-form';
 import { isVenueRole } from '../constants/clientTypes';
 
 const REQUIRED_FIELDS = ['firstName', 'lastName', 'businessName', 'email', 'city', 'state'];
 const VENUE_FIELDS = ['firstName', 'lastName', 'businessName', 'dbaName', 'email', 'city', 'state', 'streetNumber', 'streetName'];
 const SOCIAL_FIELDS = ['website', 'facebook', 'instagram', 'twitter', 'tiktok', 'youtube', 'spotify', 'linkedin', 'yelp', 'googleBusiness'];
+const VENUE_SETUP_TABS = ['profile', 'zones', 'operations'];
 
 export default function VenueSetup() {
   const { venue, saveVenue } = useVenue();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const isVenueUser = isVenueRole(user?.clientType || 'venue_owner');
   const [form, setForm] = useState({
     // Contact Info
@@ -73,14 +77,23 @@ export default function VenueSetup() {
   const [saved, setSaved] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [uploadedImages, setUploadedImages] = useState([]);
+  const requestedTab = searchParams.get('tab');
+  const [activeTab, setActiveTab] = useState(VENUE_SETUP_TABS.includes(requestedTab) ? requestedTab : 'profile');
   const [expandedSections, setExpandedSections] = useState({
     contact: true,
     business: true,
     address: true,
     social: false,
+    commerce: false,
     venue: false,
     brand: false,
   });
+
+  useEffect(() => {
+    if (VENUE_SETUP_TABS.includes(requestedTab)) {
+      setActiveTab(requestedTab);
+    }
+  }, [requestedTab]);
 
   const update = (field) => (e) => setForm({ ...form, [field]: e.target.value });
   const updateCheckbox = (field) => (e) => setForm({ ...form, [field]: e.target.checked });
@@ -124,10 +137,10 @@ export default function VenueSetup() {
           return updated;
         });
       } else {
-        alert('Extraction failed: ' + result.error);
+        alert('I hit a snag extracting details from those images: ' + result.error);
       }
     } catch (err) {
-      alert('Error: ' + err.message);
+      alert('Hmm. Something pushed back: ' + err.message);
     } finally {
       setExtracting(false);
     }
@@ -148,7 +161,7 @@ export default function VenueSetup() {
     // Check required fields
     const missingFields = REQUIRED_FIELDS.filter(f => !(form[f] || '').toString().trim());
     if (missingFields.length > 0) {
-      alert(`Please fill in required fields: ${missingFields.join(', ')}`);
+      alert(`I still need these required fields before we continue: ${missingFields.join(', ')}`);
       return;
     }
     
@@ -158,7 +171,7 @@ export default function VenueSetup() {
       setSaved(true);
       setTimeout(() => navigate('/'), 1500);
     } catch (err) {
-      alert('Error saving venue: ' + err.message);
+      alert('I hit a snag saving this venue profile: ' + err.message);
     } finally {
       setSaving(false);
     }
@@ -229,54 +242,95 @@ export default function VenueSetup() {
   };
 
   return (
-    <div className="p-4 md:p-8 max-w-3xl">
+    <div className={`p-4 md:p-8 ${activeTab === 'profile' ? 'max-w-3xl' : 'max-w-6xl'}`}>
       <h1 className="text-3xl mb-2">Venue Setup</h1>
-      <p className="text-gray-500 mb-6">Tell us about your venue to personalize your experience.</p>
+      <p className="text-gray-500 mb-6">Tell me about your venue once, and I will carry it across your events, production, and distribution flow.</p>
 
-      <FormAIAssist
-        formType="venue"
-        currentForm={form}
-        onApply={applyVenuePatch}
-        title="Venue AI Assistant"
-        description="Speak venue details once and AI will distribute them into contact, business, address, social, and venue fields."
-      />
-
-      {/* Photo-to-Form: AI Data Extraction for Venue */}
-      <div className="card mb-6 border-2 border-dashed border-[#c8a45e] bg-[#faf8f3]">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h3 className="text-lg">📸 Snap & Auto-Fill Venue Info</h3>
-            <p className="text-xs text-gray-500 m-0">Photo a business card, menu, storefront sign, or anything with venue details : AI fills the form</p>
-          </div>
-          {extracting && <span className="text-sm text-[#c8a45e] animate-pulse">🔍 Extracting...</span>}
-        </div>
-        <div className="flex flex-wrap gap-3">
-          <button type="button" onClick={async () => { try { const f = await openCamera(); handlePhotoExtract([f]); } catch {} }}
-            className="btn-primary text-sm" disabled={extracting}>
-            📷 Take Photo
-          </button>
-          <button type="button" onClick={async () => { try { const files = await openFileUpload(true); handlePhotoExtract(files); } catch {} }}
-            className="btn-secondary text-sm" disabled={extracting}>
-            📁 Upload Images
-          </button>
-        </div>
-        {uploadedImages.length > 0 && (
-          <div className="flex gap-2 mt-3 overflow-x-auto">
-            {uploadedImages.map((url, i) => (
-              <img key={i} src={url} alt={`Upload ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-gray-200" />
-            ))}
-          </div>
-        )}
+      <div className="flex flex-wrap gap-2 mb-5">
+        <button
+          type="button"
+          onClick={() => setActiveTab('profile')}
+          className={`px-3 py-1.5 rounded border text-sm ${
+            activeTab === 'profile'
+              ? 'bg-[#0d1b2a] text-white border-[#0d1b2a]'
+              : 'bg-white border-gray-300 text-gray-700'
+          }`}
+        >
+          Venue Profile
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('zones')}
+          className={`px-3 py-1.5 rounded border text-sm ${
+            activeTab === 'zones'
+              ? 'bg-[#0d1b2a] text-white border-[#0d1b2a]'
+              : 'bg-white border-gray-300 text-gray-700'
+          }`}
+        >
+          Performance Zones
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('operations')}
+          className={`px-3 py-1.5 rounded border text-sm ${
+            activeTab === 'operations'
+              ? 'bg-[#0d1b2a] text-white border-[#0d1b2a]'
+              : 'bg-white border-gray-300 text-gray-700'
+          }`}
+        >
+          Operations
+        </button>
       </div>
 
-      <CompletionBar completed={completed} total={total} label="Venue Profile" />
+      {activeTab === 'profile' && (
+        <>
+          <FormAIAssist
+            formType="venue"
+            currentForm={form}
+            onApply={applyVenuePatch}
+            title="Venue AI Assistant"
+            description="Say it once by voice or text, and I will place venue details into the right fields."
+            sourceContext="venue_setup_profile"
+            entityType="venue_profile"
+            entityId={user?.id || ''}
+          />
 
-      {saved && (
-        <div className="bg-green-50 text-green-700 p-4 rounded-lg mb-6 font-medium">✓ Venue saved! Redirecting to dashboard...</div>
-      )}
+          {/* Photo-to-Form: AI Data Extraction for Venue */}
+          <div className="card mb-6 border-2 border-dashed border-[#c8a45e] bg-[#faf8f3]">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="text-lg">📸 Snap & Auto-Fill Venue Info</h3>
+                <p className="text-xs text-gray-500 m-0">Snap a card, menu, storefront sign, or flyer. I will read it and fill what I can.</p>
+              </div>
+              {extracting && <span className="text-sm text-[#c8a45e] animate-pulse">🔍 Extracting...</span>}
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <button type="button" onClick={async () => { try { const f = await openCamera(); handlePhotoExtract([f]); } catch {} }}
+                className="btn-primary text-sm" disabled={extracting}>
+                📷 Take Photo
+              </button>
+              <button type="button" onClick={async () => { try { const files = await openFileUpload(true); handlePhotoExtract(files); } catch {} }}
+                className="btn-secondary text-sm" disabled={extracting}>
+                📁 Upload Images
+              </button>
+            </div>
+            {uploadedImages.length > 0 && (
+              <div className="flex gap-2 mt-3 overflow-x-auto">
+                {uploadedImages.map((url, i) => (
+                  <img key={i} src={url} alt={`Upload ${i + 1}`} className="w-16 h-16 object-cover rounded-lg border border-gray-200" />
+                ))}
+              </div>
+            )}
+          </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <p className="text-xs text-gray-400">* Required fields</p>
+          <CompletionBar completed={completed} total={total} label="Venue Profile" />
+
+          {saved && (
+            <div className="bg-green-50 text-green-700 p-4 rounded-lg mb-6 font-medium">✓ Beautiful. Venue saved. Taking you to your dashboard...</div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-6">
+        <p className="text-xs text-gray-400">* Fill the required fields first so downstream distribution stays clean.</p>
 
         {/* Contact Information */}
         <div>
@@ -287,7 +341,7 @@ export default function VenueSetup() {
                 {fieldInput("First Name", "firstName", "text", "Julie", true)}
                 {fieldInput("Last Name", "lastName", "text", "Good", true)}
                 <div className="md:col-span-2">
-                  {fieldInput("Title/Role", "title", "text", "Owner, Booking Manager, Marketing Director")}
+                  {fieldInput("Title/Role", "title", "text", "Owner, Booking Agent, Staff Scheduler")}
                 </div>
                 {fieldInput("Work Phone", "workPhone", "tel", "(210) 555-1234")}
                 {fieldInput("Cell Phone", "cellPhone", "tel", "(210) 555-5678")}
@@ -452,7 +506,7 @@ export default function VenueSetup() {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Logo</label>
                   <div className="border-2 border-dashed border-gray-200 rounded-lg p-6 text-center text-sm text-gray-400 cursor-pointer hover:border-[#c8a45e]"
-                    onClick={() => alert('File upload coming with cloud storage integration')}>
+                    onClick={() => alert('Logo upload from cloud storage is almost ready. For now, keep going and I will save the rest.')}>
                     {form.logo ? '✓ Logo uploaded' : 'Click to upload logo (PNG, JPG)'}
                   </div>
                 </div>
@@ -480,9 +534,19 @@ export default function VenueSetup() {
         </div>
 
         <button type="submit" className="btn-primary text-lg px-8" disabled={saving}>
-          {saving ? '⟳ Saving...' : 'Save & Continue →'}
+          {saving ? '⟳ Saving...' : 'Save This & Continue →'}
         </button>
-      </form>
+          </form>
+        </>
+      )}
+
+      {activeTab === 'zones' && (
+        <PerformanceZonesManager />
+      )}
+
+      {activeTab === 'operations' && (
+        <VenueOperationsManager />
+      )}
     </div>
   );
 }

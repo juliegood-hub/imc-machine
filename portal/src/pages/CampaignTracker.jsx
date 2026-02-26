@@ -174,7 +174,7 @@ export default function CampaignTracker() {
       <div className="p-4 md:p-8 max-w-5xl flex items-center justify-center min-h-[50vh]">
         <div className="text-center">
           <div className="text-4xl animate-spin mb-4">⟳</div>
-          <p className="text-gray-500">Loading campaigns...</p>
+          <p className="text-gray-500">Loading campaign data...</p>
         </div>
       </div>
     );
@@ -185,12 +185,12 @@ export default function CampaignTracker() {
       <div className="flex items-center justify-between flex-wrap gap-4 mb-6">
         <div>
           <h1 className="text-3xl mb-1">📊 Campaign Tracker</h1>
-          <p className="text-gray-500 m-0">Track every IMC channel per event: status, links, completion</p>
+          <p className="text-gray-500 m-0">Track every IMC channel by event: status, links, and completion.</p>
         </div>
         {selectedEventId && (
           <div className="flex gap-2">
             <button onClick={handleExportCSV} className="btn-secondary text-sm">⬇ Export CSV</button>
-            <button onClick={() => alert('Google Sheets sync coming soon!')} className="btn-secondary text-sm">📊 Sync to Sheets</button>
+            <button onClick={() => alert('Google Sheets sync is next on deck.')} className="btn-secondary text-sm">📊 Sync to Sheets</button>
           </div>
         )}
       </div>

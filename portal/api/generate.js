@@ -11,6 +11,7 @@
 //   translate         → Gemini/OpenAI Spanish translation
 //   podcast-script    → Gemini podcast script generation
 //   extract-photo     → Gemini Vision photo-to-form extraction
+//   extract-upload    → Gemini OCR extraction from image/PDF upload
 //   research          → Gemini research (venue, artist, context)
 //   form-assist       → AI-assisted structured form filling
 // ═══════════════════════════════════════════════════════════════
@@ -20,10 +21,10 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Send this endpoint a POST request and I can generate it.' });
 
   const { action, driveEventFolderId } = req.body;
-  if (!action) return res.status(400).json({ error: 'Missing action' });
+  if (!action) return res.status(400).json({ error: 'Tell me what you want me to generate and I will run it.' });
 
   try {
     let result;
@@ -55,6 +56,9 @@ export default async function handler(req, res) {
       case 'extract-photo':
         result = await extractFromPhoto(req.body);
         break;
+      case 'extract-upload':
+        result = await extractFromUpload(req.body);
+        break;
       case 'research':
         result = await conductResearch(req.body);
         break;
@@ -74,7 +78,7 @@ export default async function handler(req, res) {
         result = await formAssist(req.body);
         break;
       default:
-        return res.status(400).json({ error: `Unknown action: ${action}` });
+        return res.status(400).json({ error: `I do not recognize "${action}" yet. Choose one of the supported generation actions.` });
     }
     return res.status(200).json({ success: true, ...result });
   } catch (err) {
@@ -89,7 +93,7 @@ export default async function handler(req, res) {
 
 async function openaiChat(systemPrompt, userPrompt, model = 'gpt-4o', temperature = 0.8) {
   const key = process.env.OPENAI_API_KEY;
-  if (!key) throw new Error('OPENAI_API_KEY not configured');
+  if (!key) throw new Error('I need OPENAI_API_KEY before I can generate this.');
 
   const r = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -119,7 +123,7 @@ async function generateContent({ event, channels, venue, researchContext, houseS
     try {
       results[contentType] = await openaiChat(systemPrompt, userPrompt);
     } catch (err) {
-      results[contentType] = `[Error generating ${contentType} content: ${err.message}]`;
+      results[contentType] = `[I hit a snag generating ${contentType}: ${err.message}]`;
     }
     return { content: results };
   }
@@ -131,7 +135,7 @@ async function generateContent({ event, channels, venue, researchContext, houseS
       try {
         results[channel.key] = await openaiChat(systemPrompt, userPrompt);
       } catch (err) {
-        results[channel.key] = `[Error generating ${channel.key} content: ${err.message}]`;
+        results[channel.key] = `[I hit a snag generating ${channel.key}: ${err.message}]`;
       }
     }
   }
@@ -195,6 +199,9 @@ Brand Colors: ${venue.brandPrimaryColor || '#0d1b2a'}, ${venue.brandSecondaryCol
     
     case 'social_post':
       return `${houseStyle}${venueBrand}\n\nYou create platform-native social posts. Never copy-paste across platforms. Include Instagram caption with hashtags, Facebook post, LinkedIn post.`;
+
+    case 'video_social_post':
+      return `${houseStyle}${venueBrand}\n\nYou are writing distribution-ready copy for short-form and platform video posts. Keep copy concise, platform-native, and optimized for hooks in the first sentence.`;
     
     case 'email_blast':
       return `${houseStyle}${venueBrand}\n\nYou write event announcement emails that drive ticket sales without being spammy.`;
@@ -244,6 +251,9 @@ ${researchContext || ''}`.replace(/\n{3,}/g, '\n\n');
     
     case 'social_post':
       return `Create social media posts for:\n\n${eventInfo}\n\nCreate FOUR platform-specific posts:\n\n1. **Facebook**: Community-oriented, conversational, 2-3 paragraphs. Include venue details and ticket link.\n2. **Instagram Caption**: Visual-first language, include 8-12 relevant hashtags (#SanAntonio #SATX #LiveMusic #SAarts #SanAntonioEvents). End with "Link in bio" if ticket link exists.\n3. **LinkedIn**: Professional angle, cultural/industry significance, 1-2 paragraphs. Include event link.\n4. **Twitter/X**: MAXIMUM 280 characters. Punchy, conversational. One hashtag max. Include ticket link if space allows.\n\nLabel each section clearly with the platform name as a bold header.`;
+
+    case 'video_social_post':
+      return `Create VIDEO distribution copy for:\n\n${eventInfo}\n\nThe uploaded video will be distributed to Facebook Reels, Instagram Reels + Stories, YouTube (video or Shorts), and LinkedIn video posts.\n\nCreate these sections exactly:\n\n1. **Facebook Reel Caption**\n- 1 short paragraph (max 220 chars)\n- Hook in first 7 words\n- Include one CTA\n\n2. **Instagram Reel Caption**\n- 2-4 short lines\n- 6-10 hashtags\n- Include "Link in bio" when ticket link exists\n\n3. **Instagram Story Overlay Text**\n- 2 lines max\n- Very short, punchy, readable on screen\n\n4. **LinkedIn Video Post**\n- 1-2 concise paragraphs\n- Professional tone, community/cultural angle\n- Include ticket/event link if provided\n\n5. **YouTube Title**\n- Max 90 characters\n- Strong searchable title\n\n6. **YouTube Description**\n- 2 short paragraphs\n- Include date/time/location + CTA + ticket link\n- If video is short-form style, include #Shorts naturally\n\n7. **YouTube Tags**\n- Comma-separated tags only\n- 8-15 tags, include San Antonio and event genre\n\nLabel each section clearly with the exact heading text above.`;
     
     case 'email_blast':
       return `Write an event announcement email for:\n\n${eventInfo}\n\nInclude:\n- Subject Line (<50 chars)\n- Preview Text (<90 chars)\n- Email Body (3-4 paragraphs)\n- Clear call-to-action\n- Footer with venue/promoter info`;
@@ -268,7 +278,7 @@ const FORM_ASSIST_SCHEMAS = {
     lastName: { type: 'string' },
     email: { type: 'string' },
     cellPhone: { type: 'string' },
-    clientType: { type: 'string', enum: ['venue_owner', 'venue_manager', 'venue_marketing', 'venue_staff', 'restaurant', 'festival_organizer', 'artist', 'promoter', 'manager', 'booking_agent', 'producer', 'dj', 'vendor', 'artisan', 'attorney', 'educator', 'professor', 'doctor', 'speaker', 'author', 'writer', 'journalist', 'editor', 'poet', 'playwright', 'podcaster', 'moderator', 'coach', 'consultant', 'comedian', 'activist', 'politician', 'chef', 'k12_school', 'conservatory', 'childrens_theater', 'youth_program', 'media', 'sponsor', 'admin'] },
+    clientType: { type: 'string', enum: ['venue_owner', 'venue_manager', 'venue_marketing', 'venue_staff', 'restaurant', 'festival_organizer', 'artist', 'promoter', 'manager', 'booking_agent', 'producer', 'dj', 'vendor', 'artisan', 'attorney', 'lawyer', 'educator', 'professor', 'doctor', 'speaker', 'author', 'writer', 'journalist', 'editor', 'poet', 'playwright', 'podcaster', 'moderator', 'coach', 'consultant', 'comedian', 'activist', 'politician', 'chef', 'k12_school', 'conservatory', 'childrens_theater', 'youth_program', 'media', 'sponsor', 'admin'] },
     clientName: { type: 'string' },
     inviteCode: { type: 'string' },
   },
@@ -347,6 +357,13 @@ const FORM_ASSIST_SCHEMAS = {
     recordLabel: { type: 'string' },
     performingRightsOrg: { type: 'string' },
     unionMember: { type: 'string' },
+    politicalScope: { type: 'string', enum: ['City of San Antonio', 'Bexar County', 'State of Texas', 'Federal (U.S.)', 'Judicial', 'School District / Board', 'Special District', 'Multi-Jurisdiction'] },
+    officeSought: { type: 'string' },
+    district: { type: 'string' },
+    partyAffiliation: { type: 'string', enum: ['Democratic', 'Republican', 'Independent', 'Libertarian', 'Green', 'Nonpartisan', 'Other'] },
+    candidateStatus: { type: 'string', enum: ['Incumbent', 'Challenger', 'Nomination Candidate', 'Open Seat Candidate', 'Appointed Officeholder', 'Former Officeholder', 'Campaign Team'] },
+    electionStage: { type: 'string', enum: ['Exploratory', 'Filed / Declared', 'Primary Nomination', 'Primary', 'Primary Runoff', 'General Election', 'Special Election', 'Recall / Referendum', 'Post-Election Transition'] },
+    campaignObjective: { type: 'string', enum: ['Brand awareness / name recognition', 'Fundraising', 'Volunteer recruitment', 'Voter registration', 'Voter turnout (GOTV)', 'Issue education', 'Town hall attendance', 'Media coverage', 'Debate preparation / amplification', 'Coalition building'] },
     bio: { type: 'string' },
     website: { type: 'string' },
     facebook: { type: 'string' },
@@ -394,15 +411,348 @@ const FORM_ASSIST_SCHEMAS = {
     writingTone: { type: 'string', enum: ['Professional yet approachable', 'Casual and fun', 'Formal and elegant', 'Edgy and bold', 'Warm and community-focused'] },
     specialInstructions: { type: 'string' },
     detectedFonts: { type: 'string' },
+    productionType: { type: 'string', enum: ['Play', 'Musical', 'Opera', 'Dance Theater', 'Cabaret / Revue', 'Touring Production', 'Workshop / Reading', 'Festival Production', 'Youth / School Production', 'Site-Specific Production'] },
+    unionHouse: { type: 'string', enum: ['Non-Union', 'Equity / AGMA', 'IATSE', 'Mixed Union', 'TBD'] },
+    stageFormat: { type: 'string', enum: ['Proscenium', 'Thrust', 'Arena', 'Black Box', 'Outdoor', 'Site-Specific', 'Flexible / Immersive'] },
+    rehearsalStart: { type: 'date' },
+    openingNight: { type: 'date' },
+    closingNight: { type: 'date' },
+    runtimeMinutes: { type: 'number' },
+    intermissions: { type: 'number' },
+    productionNotes: { type: 'string' },
+    cleCreditHours: { type: 'number' },
+    mcleAccreditationProvider: { type: 'string' },
+    barAssociationSponsor: { type: 'string' },
+    legalJurisdiction: { type: 'string', enum: ['Texas', 'Federal (U.S.)', 'Bexar County', 'City of San Antonio', 'Multi-State', 'Other'] },
+    mcleApprovalCode: { type: 'string' },
+    mcleStatus: { type: 'string', enum: ['Pending Submission', 'Submitted', 'Approved', 'Rejected', 'Exempt / Informational'] },
+    cleProgramNotes: { type: 'string' },
+    cleRegistrants: { type: 'number' },
+    cleCheckIns: { type: 'number' },
+    cleCertificatesIssued: { type: 'number' },
+    ticketSalesCount: { type: 'number' },
+    grossTicketRevenue: { type: 'number' },
+    netPayoutRevenue: { type: 'number' },
+    analyticsSource: { type: 'string', enum: ['Eventbrite API', 'Ticket Tailor API', 'Universe API', 'Manual Entry', 'CSV Import', 'Zapier Webhook', 'Other'] },
+    analyticsLastSyncedAt: { type: 'string' },
+    stakeholderReportExportedAt: { type: 'string' },
+  },
+  staff_profile: {
+    firstName: { type: 'string' },
+    lastName: { type: 'string' },
+    displayName: { type: 'string' },
+    phoneNumber: { type: 'string' },
+    email: { type: 'string' },
+    primaryRole: { type: 'string' },
+    jobTitles: { type: 'array' },
+    payType: { type: 'string', enum: ['hourly', 'flat', 'salary', 'volunteer'] },
+    defaultRate: { type: 'number' },
+    emergencyContact: { type: 'string' },
+    notes: { type: 'string' },
+    taxProfileLink: { type: 'string' },
+    isActive: { type: 'boolean' },
+  },
+  contact: {
+    firstName: { type: 'string' },
+    lastName: { type: 'string' },
+    displayName: { type: 'string' },
+    email: { type: 'string' },
+    phone: { type: 'string' },
+    role: { type: 'string' },
+    title: { type: 'string' },
+    company: { type: 'string' },
+    notes: { type: 'string' },
+  },
+  performance_zone: {
+    name: { type: 'string' },
+    zoneType: { type: 'string', enum: ['theater', 'club_stage', 'rooftop', 'outdoor_patio', 'black_box', 'studio'] },
+    widthFeet: { type: 'number' },
+    depthFeet: { type: 'number' },
+    ceilingHeightFeet: { type: 'number' },
+    capacity: { type: 'number' },
+    fixedEquipment: { type: 'array' },
+    powerNotes: { type: 'string' },
+    restrictions: { type: 'string' },
+    notes: { type: 'string' },
+  },
+  supplier: {
+    supplierName: { type: 'string' },
+    supplierType: { type: 'string', enum: ['local_store', 'online_store', 'distributor', 'rental_house', 'service_vendor'] },
+    addressLine1: { type: 'string' },
+    addressLine2: { type: 'string' },
+    city: { type: 'string' },
+    state: { type: 'string' },
+    postalCode: { type: 'string' },
+    country: { type: 'string' },
+    phone: { type: 'string' },
+    email: { type: 'string' },
+    websiteUrl: { type: 'string' },
+    orderingUrl: { type: 'string' },
+    accountNumber: { type: 'string' },
+    notes: { type: 'string' },
+  },
+  inventory_item: {
+    itemName: { type: 'string' },
+    category: { type: 'string' },
+    subcategory: { type: 'string' },
+    quantityOnHand: { type: 'number' },
+    minThreshold: { type: 'number' },
+    unit: { type: 'string' },
+    serialNumber: { type: 'string' },
+    ownership: { type: 'string', enum: ['house', 'tour', 'promoter'] },
+    location: { type: 'string' },
+    status: { type: 'string', enum: ['active', 'maintenance', 'retired'] },
+    notes: { type: 'string' },
+  },
+  purchase_order: {
+    supplierName: { type: 'string' },
+    supplierEmail: { type: 'string' },
+    supplierAddress: { type: 'string' },
+    currency: { type: 'string' },
+    deliveryInstructions: { type: 'string' },
+    receivingHours: { type: 'string' },
+    dockNotes: { type: 'string' },
+    purchaserName: { type: 'string' },
+    purchaserEmail: { type: 'string' },
+    notes: { type: 'string' },
+  },
+  training_session: {
+    title: { type: 'string' },
+    category: { type: 'string' },
+    sessionType: { type: 'string', enum: ['workshop', 'onboarding', 'refresher'] },
+    startDatetime: { type: 'string' },
+    endDatetime: { type: 'string' },
+    locationNotes: { type: 'string' },
+    instructorName: { type: 'string' },
+    capacity: { type: 'number' },
+    notes: { type: 'string' },
+  },
+  booking_document: {
+    title: { type: 'string' },
+    docType: { type: 'string' },
+    status: { type: 'string' },
+    templateBody: { type: 'string' },
+    renderedBody: { type: 'string' },
+    notes: { type: 'string' },
+  },
+  ticketing: {
+    providerType: { type: 'string', enum: ['eventbrite', 'ticketmaster', 'manual'] },
+    externalEventId: { type: 'string' },
+    externalEventUrl: { type: 'string' },
+    ticketSalesUrl: { type: 'string' },
+    ticketsSold: { type: 'number' },
+    grossSales: { type: 'number' },
+    manualMode: { type: 'boolean' },
+  },
+  production_checklist: {
+    title: { type: 'string' },
+    phase: { type: 'string' },
+    status: { type: 'string' },
+    notes: { type: 'string' },
+  },
+  budget: {
+    title: { type: 'string' },
+    currency: { type: 'string' },
+    totalBudget: { type: 'number' },
+    notes: { type: 'string' },
+  },
+  rider: {
+    title: { type: 'string' },
+    riderType: { type: 'string' },
+    notes: { type: 'string' },
+  },
+  media_capture: {
+    recordingType: { type: 'string', enum: ['video', 'audio', 'both'] },
+    captureMode: { type: 'string', enum: ['static', 'multi_cam', 'ai_directed'] },
+    primaryPlatform: { type: 'string' },
+    streamLive: { type: 'boolean' },
+    rightsClearanceStatus: { type: 'string' },
+    postProductionNotes: { type: 'string' },
+  },
+  capture_source: {
+    type: { type: 'string', enum: ['camera', 'audio_input'] },
+    name: { type: 'string' },
+    location: { type: 'string' },
+    operator: { type: 'string' },
+    aiControlEnabled: { type: 'boolean' },
+  },
+  zoom_meeting: {
+    zoomMeetingType: { type: 'string', enum: ['meeting', 'webinar'] },
+    zoomMeetingId: { type: 'string' },
+    zoomJoinUrl: { type: 'string' },
+    zoomHostEmail: { type: 'string' },
+    zoomPasscode: { type: 'string' },
+    zoomCloudRecordingEnabled: { type: 'boolean' },
+    zoomTranscriptEnabled: { type: 'boolean' },
+    zoomStatus: { type: 'string', enum: ['not_scheduled', 'scheduled', 'live', 'ended'] },
+  },
+  youtube_distribution: {
+    youtubeVideoUrl: { type: 'string' },
+    youtubeVideoId: { type: 'string' },
+    publishStatus: { type: 'string', enum: ['not_published', 'queued', 'published', 'error'] },
+    publishNotes: { type: 'string' },
+  },
+  concessions_plan: {
+    isActive: { type: 'boolean' },
+    managerContactId: { type: 'string' },
+    barOpenTime: { type: 'string' },
+    barCloseTime: { type: 'string' },
+    intermissionService: { type: 'boolean' },
+    cashlessOnly: { type: 'boolean' },
+    notes: { type: 'string' },
+  },
+  concessions_menu_item: {
+    name: { type: 'string' },
+    category: { type: 'string' },
+    price: { type: 'number' },
+    costBasis: { type: 'number' },
+    supplierReference: { type: 'string' },
+    alcoholFlag: { type: 'boolean' },
+    inventoryLink: { type: 'string' },
+    isSignatureItem: { type: 'boolean' },
+    availabilityStatus: { type: 'string' },
+    notes: { type: 'string' },
+  },
+  merch_plan: {
+    merchManagerContactId: { type: 'string' },
+    tableFee: { type: 'boolean' },
+    tableFeeAmount: { type: 'number' },
+    merchAreaLocation: { type: 'string' },
+    loadInTime: { type: 'string' },
+    marketplaceMode: { type: 'boolean' },
+    notes: { type: 'string' },
+  },
+  merch_participant: {
+    name: { type: 'string' },
+    organizationName: { type: 'string' },
+    emergencyContactName: { type: 'string' },
+    emergencyContactPhone: { type: 'string' },
+    emergencyContactEmail: { type: 'string' },
+    supervisorName: { type: 'string' },
+    merchTableRequired: { type: 'boolean' },
+    staffRunningTable: { type: 'string' },
+    tableAssignmentLabel: { type: 'string' },
+    notes: { type: 'string' },
+  },
+  merch_revenue_split: {
+    appliesTo: { type: 'string' },
+    participantId: { type: 'string' },
+    splitType: { type: 'string', enum: ['gross', 'net'] },
+    tableFeeDeductedFirst: { type: 'boolean' },
+    notes: { type: 'string' },
+  },
+  staff_assignment: {
+    staffProfileId: { type: 'string' },
+    jobTitle: { type: 'string' },
+    startTime: { type: 'string' },
+    endTime: { type: 'string' },
+    payType: { type: 'string', enum: ['hourly', 'flat', 'salary', 'volunteer'] },
+    payOverride: { type: 'number' },
+    status: { type: 'string', enum: ['scheduled', 'confirmed', 'declined', 'no_show'] },
+    notes: { type: 'string' },
   },
 };
 
+const FORM_REQUIRED_FIELDS = {
+  signup: ['firstName', 'lastName', 'email'],
+  venue: ['businessName', 'city', 'state'],
+  artist: ['stageName', 'genre'],
+  event: ['title', 'date', 'time', 'venue'],
+  staff_profile: ['displayName', 'phoneNumber', 'primaryRole'],
+  contact: ['displayName', 'email'],
+  performance_zone: ['name', 'zoneType'],
+  supplier: ['supplierName', 'supplierType'],
+  inventory_item: ['itemName', 'category'],
+  purchase_order: ['supplierName'],
+  training_session: ['title', 'startDatetime'],
+  booking_document: ['title'],
+  ticketing: ['providerType'],
+  production_checklist: ['title'],
+  budget: ['title'],
+  rider: ['title'],
+  media_capture: ['recordingType', 'captureMode'],
+  capture_source: ['type', 'name'],
+  zoom_meeting: ['zoomMeetingType'],
+  youtube_distribution: ['publishStatus'],
+  concessions_plan: ['isActive'],
+  concessions_menu_item: ['name'],
+  merch_plan: ['marketplaceMode'],
+  merch_participant: ['name'],
+  merch_revenue_split: ['splitType'],
+  staff_assignment: ['staffProfileId', 'startTime', 'endTime'],
+};
+
+const FOLLOW_UP_QUESTION_MAP = {
+  title: 'What should the final title be?',
+  date: 'What is the confirmed date?',
+  time: 'What is the confirmed start time?',
+  venue: 'Which venue is this tied to?',
+  businessName: 'What is the official business/venue name?',
+  supplierName: 'Which supplier should this use?',
+  providerType: 'Which ticketing provider should this booking use?',
+  recordingType: 'Should this capture video, audio, or both?',
+  captureMode: 'Is this static, multi-cam, or AI-directed capture?',
+  zoomJoinUrl: 'What is the Zoom join URL?',
+  splitType: 'Should the split be gross or net?',
+};
+
+function buildMissingFieldQuestions(formType, schema, fields = {}, explicitMissing = []) {
+  const required = FORM_REQUIRED_FIELDS[formType] || [];
+  const requiredMissing = required.filter((key) => !fields[key]);
+  const merged = [...new Set([...(explicitMissing || []), ...requiredMissing])].filter((key) => schema[key]);
+  return merged.map((fieldKey) => ({
+    field_key: fieldKey,
+    question: FOLLOW_UP_QUESTION_MAP[fieldKey] || `Give me ${fieldKey} and I will plug it in.`,
+    why_needed: required.includes(fieldKey) ? 'I need this field before this form can be completed.' : 'This helps me fill the form with better accuracy.',
+  }));
+}
+
+function sanitizeFieldMeta(schema, fieldMeta = {}) {
+  const out = {};
+  if (!fieldMeta || typeof fieldMeta !== 'object') return out;
+  for (const [key, value] of Object.entries(fieldMeta)) {
+    if (!schema[key]) continue;
+    const item = value && typeof value === 'object' ? value : {};
+    const confidence = Number(item.confidence);
+    out[key] = {
+      confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0.7,
+      evidence: typeof item.evidence === 'string' ? item.evidence.slice(0, 300) : '',
+      sourceSnippet: typeof item.sourceSnippet === 'string' ? item.sourceSnippet.slice(0, 300) : '',
+    };
+  }
+  return out;
+}
+
+function sanitizeInferredEntities(input = {}) {
+  const entities = input && typeof input === 'object' ? input : {};
+  const toArray = (value) => (Array.isArray(value) ? value.filter(Boolean).slice(0, 12) : []);
+  return {
+    contacts: toArray(entities.contacts),
+    venues: toArray(entities.venues),
+    acts: toArray(entities.acts),
+    bookings: toArray(entities.bookings || entities.events),
+    suppliers: toArray(entities.suppliers),
+  };
+}
+
+function sanitizeSuggestedNextActions(input = []) {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((item) => ({
+      action_type: normalizeString(item?.action_type || item?.actionType || ''),
+      label: normalizeString(item?.label || ''),
+      payload: (item?.payload && typeof item.payload === 'object') ? item.payload : {},
+    }))
+    .filter((item) => item.action_type)
+    .slice(0, 12);
+};
+
 async function formAssist({ formType, inputText, currentForm = {} }) {
-  if (!formType) throw new Error('formType is required');
-  if (!inputText || !inputText.trim()) throw new Error('inputText is required');
+  if (!formType) throw new Error('I need formType so I know which schema to use.');
+  if (!inputText || !inputText.trim()) throw new Error('Give me text to parse and I will extract the fields.');
 
   const schema = FORM_ASSIST_SCHEMAS[formType];
-  if (!schema) throw new Error(`Unsupported formType: ${formType}`);
+  if (!schema) throw new Error(`I do not support formType "${formType}" yet.`);
 
   const schemaSummary = Object.entries(schema).map(([key, meta]) => {
     const base = `${key}: ${meta.type}`;
@@ -411,21 +761,34 @@ async function formAssist({ formType, inputText, currentForm = {} }) {
   }).join('\n');
 
   const model = process.env.OPENAI_FORM_ASSIST_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini';
-  const systemPrompt = `You extract form fields from user notes/transcripts. Return ONLY valid JSON.
+  const systemPrompt = `You extract structured data for form autofill. Return ONLY valid JSON.
 Output shape:
 {
   "fields": { "<fieldKey>": <value> },
-  "missing": ["<requiredOrusefulFieldKey>"],
+  "fieldMeta": {
+    "<fieldKey>": { "confidence": 0.0, "evidence": "short proof phrase", "sourceSnippet": "short quote from source" }
+  },
+  "missing": ["<requiredOrUsefulFieldKey>"],
+  "inferredEntities": {
+    "contacts": [],
+    "venues": [],
+    "acts": [],
+    "bookings": [],
+    "suppliers": []
+  },
+  "suggestedNextActions": [
+    { "actionType": "create_contact|create_event|create_supplier|create_booking|create_task", "label": "short label", "payload": {} }
+  ],
   "notes": "short clarification note"
 }
 Rules:
-- Only include keys from allowed schema.
-- Only include fields you are confident about.
-- Use ISO date: YYYY-MM-DD.
-- Use 24-hour time: HH:MM.
-- For arrays, return an array of strings.
-- If useful facts appear that are not schema fields (for example ISBN, extra contacts, sponsor names), include them briefly in "notes".
-- Do not include markdown, comments, or extra keys.`;
+- Only include keys from the allowed schema.
+- Only include fields you are reasonably confident about.
+- Use ISO date: YYYY-MM-DD when applicable.
+- Use 24-hour time HH:MM when applicable.
+- For arrays, return array of strings.
+- If unknown, omit the field.
+- No markdown and no extra top-level keys.`;
 
   const userPrompt = `FORM TYPE: ${formType}
 
@@ -443,16 +806,29 @@ ${inputText}`;
   try {
     parsed = parseJSON(raw);
   } catch {
-    throw new Error('AI form parsing returned invalid JSON');
+    throw new Error('I could not parse that AI response cleanly. Try again and I will re-run it.');
   }
 
   const fields = sanitizeFormPatch(formType, parsed?.fields || {});
-  const missing = Array.isArray(parsed?.missing)
-    ? parsed.missing.filter(k => schema[k])
+  const explicitMissing = Array.isArray(parsed?.missing)
+    ? parsed.missing.filter((key) => schema[key])
     : [];
+  const missingFields = buildMissingFieldQuestions(formType, schema, fields, explicitMissing);
   const notes = typeof parsed?.notes === 'string' ? parsed.notes.trim() : '';
+  const fieldMeta = sanitizeFieldMeta(schema, parsed?.fieldMeta || parsed?.field_meta || {});
+  const inferredEntities = sanitizeInferredEntities(parsed?.inferredEntities || parsed?.inferred_entities || {});
+  const suggestedNextActions = sanitizeSuggestedNextActions(parsed?.suggestedNextActions || parsed?.suggested_next_actions || []);
 
-  return { fields, missing, notes, modelUsed: model };
+  return {
+    fields,
+    fieldMeta,
+    missing: missingFields.map((item) => item.field_key),
+    missingFields,
+    inferredEntities,
+    suggestedNextActions,
+    notes,
+    modelUsed: model,
+  };
 }
 
 function sanitizeFormPatch(formType, patch) {
@@ -611,7 +987,7 @@ async function generateImage({ prompt, dalleSize }) {
     return { url: data.data[0].url, model: 'dall-e-3', engine: 'openai', revisedPrompt: data.data[0].revised_prompt };
   }
 
-  throw new Error('No image generation API keys configured');
+  throw new Error('I need at least one image-generation API key before I can make graphics.');
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -620,7 +996,7 @@ async function generateImage({ prompt, dalleSize }) {
 
 async function geminiGenerate(prompt, temperature = 0.1) {
   const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error('GEMINI_API_KEY not configured');
+  if (!key) throw new Error('I need GEMINI_API_KEY before I can run Gemini.');
 
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, {
     method: 'POST',
@@ -632,7 +1008,7 @@ async function geminiGenerate(prompt, temperature = 0.1) {
   });
   const data = await r.json();
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error('No response from Gemini');
+  if (!text) throw new Error('Gemini came back empty this round. Try again and I will rerun it.');
   return text;
 }
 
@@ -680,9 +1056,11 @@ async function generatePodcastScript({ pressRelease, research, event, venue, scr
 // PHOTO EXTRACTION (Gemini Vision)
 // ═══════════════════════════════════════════════════════════════
 
-async function extractFromPhoto({ imageData, mimeType, extractionPrompt }) {
+async function extractFromUpload({ fileData, imageData, mimeType, extractionPrompt }) {
   const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error('GEMINI_API_KEY not configured');
+  if (!key) throw new Error('I need GEMINI_API_KEY before I can extract from uploads.');
+  const inlineData = fileData || imageData;
+  if (!inlineData) throw new Error('I need a file payload before I can extract text and details.');
 
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, {
     method: 'POST',
@@ -691,7 +1069,7 @@ async function extractFromPhoto({ imageData, mimeType, extractionPrompt }) {
       contents: [{
         parts: [
           { text: extractionPrompt },
-          { inlineData: { mimeType: mimeType || 'image/jpeg', data: imageData } },
+          { inlineData: { mimeType: mimeType || 'image/jpeg', data: inlineData } },
         ],
       }],
       generationConfig: { temperature: 0.1 },
@@ -699,8 +1077,12 @@ async function extractFromPhoto({ imageData, mimeType, extractionPrompt }) {
   });
   const data = await r.json();
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error('No extraction result from Gemini');
+  if (!text) throw new Error('I did not get extraction text back from Gemini yet. Try once more.');
   return { extracted: parseJSON(text) };
+}
+
+async function extractFromPhoto({ imageData, mimeType, extractionPrompt }) {
+  return extractFromUpload({ imageData, mimeType, extractionPrompt });
 }
 
 // ═══════════════════════════════════════════════════════════════

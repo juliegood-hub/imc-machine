@@ -90,7 +90,7 @@ export default function PressPagePreview() {
 
     } catch (err) {
       console.error('Failed to generate press page:', err);
-      alert('Failed to generate press page: ' + err.message);
+      alert('I hit a snag generating that press page: ' + err.message);
     } finally {
       setGenerating(false);
     }
@@ -113,7 +113,7 @@ export default function PressPagePreview() {
     
     try {
       await navigator.clipboard.writeText(shareableLink);
-      alert('Shareable link copied to clipboard!');
+      alert('Shareable link copied.');
     } catch (err) {
       // Fallback for older browsers
       const textArea = document.createElement('textarea');
@@ -122,7 +122,7 @@ export default function PressPagePreview() {
       textArea.select();
       document.execCommand('copy');
       document.body.removeChild(textArea);
-      alert('Shareable link copied to clipboard!');
+      alert('Shareable link copied.');
     }
   };
 
@@ -142,7 +142,7 @@ export default function PressPagePreview() {
         <div>
           <h1 className="text-3xl mb-1">📰 Press Page Generator</h1>
           <p className="text-gray-500 m-0">
-            Auto-generated event press kit page with bilingual content, images, and venue details
+            Build a shareable press kit page with bilingual copy, images, and venue details.
           </p>
         </div>
       </div>

@@ -3,7 +3,7 @@ import { parseLocalDate } from '../lib/dateUtils';
 
 /**
  * SA Current Calendar Wizard
- * SA Current is protected by Cloudflare — automated submission is blocked.
+ * SA Current is protected by Cloudflare, so automated submission is blocked.
  * Generates a ready-to-paste ChatGPT Agent prompt for manual submission.
  */
 export default function SACurrentWizard({ event, venue, generatedContent }) {
@@ -69,12 +69,12 @@ ${event.performers ? `- **Artist/Performer:** ${event.performers}` : ''}
           className="btn-secondary text-xs"
           style={{ padding: '4px 12px', fontSize: '12px' }}
         >
-          {showPrompt ? 'Hide Prompt' : 'Generate Prompt'}
+          {showPrompt ? 'Hide Prompt' : 'Build Prompt'}
         </button>
       </div>
 
       <p className="text-xs text-gray-500 m-0 mb-3">
-        SA Current is Cloudflare-protected — paste this prompt into ChatGPT Agent to submit manually.
+        SA Current is Cloudflare-protected, so paste this prompt into ChatGPT Agent for manual submit.
       </p>
 
       {showPrompt && (

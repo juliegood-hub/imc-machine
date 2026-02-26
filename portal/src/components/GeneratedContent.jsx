@@ -54,7 +54,7 @@ export default function GeneratedContent({
     if (distributed === 'sending') return { text: 'Sending...', class: 'bg-blue-500 text-white' };
     if (distributed === 'ready') return { text: 'Ready', class: 'bg-yellow-500 text-white' };
     if (distributed === true) return { text: '✓ Sent', class: 'bg-green-500 text-white' };
-    if (distributed === false) return { text: '✗ Failed', class: 'bg-red-500 text-white' };
+    if (distributed === false) return { text: '✗ Needs Attention', class: 'bg-red-500 text-white' };
     return { text: 'Distribute', class: 'bg-[#c8a45e] text-[#0d1b2a] hover:bg-[#b8943e]' };
   };
 
@@ -107,7 +107,7 @@ export default function GeneratedContent({
         rows={6}
         style={{ wordBreak: 'break-word', overflowWrap: 'break-word', whiteSpace: 'pre-wrap', maxWidth: '100%' }}
         className="w-full border border-gray-200 rounded-lg p-3 text-sm resize-y focus:outline-none focus:border-[#c8a45e]"
-        placeholder={`Generated ${channel} content will appear here...`}
+        placeholder={`I will place your ${channel} draft here...`}
       />
       {text && (
         <div className="mt-2 text-xs text-gray-500">

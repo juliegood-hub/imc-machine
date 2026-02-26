@@ -45,7 +45,7 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Send this endpoint a POST request and I can run it.' });
 
   const { action } = req.body;
 
@@ -53,7 +53,7 @@ export default async function handler(req, res) {
     switch (action) {
       case 'upload': {
         const { base64, category, label, eventId, userId, fileName, mimeType } = req.body;
-        if (!base64 || !userId) return res.status(400).json({ error: 'base64 and userId required' });
+        if (!base64 || !userId) return res.status(400).json({ error: 'I need the file payload and user ID before I can upload this.' });
 
         await ensureBucket();
 
@@ -76,7 +76,7 @@ export default async function handler(req, res) {
 
         if (!uploadRes.ok) {
           const err = await uploadRes.text();
-          throw new Error(`Storage upload failed: ${err}`);
+          throw new Error(`I could not upload that file to storage yet: ${err}`);
         }
 
         const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${storagePath}`;
@@ -106,11 +106,11 @@ export default async function handler(req, res) {
 
       case 'delete': {
         const { id, userId } = req.body;
-        if (!id) return res.status(400).json({ error: 'id required' });
+        if (!id) return res.status(400).json({ error: 'I need the media ID so I can delete the right file.' });
 
         // Get record to find storage path
         const records = await supabaseRest(`media?id=eq.${id}&user_id=eq.${userId}`);
-        if (!records?.length) return res.status(404).json({ error: 'Not found' });
+        if (!records?.length) return res.status(404).json({ error: 'I could not find that media record.' });
 
         const record = records[0];
         // Extract storage path from URL
@@ -128,7 +128,7 @@ export default async function handler(req, res) {
       }
 
       default:
-        return res.status(400).json({ error: `Unknown action: ${action}` });
+        return res.status(400).json({ error: `I do not recognize "${action}" yet. Choose upload, list, or delete.` });
     }
   } catch (err) {
     console.error('[media]', err);

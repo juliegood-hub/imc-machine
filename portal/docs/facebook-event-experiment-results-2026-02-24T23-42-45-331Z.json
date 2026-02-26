@@ -1,0 +1,210 @@
+{
+  "timestamp": "2026-02-24T23:42:45.331Z",
+  "graph_version": "v25.0",
+  "page_id": "522058047815423",
+  "dry_run": false,
+  "runs": 5,
+  "approaches": {
+    "page_event_create": {
+      "summary": {
+        "attempts": 5,
+        "success_count": 0,
+        "success_rate": 0,
+        "median_ms": 184,
+        "p95_ms": 454,
+        "failure_modes": {
+          "100:Unsupported post request. Object with ID '522058047815423' does not exist, cannot be loaded due to missing permissions, or does not support this operation. Please read the Graph API documentation at https://developers.facebook.com/docs/graph-api": 5
+        }
+      },
+      "attempts": [
+        {
+          "run": 1,
+          "success": false,
+          "statusCode": 400,
+          "elapsedMs": 454,
+          "response": {
+            "error": {
+              "message": "Unsupported post request. Object with ID '522058047815423' does not exist, cannot be loaded due to missing permissions, or does not support this operation. Please read the Graph API documentation at https://developers.facebook.com/docs/graph-api",
+              "type": "GraphMethodException",
+              "code": 100,
+              "error_subcode": 33,
+              "fbtrace_id": "A0n9-WoVDsnhljPWifcIvt5"
+            }
+          },
+          "errorCode": 100,
+          "errorSubcode": 33,
+          "errorType": "GraphMethodException",
+          "errorMessage": "Unsupported post request. Object with ID '522058047815423' does not exist, cannot be loaded due to missing permissions, or does not support this operation. Please read the Graph API documentation at https://developers.facebook.com/docs/graph-api",
+          "id": null
+        },
+        {
+          "run": 2,
+          "success": false,
+          "statusCode": 400,
+          "elapsedMs": 184,
+          "response": {
+            "error": {
+              "message": "Unsupported post request. Object with ID '522058047815423' does not exist, cannot be loaded due to missing permissions, or does not support this operation. Please read the Graph API documentation at https://developers.facebook.com/docs/graph-api",
+              "type": "GraphMethodException",
+              "code": 100,
+              "error_subcode": 33,
+              "fbtrace_id": "AehRKCKjL1vgAow0w4_WQUy"
+            }
+          },
+          "errorCode": 100,
+          "errorSubcode": 33,
+          "errorType": "GraphMethodException",
+          "errorMessage": "Unsupported post request. Object with ID '522058047815423' does not exist, cannot be loaded due to missing permissions, or does not support this operation. Please read the Graph API documentation at https://developers.facebook.com/docs/graph-api",
+          "id": null
+        },
+        {
+          "run": 3,
+          "success": false,
+          "statusCode": 400,
+          "elapsedMs": 136,
+          "response": {
+            "error": {
+              "message": "Unsupported post request. Object with ID '522058047815423' does not exist, cannot be loaded due to missing permissions, or does not support this operation. Please read the Graph API documentation at https://developers.facebook.com/docs/graph-api",
+              "type": "GraphMethodException",
+              "code": 100,
+              "error_subcode": 33,
+              "fbtrace_id": "AZzH9EsCivtiPX6Ekl-kTrY"
+            }
+          },
+          "errorCode": 100,
+          "errorSubcode": 33,
+          "errorType": "GraphMethodException",
+          "errorMessage": "Unsupported post request. Object with ID '522058047815423' does not exist, cannot be loaded due to missing permissions, or does not support this operation. Please read the Graph API documentation at https://developers.facebook.com/docs/graph-api",
+          "id": null
+        },
+        {
+          "run": 4,
+          "success": false,
+          "statusCode": 400,
+          "elapsedMs": 160,
+          "response": {
+            "error": {
+              "message": "Unsupported post request. Object with ID '522058047815423' does not exist, cannot be loaded due to missing permissions, or does not support this operation. Please read the Graph API documentation at https://developers.facebook.com/docs/graph-api",
+              "type": "GraphMethodException",
+              "code": 100,
+              "error_subcode": 33,
+              "fbtrace_id": "AJ5OAADjkAsS3oKRpCtp_H2"
+            }
+          },
+          "errorCode": 100,
+          "errorSubcode": 33,
+          "errorType": "GraphMethodException",
+          "errorMessage": "Unsupported post request. Object with ID '522058047815423' does not exist, cannot be loaded due to missing permissions, or does not support this operation. Please read the Graph API documentation at https://developers.facebook.com/docs/graph-api",
+          "id": null
+        },
+        {
+          "run": 5,
+          "success": false,
+          "statusCode": 400,
+          "elapsedMs": 342,
+          "response": {
+            "error": {
+              "message": "Unsupported post request. Object with ID '522058047815423' does not exist, cannot be loaded due to missing permissions, or does not support this operation. Please read the Graph API documentation at https://developers.facebook.com/docs/graph-api",
+              "type": "GraphMethodException",
+              "code": 100,
+              "error_subcode": 33,
+              "fbtrace_id": "A4l5hyePPSd0WpIdM0G-YWZ"
+            }
+          },
+          "errorCode": 100,
+          "errorSubcode": 33,
+          "errorType": "GraphMethodException",
+          "errorMessage": "Unsupported post request. Object with ID '522058047815423' does not exist, cannot be loaded due to missing permissions, or does not support this operation. Please read the Graph API documentation at https://developers.facebook.com/docs/graph-api",
+          "id": null
+        }
+      ]
+    },
+    "page_feed_fallback_post": {
+      "summary": {
+        "attempts": 5,
+        "success_count": 5,
+        "success_rate": 1,
+        "median_ms": 3432,
+        "p95_ms": 5589,
+        "failure_modes": {}
+      },
+      "attempts": [
+        {
+          "run": 1,
+          "success": true,
+          "statusCode": 200,
+          "elapsedMs": 2830,
+          "response": {
+            "id": "522058047815423_1378092007665861"
+          },
+          "errorCode": null,
+          "errorSubcode": null,
+          "errorType": null,
+          "errorMessage": null,
+          "id": "522058047815423_1378092007665861"
+        },
+        {
+          "run": 2,
+          "success": true,
+          "statusCode": 200,
+          "elapsedMs": 2960,
+          "response": {
+            "id": "522058047815423_1378092024332526"
+          },
+          "errorCode": null,
+          "errorSubcode": null,
+          "errorType": null,
+          "errorMessage": null,
+          "id": "522058047815423_1378092024332526"
+        },
+        {
+          "run": 3,
+          "success": true,
+          "statusCode": 200,
+          "elapsedMs": 3432,
+          "response": {
+            "id": "522058047815423_1378092074332521"
+          },
+          "errorCode": null,
+          "errorSubcode": null,
+          "errorType": null,
+          "errorMessage": null,
+          "id": "522058047815423_1378092074332521"
+        },
+        {
+          "run": 4,
+          "success": true,
+          "statusCode": 200,
+          "elapsedMs": 5589,
+          "response": {
+            "id": "522058047815423_1378092100999185"
+          },
+          "errorCode": null,
+          "errorSubcode": null,
+          "errorType": null,
+          "errorMessage": null,
+          "id": "522058047815423_1378092100999185"
+        },
+        {
+          "run": 5,
+          "success": true,
+          "statusCode": 200,
+          "elapsedMs": 4603,
+          "response": {
+            "id": "522058047815423_1378092170999178"
+          },
+          "errorCode": null,
+          "errorSubcode": null,
+          "errorType": null,
+          "errorMessage": null,
+          "id": "522058047815423_1378092170999178"
+        }
+      ]
+    }
+  },
+  "cleanup": {
+    "events_deleted": 0,
+    "posts_deleted": 5,
+    "failures": []
+  }
+}

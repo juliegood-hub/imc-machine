@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { CLIENT_TYPES, isVenueRole, isArtistRole } from '../constants/clientTypes';
+import { CLIENT_TYPES, isVenueRole, normalizeClientType } from '../constants/clientTypes';
 import FormAIAssist from '../components/FormAIAssist';
+import AuthBrandHeader from '../components/AuthBrandHeader';
 
 export default function Signup() {
   const [searchParams] = useSearchParams();
@@ -16,28 +17,30 @@ export default function Signup() {
   const [inviteCode, setInviteCode] = useState(searchParams.get('code') || searchParams.get('invite') || '');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [stepNote, setStepNote] = useState('');
   const { signup } = useAuth();
   const navigate = useNavigate();
+  const normalizedClientType = normalizeClientType(clientType);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!firstName || !lastName || !email || !password) { setError('Please fill in all required fields'); return; }
-    if (!clientType) { setError('Please select what type of client you are'); return; }
-    if (!clientName) { setError('Please enter your organization/venue/band name'); return; }
-    if (password.length < 6) { setError('Password must be at least 6 characters'); return; }
-    if (!inviteCode.trim()) { setError('An invite code is required to create an account'); return; }
+    if (!firstName || !lastName || !email || !password) { setError('I need the required fields first, then we can create your account.'); return; }
+    if (!clientType) { setError('Choose your user type so I can tailor your workspace.'); return; }
+    if (!clientName) { setError('Add your organization, venue, artist, or campaign name so I can personalize everything.'); return; }
+    if (password.length < 6) { setError('Use at least 6 characters for your password.'); return; }
+    if (!inviteCode.trim()) { setError('Drop in your invite code and I will unlock signup.'); return; }
     setError('');
     setSubmitting(true);
     try {
       const fullName = `${firstName} ${lastName}`.trim();
-      await signup(email, password, fullName, clientName, inviteCode, clientType, {
+      await signup(email, password, fullName, clientName, inviteCode, normalizedClientType, {
         firstName,
         lastName,
         cellPhone
       });
-      navigate(isVenueRole(clientType) ? '/venue-setup' : '/artist-setup');
+      navigate(isVenueRole(normalizedClientType) ? '/venue-setup' : '/artist-setup');
     } catch (err) {
-      setError(err.message || 'Signup failed');
+      setError(err.message || 'Hmm. Signup did not go through yet. Try once more.');
     } finally {
       setSubmitting(false);
     }
@@ -59,6 +62,7 @@ export default function Signup() {
     sponsor: 'Company / Brand Name',
     admin: 'Organization Name',
     attorney: 'Firm / Practice Name',
+    lawyer: 'Firm / Practice Name',
     educator: 'School / Institution Name',
     professor: 'University / Research Group',
     doctor: 'Practice / Clinic Name',
@@ -105,6 +109,7 @@ export default function Signup() {
     sponsor: 'Good Creative Media',
     admin: 'System Administration',
     attorney: 'Good Law Group',
+    lawyer: 'Good Law Group',
     educator: 'UTSA Department of Music',
     professor: 'UTSA Cultural Studies Lab',
     doctor: 'SA Wellness Center',
@@ -140,7 +145,7 @@ export default function Signup() {
     if (fields.lastName !== undefined) setLastName(fields.lastName);
     if (fields.email !== undefined) setEmail(fields.email);
     if (fields.cellPhone !== undefined) setCellPhone(fields.cellPhone);
-    if (fields.clientType !== undefined) setClientType(fields.clientType);
+    if (fields.clientType !== undefined) setClientType(normalizeClientType(fields.clientType));
     if (fields.clientName !== undefined) setClientName(fields.clientName);
     if (fields.inviteCode !== undefined) setInviteCode(fields.inviteCode);
   };
@@ -148,17 +153,11 @@ export default function Signup() {
   return (
     <div className="min-h-screen bg-[#0d1b2a] flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-[#c8a45e] rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <span className="text-[#0d1b2a] font-bold text-xl">IMC</span>
-          </div>
-          <h1 className="text-white text-3xl mb-1" style={{ fontFamily: "'Playfair Display', serif" }}>Good Creative Media</h1>
-          <p className="text-[#c8a45e] text-lg font-light tracking-wide">The IMC Machine — Integrated Marketing Communications</p>
-        </div>
+        <AuthBrandHeader />
 
         <form onSubmit={handleSubmit} className="bg-white rounded-xl p-8">
           <h2 className="text-2xl mb-6 text-center" style={{ fontFamily: "'Playfair Display', serif" }}>Let's Get You Set Up</h2>
-          <p className="text-xs text-gray-400 text-center mb-4">* Required fields</p>
+          <p className="text-xs text-gray-400 text-center mb-4">* Fill the required fields and I will set up your profile.</p>
 
           {error && <div className="bg-red-50 text-red-600 text-sm p-3 rounded-lg mb-4">{error}</div>}
 
@@ -167,7 +166,9 @@ export default function Signup() {
             currentForm={{ firstName, lastName, email, cellPhone, clientType, clientName, inviteCode }}
             onApply={applySignupPatch}
             title="Signup AI Assistant"
-            description="Speak or type your details once, and AI will place them into the signup fields."
+            description="Tell me your details once by voice or text, and I will map them into this form."
+            sourceContext="signup_form"
+            entityType="signup"
           />
 
           {/* Client Type Selection */}
@@ -177,7 +178,7 @@ export default function Signup() {
               {CLIENT_TYPES.map(t => (
                 <button key={t.key} type="button" onClick={() => setClientType(t.key)}
                   className={`p-3 rounded-lg border-2 text-left transition-all cursor-pointer bg-white ${
-                    clientType === t.key ? 'border-[#c8a45e] bg-[#faf8f3]' : 'border-gray-200 hover:border-gray-300'
+                    normalizedClientType === t.key ? 'border-[#c8a45e] bg-[#faf8f3]' : 'border-gray-200 hover:border-gray-300'
                   }`}>
                   <span className="text-lg block">{t.icon}</span>
                   <span className="text-xs font-semibold block mt-1">{t.label}</span>
@@ -242,8 +243,23 @@ export default function Signup() {
           </div>
 
           <button type="submit" disabled={submitting} className="btn-primary w-full text-center disabled:opacity-50">
-            {submitting ? 'Creating account...' : 'Create Account'}
+            {submitting ? 'Setting up your account...' : 'Set Up My Account'}
           </button>
+
+          <div className="mt-4 border border-gray-200 rounded-lg p-3">
+            <p className="text-sm font-semibold m-0">Step Actions</p>
+            <p className="text-xs text-gray-500 m-0 mt-1">Choose what you want to do with this step.</p>
+            <div className="flex flex-wrap gap-2 mt-2">
+              <button type="button" className="btn-secondary text-xs" onClick={() => setStepNote('Beautiful. Signup step marked complete once you submit.')}>✓ Mark Complete</button>
+              <button type="button" className="btn-secondary text-xs" onClick={() => setStepNote('Saved for later. Your details stay here while this page is open.')}>Save for Later</button>
+              <button type="button" className="btn-secondary text-xs" onClick={() => navigate('/login')}>Skip to Sign In</button>
+              <button type="submit" className="btn-secondary text-xs">Next Step → Profile Setup</button>
+            </div>
+            {stepNote && <p className="text-xs text-emerald-700 mt-2 mb-0">{stepNote}</p>}
+            <p className="text-xs text-gray-500 mt-2 mb-0">
+              Next up: <span className="font-semibold text-gray-700">Profile Setup</span> — I will route you to venue or artist setup right after signup.
+            </p>
+          </div>
 
           <p className="text-center text-sm text-gray-500 mt-4">
             Already have an account? <Link to="/login" className="text-[#c8a45e] font-semibold no-underline">Sign In</Link>
@@ -252,7 +268,7 @@ export default function Signup() {
 
         <div className="text-center mt-8">
           <p className="text-xs text-gray-500 leading-relaxed">
-            The IMC Machine™ · Good to Go. © {new Date().getFullYear()} Julie Good. All Rights Reserved.
+            The IMC Machine™ · © {new Date().getFullYear()} Julie Good. All Rights Reserved.
           </p>
           <p className="text-[10px] text-gray-600 mt-1">
             Made with love in San Antonio by Julie Good · Good Creative Media

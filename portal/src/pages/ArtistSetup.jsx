@@ -4,14 +4,18 @@ import { useVenue } from '../context/VenueContext';
 import { useAuth } from '../context/AuthContext';
 import CompletionBar from '../components/CompletionBar';
 import FormAIAssist from '../components/FormAIAssist';
+import ShowConfigurationManager from '../components/ShowConfigurationManager';
 import { extractFromImages, openCamera, openFileUpload } from '../services/photo-to-form';
-import { isArtistRole } from '../constants/clientTypes';
+import { isArtistRole, normalizeClientType } from '../constants/clientTypes';
 
 const PERFORMANCE_GENRES = [
   'Theater | Plays | Musicals',
+  'Acting Gigs | Character Performance | Seasonal',
   'Live Music | Contemporary | Jazz | Electronic | Indie',
   'Orchestral | Classical | Choral',
+  'Visual Art | Artisan | Gallery | Craft Shows',
   'Comedy | Speaking | Lectures | Workshops',
+  'Legal CLE | Law Panels | Bar Association Events',
   'Dance | Performance Art | Experimental',
 ];
 
@@ -80,6 +84,14 @@ const ARTISAN_ASSOCIATIONS = [
 ];
 
 const KNOWLEDGE_CREATOR_TOPICS = [
+  'Continuing Legal Education (CLE)',
+  'Legal Ethics and Professional Responsibility',
+  'Trial Advocacy',
+  'Criminal Law and Justice',
+  'Family Law',
+  'Business and Corporate Law',
+  'Estate Planning and Probate',
+  'Civil Rights and Constitutional Law',
   'Books and Publishing',
   'Book Signings and Author Talks',
   'Poetry Readings and Literary Performance',
@@ -103,7 +115,6 @@ const KNOWLEDGE_CREATOR_TOPICS = [
   'History and Humanities',
   'Career Development',
   'Personal Development',
-  'Faith and Spirituality',
   'Food and Culinary',
   'Comedy and Storytelling',
   'Podcasting and Media Hosting',
@@ -116,6 +127,11 @@ const KNOWLEDGE_CREATOR_TOPICS = [
 
 const PROFESSIONAL_ASSOCIATIONS = [
   { value: '', label: 'None' },
+  { value: 'StateBarTexas', label: 'State Bar of Texas' },
+  { value: 'SanAntonioBarAssociation', label: 'San Antonio Bar Association' },
+  { value: 'TexasBarCLE', label: 'State Bar of Texas CLE' },
+  { value: 'TCDLA', label: 'Texas Criminal Defense Lawyers Association (TCDLA)' },
+  { value: 'TexasDistrictCountyAttorneysAssociation', label: 'Texas District & County Attorneys Association (TDCAA)' },
   { value: 'GeminiInk', label: 'Gemini Ink (San Antonio)' },
   { value: 'TrinityUniversityPress', label: 'Trinity University Press' },
   { value: 'SanAntonioBookFestival', label: 'San Antonio Book Festival' },
@@ -136,6 +152,8 @@ const PROFESSIONAL_ASSOCIATIONS = [
 ];
 
 const KNOWLEDGE_CREATOR_ROLES = [
+  'attorney',
+  'lawyer',
   'author',
   'writer',
   'journalist',
@@ -150,6 +168,129 @@ const KNOWLEDGE_CREATOR_ROLES = [
   'coach',
   'consultant',
   'media',
+  'politician',
+];
+
+const POLITICAL_SCOPES = [
+  'City of San Antonio',
+  'Bexar County',
+  'State of Texas',
+  'Federal (U.S.)',
+  'Judicial',
+  'School District / Board',
+  'Special District',
+  'Multi-Jurisdiction',
+];
+
+const POLITICAL_OFFICES = [
+  'Mayor of San Antonio',
+  'San Antonio City Council District 1',
+  'San Antonio City Council District 2',
+  'San Antonio City Council District 3',
+  'San Antonio City Council District 4',
+  'San Antonio City Council District 5',
+  'San Antonio City Council District 6',
+  'San Antonio City Council District 7',
+  'San Antonio City Council District 8',
+  'San Antonio City Council District 9',
+  'San Antonio City Council District 10',
+  'Bexar County Judge',
+  'Bexar County Commissioner Precinct 1',
+  'Bexar County Commissioner Precinct 2',
+  'Bexar County Commissioner Precinct 3',
+  'Bexar County Commissioner Precinct 4',
+  'Bexar County Clerk',
+  'Bexar County District Clerk',
+  'Bexar County Sheriff',
+  'Bexar County Tax Assessor-Collector',
+  'Bexar County District Attorney (Criminal District Attorney)',
+  'Texas Governor',
+  'Texas Lieutenant Governor',
+  'Texas Attorney General',
+  'Texas Comptroller',
+  'Texas Land Commissioner',
+  'Texas Agriculture Commissioner',
+  'Texas State Senate',
+  'Texas House of Representatives',
+  'U.S. House of Representatives',
+  'U.S. Senate',
+  'President / Vice President',
+  'Texas Supreme Court Justice',
+  'Texas Court of Criminal Appeals Judge',
+  'Court of Appeals Justice',
+  'District Judge',
+  'County Court-at-Law Judge',
+  'Justice of the Peace',
+  'Constable',
+  'Municipal Judge',
+  'School Board Trustee',
+  'Other Office',
+];
+
+const PARTY_AFFILIATIONS = [
+  { value: '', label: 'Select party / alignment' },
+  { value: 'Democratic', label: 'Democratic' },
+  { value: 'Republican', label: 'Republican' },
+  { value: 'Independent', label: 'Independent' },
+  { value: 'Libertarian', label: 'Libertarian' },
+  { value: 'Green', label: 'Green' },
+  { value: 'Nonpartisan', label: 'Nonpartisan' },
+  { value: 'Other', label: 'Other / Decline to state' },
+];
+
+const CANDIDATE_STATUS_OPTIONS = [
+  'Incumbent',
+  'Challenger',
+  'Nomination Candidate',
+  'Open Seat Candidate',
+  'Appointed Officeholder',
+  'Former Officeholder',
+  'Campaign Team',
+];
+
+const ELECTION_STAGE_OPTIONS = [
+  'Exploratory',
+  'Filed / Declared',
+  'Primary Nomination',
+  'Primary',
+  'Primary Runoff',
+  'General Election',
+  'Special Election',
+  'Recall / Referendum',
+  'Post-Election Transition',
+];
+
+const CAMPAIGN_OBJECTIVE_OPTIONS = [
+  'Brand awareness / name recognition',
+  'Fundraising',
+  'Volunteer recruitment',
+  'Voter registration',
+  'Voter turnout (GOTV)',
+  'Issue education',
+  'Town hall attendance',
+  'Media coverage',
+  'Debate preparation / amplification',
+  'Coalition building',
+];
+
+const POLICY_PRIORITY_OPTIONS = [
+  'Public safety',
+  'Education',
+  'Property taxes',
+  'Housing affordability',
+  'Transportation',
+  'Infrastructure',
+  'Economic development',
+  'Small business support',
+  'Healthcare access',
+  'Mental health',
+  'Environmental sustainability',
+  'Criminal justice reform',
+  'Immigration',
+  'Veterans services',
+  'Arts and culture',
+  'Government transparency',
+  'Ethics and accountability',
 ];
 
 const REQUIRED_FIELDS = ['firstName', 'lastName', 'stageName', 'email', 'city', 'state'];
@@ -160,9 +301,11 @@ export default function ArtistSetup() {
   const { venue, saveVenue } = useVenue();
   const { user } = useAuth();
   const navigate = useNavigate();
-  const isArtistUser = isArtistRole(user?.clientType || 'artist');
-  const isArtisanUser = user?.clientType === 'artisan';
-  const isKnowledgeCreatorUser = KNOWLEDGE_CREATOR_ROLES.includes(user?.clientType || '');
+  const normalizedClientType = normalizeClientType(user?.clientType || 'artist');
+  const isArtistUser = isArtistRole(normalizedClientType);
+  const isArtisanUser = normalizedClientType === 'artisan';
+  const isPoliticianUser = normalizedClientType === 'politician';
+  const isKnowledgeCreatorUser = KNOWLEDGE_CREATOR_ROLES.includes(normalizedClientType);
   const showTechnicalSection = isArtistUser && !isArtisanUser;
   const [form, setForm] = useState({
     // Contact Info
@@ -195,6 +338,13 @@ export default function ArtistSetup() {
     recordLabel: venue.recordLabel || '',
     performingRightsOrg: venue.performingRightsOrg || '',
     unionMember: venue.unionMember || '',
+    politicalScope: venue.politicalScope || venue.genre || '',
+    officeSought: venue.officeSought || venue.recordLabel || '',
+    district: venue.district || venue.unionMember || '',
+    partyAffiliation: venue.partyAffiliation || venue.performingRightsOrg || '',
+    candidateStatus: venue.candidateStatus || '',
+    electionStage: venue.electionStage || '',
+    campaignObjective: venue.campaignObjective || '',
     bio: venue.bio || '',
     
     // Social & Streaming
@@ -221,11 +371,12 @@ export default function ArtistSetup() {
     brandPrimary: venue.brandPrimary || '#c8a45e',
     brandSecondary: venue.brandSecondary || '#0d1b2a',
     
-    type: 'artist',
+    type: venue.type || normalizedClientType || 'artist',
     members: venue.members || [],
   });
   const [saved, setSaved] = useState(false);
   const [extracting, setExtracting] = useState(false);
+  const [activeTab, setActiveTab] = useState('profile');
   const [memberName, setMemberName] = useState('');
   const [memberRole, setMemberRole] = useState('');
   const [subgenreInput, setSubgenreInput] = useState('');
@@ -313,17 +464,17 @@ export default function ArtistSetup() {
     // Check required fields
     const missingFields = REQUIRED_FIELDS.filter(f => !(form[f] || '').toString().trim());
     if (missingFields.length > 0) {
-      alert(`Please fill in required fields: ${missingFields.join(', ')}`);
+      alert(`I still need these required fields before we continue: ${missingFields.join(', ')}`);
       return;
     }
     
     setSaving(true);
     try {
-      await saveVenue({ ...form, type: 'artist' });
+      await saveVenue({ ...form, type: normalizedClientType || form.type || 'artist' });
       setSaved(true);
       setTimeout(() => navigate('/'), 1500);
     } catch (err) {
-      alert('Error saving artist profile: ' + err.message);
+      alert('I hit a snag saving your profile: ' + err.message);
     } finally {
       setSaving(false);
     }
@@ -397,49 +548,83 @@ export default function ArtistSetup() {
   };
 
   return (
-    <div className="p-4 md:p-8 max-w-3xl">
-      <h1 className="text-3xl mb-2" style={{ fontFamily: "'Playfair Display', serif" }}>{isArtisanUser ? 'Artisan Setup' : 'Artist / Band Setup'}</h1>
+    <div className={`p-4 md:p-8 ${activeTab === 'stageTech' ? 'max-w-6xl' : 'max-w-3xl'}`}>
+      <h1 className="text-3xl mb-2" style={{ fontFamily: "'Playfair Display', serif" }}>
+        {isArtisanUser ? 'Artisan Setup' : isPoliticianUser ? 'Political Campaign Setup' : isKnowledgeCreatorUser ? 'Professional / Speaker Setup' : 'Artist / Band Setup'}
+      </h1>
       <p className="text-gray-500 mb-6">
         {isArtisanUser
-          ? 'Tell us about your art practice so we can personalize your profile, press, and event promotions.'
+          ? 'Tell me about your art practice, and I will shape your profile, press, and event promos around it.'
+          : isPoliticianUser
+            ? 'Tell me about your race, office, and priorities so I can keep campaign messaging accurate and sharp.'
           : isKnowledgeCreatorUser
-            ? 'Tell us about your voice, topics, and professional focus so we can personalize your profile and campaigns.'
-            : 'Tell us about you so we can personalize your press and promo.'}
+            ? 'Tell me your voice, your topics, and your lane, and I will tailor your profile and campaigns.'
+            : 'Tell me about you, and I will personalize your press and promo.'}
       </p>
 
-      <FormAIAssist
-        formType="artist"
-        currentForm={form}
-        onApply={applyArtistPatch}
-        title={isArtisanUser ? 'Artisan AI Assistant' : isKnowledgeCreatorUser ? 'Professional AI Assistant' : 'Artist AI Assistant'}
-        description="Speak your profile details and AI will map them into contact, address, professional, social, and profile fields."
-      />
-
-      {/* Photo-to-Form */}
-      <div className="card mb-6 border-2 border-dashed border-[#c8a45e] bg-[#faf8f3]">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h3 className="text-lg">📸 Snap & Auto-Fill</h3>
-            <p className="text-xs text-gray-500 m-0">Photo a press kit, one-sheet, business card, portfolio page, or studio card : AI extracts your info</p>
-          </div>
-          {extracting && <span className="text-sm text-[#c8a45e] animate-pulse">🔍 Extracting...</span>}
-        </div>
-        <div className="flex flex-wrap gap-3">
-          <button type="button" onClick={async () => { try { const f = await openCamera(); handlePhotoExtract([f]); } catch {} }}
-            className="btn-primary text-sm" disabled={extracting}>📷 Take Photo</button>
-          <button type="button" onClick={async () => { try { const files = await openFileUpload(true); handlePhotoExtract(files); } catch {} }}
-            className="btn-secondary text-sm" disabled={extracting}>📁 Upload</button>
-        </div>
+      <div className="flex flex-wrap gap-2 mb-5">
+        <button
+          type="button"
+          onClick={() => setActiveTab('profile')}
+          className={`px-3 py-1.5 rounded border text-sm ${
+            activeTab === 'profile'
+              ? 'bg-[#0d1b2a] text-white border-[#0d1b2a]'
+              : 'bg-white border-gray-300 text-gray-700'
+          }`}
+        >
+          Profile
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('stageTech')}
+          className={`px-3 py-1.5 rounded border text-sm ${
+            activeTab === 'stageTech'
+              ? 'bg-[#0d1b2a] text-white border-[#0d1b2a]'
+              : 'bg-white border-gray-300 text-gray-700'
+          }`}
+        >
+          Stage Plot & Tech
+        </button>
       </div>
 
-      <CompletionBar completed={completed} total={total} label={isArtisanUser ? 'Artisan Profile' : isKnowledgeCreatorUser ? 'Professional Profile' : 'Artist Profile'} />
+      {activeTab === 'profile' && (
+        <>
+          <FormAIAssist
+            formType="artist"
+            currentForm={form}
+            onApply={applyArtistPatch}
+            title={isArtisanUser ? 'Artisan AI Assistant' : isPoliticianUser ? 'Campaign AI Assistant' : isKnowledgeCreatorUser ? 'Professional AI Assistant' : 'Artist AI Assistant'}
+            description="Say it once by voice or text, and I will map it into contact, address, profile, and social fields."
+            sourceContext="artist_setup_profile"
+            entityType="artist_profile"
+            entityId={user?.id || ''}
+          />
 
-      {saved && (
-        <div className="bg-green-50 text-green-700 p-4 rounded-lg mb-6 font-medium">✓ Artist profile saved! Redirecting to dashboard...</div>
-      )}
+          {/* Photo-to-Form */}
+          <div className="card mb-6 border-2 border-dashed border-[#c8a45e] bg-[#faf8f3]">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="text-lg">📸 Snap & Auto-Fill</h3>
+                <p className="text-xs text-gray-500 m-0">Snap a one-sheet, business card, portfolio page, or press kit. I will extract what matters.</p>
+              </div>
+              {extracting && <span className="text-sm text-[#c8a45e] animate-pulse">🔍 Extracting...</span>}
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <button type="button" onClick={async () => { try { const f = await openCamera(); handlePhotoExtract([f]); } catch {} }}
+                className="btn-primary text-sm" disabled={extracting}>📷 Take Photo</button>
+              <button type="button" onClick={async () => { try { const files = await openFileUpload(true); handlePhotoExtract(files); } catch {} }}
+                className="btn-secondary text-sm" disabled={extracting}>📁 Upload</button>
+            </div>
+          </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <p className="text-xs text-gray-400">* Required fields</p>
+          <CompletionBar completed={completed} total={total} label={isArtisanUser ? 'Artisan Profile' : isKnowledgeCreatorUser ? 'Professional Profile' : 'Artist Profile'} />
+
+          {saved && (
+            <div className="bg-green-50 text-green-700 p-4 rounded-lg mb-6 font-medium">✓ Beautiful. {isKnowledgeCreatorUser ? 'Professional' : 'Artist'} profile saved. Taking you to the dashboard...</div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-6">
+        <p className="text-xs text-gray-400">* Fill the required fields first so every campaign stays accurate across every channel.</p>
 
         {/* Contact Information */}
         <div>
@@ -510,28 +695,45 @@ export default function ArtistSetup() {
 
         {/* Professional */}
         <div>
-          <SectionHeader title={isArtisanUser ? 'Professional Art Details' : 'Professional Details'} section="professional" count={7} />
+          <SectionHeader title={isArtisanUser ? 'Professional Art Details' : isPoliticianUser ? 'Campaign Details' : 'Professional Details'} section="professional" count={isPoliticianUser ? 12 : 7} />
           {expandedSections.professional && (
             <div className="card">
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    {isArtisanUser ? 'Primary Medium' : isKnowledgeCreatorUser ? 'Primary Topic / Focus' : 'Genre'}
+                    {isArtisanUser ? 'Primary Medium' : isPoliticianUser ? 'Office Level / Jurisdiction' : isKnowledgeCreatorUser ? 'Primary Topic / Focus' : 'Genre'}
                   </label>
-                  <select value={form.genre} onChange={update('genre')}
+                  <select value={isPoliticianUser ? form.politicalScope : form.genre} onChange={update(isPoliticianUser ? 'politicalScope' : 'genre')}
                     className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-[#c8a45e] bg-white">
-                    <option value="">{isArtisanUser ? 'Select primary medium...' : isKnowledgeCreatorUser ? 'Select primary topic...' : 'Select genre...'}</option>
-                    {(isArtisanUser ? ARTISAN_MEDIA : isKnowledgeCreatorUser ? KNOWLEDGE_CREATOR_TOPICS : PERFORMANCE_GENRES).map(g => <option key={g} value={g}>{g}</option>)}
+                    <option value="">{isArtisanUser ? 'Select primary medium...' : isPoliticianUser ? 'Select campaign jurisdiction...' : isKnowledgeCreatorUser ? 'Select primary topic...' : 'Select genre...'}</option>
+                    {(isArtisanUser ? ARTISAN_MEDIA : isPoliticianUser ? POLITICAL_SCOPES : isKnowledgeCreatorUser ? KNOWLEDGE_CREATOR_TOPICS : PERFORMANCE_GENRES).map(g => <option key={g} value={g}>{g}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">{isArtisanUser ? 'Additional Media / Techniques' : isKnowledgeCreatorUser ? 'Topics / Niches' : 'Subgenres'}</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{isArtisanUser ? 'Additional Media / Techniques' : isPoliticianUser ? 'Policy Priorities' : isKnowledgeCreatorUser ? 'Topics / Niches' : 'Subgenres'}</label>
+                  {isPoliticianUser && (
+                    <div className="mb-2 flex flex-wrap gap-2">
+                      {POLICY_PRIORITY_OPTIONS.map(priority => (
+                        <button
+                          key={priority}
+                          type="button"
+                          onClick={() => {
+                            if (form.subgenres.includes(priority)) return;
+                            setForm(prev => ({ ...prev, subgenres: [...prev.subgenres, priority] }));
+                          }}
+                          className="text-xs px-2 py-1 rounded border border-gray-200 bg-white hover:border-[#c8a45e] hover:text-[#8c6d2f]"
+                        >
+                          + {priority}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex gap-2 mb-2">
                     <input 
                       type="text" 
                       value={subgenreInput} 
                       onChange={e => setSubgenreInput(e.target.value)}
-                      placeholder={isArtisanUser ? 'Add medium, style, or technique' : isKnowledgeCreatorUser ? 'Add topic, beat, or niche' : 'Add subgenre tag'}
+                      placeholder={isArtisanUser ? 'Add medium, style, or technique' : isPoliticianUser ? 'Add issue area (ex: criminal justice reform)' : isKnowledgeCreatorUser ? 'Add topic, beat, or niche' : 'Add subgenre tag'}
                       className="flex-1 px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-[#c8a45e]"
                       onKeyPress={e => e.key === 'Enter' && (e.preventDefault(), addSubgenre())}
                     />
@@ -549,26 +751,35 @@ export default function ArtistSetup() {
                   )}
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {fieldInput("Years Active", "yearsActive", "number", "2015")}
-                  {fieldInput(
+                  {fieldInput(isPoliticianUser ? "Years in Public Service" : "Years Active", "yearsActive", "number", isPoliticianUser ? "8" : "2015")}
+                  {isPoliticianUser ? (
+                    selectInput("Office Sought", "officeSought", POLITICAL_OFFICES)
+                  ) : fieldInput(
                     isArtisanUser ? "Studio / Collective Name" : isKnowledgeCreatorUser ? "Publication / Organization" : "Record Label",
                     "recordLabel",
                     "text",
                     isArtisanUser ? "Studio name or collective" : isKnowledgeCreatorUser ? "Publisher, outlet, school, or brand" : "Independent / Label name"
                   )}
-                  {selectInput(isArtisanUser ? "Association / Guild Membership" : isKnowledgeCreatorUser ? "Professional Association" : "ASCAP/BMI/SESAC Member", "performingRightsOrg", isArtisanUser ? ARTISAN_ASSOCIATIONS : isKnowledgeCreatorUser ? PROFESSIONAL_ASSOCIATIONS : [
+                  {isPoliticianUser ? (
+                    fieldInput("District / Precinct / Place", "district", "text", "Example: Precinct 1, District 2, Place 3")
+                  ) : selectInput(isArtisanUser ? "Association / Guild Membership" : isKnowledgeCreatorUser ? "Professional Association" : "ASCAP/BMI/SESAC Member", "performingRightsOrg", isArtisanUser ? ARTISAN_ASSOCIATIONS : isKnowledgeCreatorUser ? PROFESSIONAL_ASSOCIATIONS : [
                     { value: '', label: 'None' },
                     { value: 'ASCAP', label: 'ASCAP' },
                     { value: 'BMI', label: 'BMI' },
                     { value: 'SESAC', label: 'SESAC' }
                   ])}
-                  {fieldInput(isArtisanUser ? "League / Guild / Chapter" : isKnowledgeCreatorUser ? "Affiliations / Credentials" : "Union Member", "unionMember", "text", isArtisanUser ? "Guild name, league, chapter, or collective" : isKnowledgeCreatorUser ? "Degrees, certifications, fellowships, memberships" : "SAG-AFTRA, AFM, etc.")}
+                  {isPoliticianUser ? (
+                    selectInput("Party / Alignment", "partyAffiliation", PARTY_AFFILIATIONS)
+                  ) : fieldInput(isArtisanUser ? "League / Guild / Chapter" : isKnowledgeCreatorUser ? "Affiliations / Credentials" : "Union Member", "unionMember", "text", isArtisanUser ? "Guild name, league, chapter, or collective" : isKnowledgeCreatorUser ? "Degrees, certifications, fellowships, memberships" : "SAG-AFTRA, AFM, etc.")}
+                  {isPoliticianUser && selectInput("Candidate Status", "candidateStatus", CANDIDATE_STATUS_OPTIONS)}
+                  {isPoliticianUser && selectInput("Election Stage", "electionStage", ELECTION_STAGE_OPTIONS)}
+                  {isPoliticianUser && selectInput("Campaign Objective", "campaignObjective", CAMPAIGN_OBJECTIVE_OPTIONS)}
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">{isArtisanUser ? 'Artist Statement / Bio' : isKnowledgeCreatorUser ? 'Professional Bio' : 'Bio'}</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{isArtisanUser ? 'Artist Statement / Bio' : isPoliticianUser ? 'Candidate Bio / Platform Summary' : isKnowledgeCreatorUser ? 'Professional Bio' : 'Bio'}</label>
                   <textarea value={form.bio} onChange={update('bio')} rows={4}
                     className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-[#c8a45e] resize-y"
-                    placeholder={isArtisanUser ? 'Tell us about your artistic practice, materials, and themes. This will be used in press releases and bios.' : isKnowledgeCreatorUser ? 'Tell us about your work, expertise, and audience. This will be used in bios and media copy.' : 'Tell us about yourself or your band... This will be used in press releases and bios.'} />
+                    placeholder={isArtisanUser ? 'Tell us about your artistic practice, materials, and themes. This will be used in press releases and bios.' : isPoliticianUser ? 'Share campaign mission, core issues, public service background, and key priorities. This will be used in bios and campaign copy.' : isKnowledgeCreatorUser ? 'Tell us about your work, expertise, and audience. This will be used in bios and media copy.' : 'Tell us about yourself or your band... This will be used in press releases and bios.'} />
                 </div>
               </div>
             </div>
@@ -726,9 +937,15 @@ export default function ArtistSetup() {
         </div>
 
         <button type="submit" className="btn-primary text-lg px-8" disabled={saving}>
-          {saving ? '⟳ Saving...' : 'Save & Continue →'}
+          {saving ? '⟳ Saving...' : 'Save This & Continue →'}
         </button>
-      </form>
+          </form>
+        </>
+      )}
+
+      {activeTab === 'stageTech' && (
+        <ShowConfigurationManager />
+      )}
     </div>
   );
 }

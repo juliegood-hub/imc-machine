@@ -6,9 +6,12 @@ import { parseLocalDate } from '../lib/dateUtils';
  * Generates a ready-to-paste ChatGPT Agent prompt that creates a Facebook Event
  * with all event details pre-filled from the selected event.
  */
-export default function FacebookEventWizard({ event, venue, generatedContent, images }) {
+export default function FacebookEventWizard({ event, venue, generatedContent, images, onSaveEventUrl }) {
   const [copied, setCopied] = useState(false);
   const [showPrompt, setShowPrompt] = useState(false);
+  const [eventUrlInput, setEventUrlInput] = useState('');
+  const [savingUrl, setSavingUrl] = useState(false);
+  const [saveStatus, setSaveStatus] = useState(null);
 
   const prompt = useMemo(() => {
     if (!event) return '';
@@ -121,6 +124,28 @@ Provide:
     });
   }
 
+  async function handleSaveUrl() {
+    if (!onSaveEventUrl) {
+      setSaveStatus({ type: 'error', message: 'Saving is not available in this view yet.' });
+      return;
+    }
+
+    setSavingUrl(true);
+    setSaveStatus(null);
+    try {
+      const response = await onSaveEventUrl(eventUrlInput);
+      if (response?.success) {
+        setSaveStatus({ type: 'success', message: 'Perfect. Facebook Event URL is saved to campaign tracking.' });
+      } else {
+        setSaveStatus({ type: 'error', message: response?.error || 'I could not save that URL yet.' });
+      }
+    } catch (err) {
+      setSaveStatus({ type: 'error', message: err.message || 'I could not save that URL yet.' });
+    } finally {
+      setSavingUrl(false);
+    }
+  }
+
   if (!event) return null;
 
   return (
@@ -134,12 +159,12 @@ Provide:
           className="btn-secondary"
           style={{ padding: '4px 12px', fontSize: '12px' }}
         >
-          {showPrompt ? 'Hide Prompt' : 'Generate Prompt'}
+          {showPrompt ? 'Hide Prompt' : 'Build Prompt'}
         </button>
       </div>
       
       <p style={{ fontSize: '12px', color: '#666', margin: '0 0 12px 0' }}>
-        Generates a ChatGPT Agent prompt to create this Facebook Event with all details pre-filled. Copy → paste into ChatGPT with browser control.
+        I will build a ready-to-run ChatGPT prompt for this Facebook Event with everything pre-filled. Copy it, paste it, and run.
       </p>
 
       {showPrompt && (
@@ -182,14 +207,53 @@ Provide:
 
           {images && images.length > 0 && images[0]?.url && (
             <p style={{ fontSize: '12px', color: '#16a34a', marginTop: '8px', margin: '8px 0 0 0' }}>
-              ✅ Banner image ready — URL included in prompt for ChatGPT Agent to download and upload.
+              ✅ Banner image is ready. I included the URL in the prompt so ChatGPT can place it.
             </p>
           )}
           {(!images || images.length === 0) && (
             <p style={{ fontSize: '12px', color: '#ca8a04', marginTop: '8px', margin: '8px 0 0 0' }}>
-              ⚠️ No banner image generated yet. Use "Generate Graphics" first for best results.
+              ⚠️ No banner image yet. Run "Generate Graphics" first for the cleanest publish.
             </p>
           )}
+
+          <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid #e5e7eb' }}>
+            <p style={{ fontSize: '12px', color: '#444', margin: '0 0 8px 0', fontWeight: 600 }}>
+              Paste Published Facebook Event URL
+            </p>
+            <p style={{ fontSize: '11px', color: '#666', margin: '0 0 8px 0' }}>
+              Add this after publishing so IMC can reuse the canonical Event link everywhere downstream.
+            </p>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <input
+                value={eventUrlInput}
+                onChange={(e) => setEventUrlInput(e.target.value)}
+                placeholder="https://www.facebook.com/events/123456789"
+                style={{
+                  flex: 1,
+                  minWidth: '260px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '8px',
+                  padding: '8px 10px',
+                  fontSize: '12px',
+                }}
+              />
+              <button
+                type="button"
+                onClick={handleSaveUrl}
+                className="btn-secondary"
+                disabled={savingUrl}
+                style={{ padding: '8px 12px', fontSize: '12px' }}
+              >
+                {savingUrl ? 'Saving...' : 'Save URL'}
+              </button>
+            </div>
+            {saveStatus && (
+              <p style={{ fontSize: '11px', margin: '8px 0 0 0', color: saveStatus.type === 'success' ? '#16a34a' : '#dc2626' }}>
+                {saveStatus.type === 'success' ? '✅ ' : '⚠️ '}
+                {saveStatus.message}
+              </p>
+            )}
+          </div>
         </>
       )}
     </div>

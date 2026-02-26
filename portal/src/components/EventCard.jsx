@@ -11,6 +11,9 @@ export default function EventCard({ event }) {
         <div>
           <h3 className="text-lg m-0">{event.title}</h3>
           <p className="text-sm text-gray-500 mt-1 mb-0">{event.genre}</p>
+          {event.performanceZoneName && (
+            <p className="text-xs text-gray-500 mt-1 mb-0">Zone: {event.performanceZoneName}</p>
+          )}
         </div>
         <div className="text-right">
           <div className="text-xs font-semibold text-[#c8a45e] bg-[#c8a45e1a] px-2 py-1 rounded">{formatted}</div>

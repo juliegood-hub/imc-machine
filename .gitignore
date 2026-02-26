@@ -1,5 +1,7 @@
 node_modules
 dist
+.DS_Store
+.codex_patch_test.tmp
 .env
 .env*.local
 service-account.json

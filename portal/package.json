@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test tests/**/*.test.mjs",
+    "experiment:facebook": "node scripts/facebook-event-experiments.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0",

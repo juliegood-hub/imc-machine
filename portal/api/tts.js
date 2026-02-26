@@ -50,11 +50,11 @@ const FALLBACK_VOICES = {
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return res.status(405).json({ error: 'Send this endpoint a POST request and I can generate audio.' });
   }
 
   const { text, speaker = 'ALEX' } = req.body;
-  if (!text) return res.status(400).json({ error: 'text is required' });
+  if (!text) return res.status(400).json({ error: 'Give me text to speak and I will handle the audio.' });
 
   try {
     const token = await getAccessToken();

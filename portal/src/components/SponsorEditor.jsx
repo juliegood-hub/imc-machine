@@ -52,7 +52,7 @@ export default function SponsorEditor({ sponsors = [], onChange }) {
                 <div className="w-8 h-8 rounded bg-gray-200 flex items-center justify-center text-gray-400 text-xs">🏢</div>
               )}
               <div>
-                <span className="text-sm font-semibold text-gray-800">{sponsor.name || 'New Sponsor'}</span>
+                <span className="text-sm font-semibold text-gray-800">{sponsor.name || 'New sponsor draft'}</span>
                 <span className="text-xs text-gray-500 ml-2">{tierInfo(sponsor.tier).label}</span>
               </div>
             </div>
@@ -61,7 +61,7 @@ export default function SponsorEditor({ sponsors = [], onChange }) {
 
           {expanded === i && (
             <div className="p-4 space-y-3 border-t border-gray-100">
-              <p className="text-xs text-gray-400">* Required fields</p>
+              <p className="text-xs text-gray-400">* Fill the required fields and I can carry this through every channel.</p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Sponsor Name <span className="text-red-500">*</span></label>
@@ -112,7 +112,7 @@ export default function SponsorEditor({ sponsors = [], onChange }) {
               <div className="flex justify-end pt-2">
                 <button type="button" onClick={() => removeSponsor(i)}
                   className="text-xs text-red-500 hover:text-red-700 bg-transparent border-none cursor-pointer">
-                  🗑️ Remove Sponsor
+                  🗑️ Remove sponsor
                 </button>
               </div>
             </div>
@@ -125,7 +125,7 @@ export default function SponsorEditor({ sponsors = [], onChange }) {
         onClick={addSponsor}
         className="w-full py-3 border-2 border-dashed border-gray-300 rounded-lg text-sm text-gray-500 hover:border-[#c8a45e] hover:text-[#c8a45e] bg-transparent cursor-pointer transition-colors"
       >
-        + Add Sponsor
+        + Add Another Sponsor
       </button>
     </div>
   );

@@ -23,11 +23,11 @@ export default async function handler(req, res) {
   
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET' && req.method !== 'POST') {
-    return res.status(405).json({ error: 'GET/POST only' });
+    return res.status(405).json({ error: 'Use GET or POST here and I can help.' });
   }
 
   const { action } = req.query;
-  if (!action) return res.status(400).json({ error: 'Missing action parameter' });
+  if (!action) return res.status(400).json({ error: 'Tell me which OAuth action you want me to run.' });
 
   try {
     let result;
@@ -68,7 +68,7 @@ export default async function handler(req, res) {
         break;
         
       default:
-        return res.status(400).json({ error: `Unknown action: ${action}` });
+        return res.status(400).json({ error: `I do not recognize "${action}" yet. Pick one of the OAuth actions and I will run it.` });
     }
     
     // Handle redirects for callback actions
@@ -97,7 +97,7 @@ export default async function handler(req, res) {
 
 async function getFacebookAuthUrl() {
   const appId = process.env.META_APP_ID;
-  if (!appId) throw new Error('META_APP_ID not configured');
+  if (!appId) throw new Error('I need META_APP_ID before I can open Facebook OAuth.');
   
   const redirectUri = 'https://imc.goodcreativemedia.com/api/oauth?action=fb-callback';
   const scopes = [
@@ -124,17 +124,17 @@ async function getFacebookAuthUrl() {
 
 async function handleFacebookCallback({ code, state, error, error_description }) {
   if (error) {
-    throw new Error(`Facebook OAuth error: ${error_description || error}`);
+    throw new Error(`Facebook OAuth pushed back: ${error_description || error}`);
   }
   
-  if (!code) throw new Error('No authorization code received from Facebook');
+  if (!code) throw new Error('I did not receive a Facebook authorization code.');
   
   // Verify state parameter
   await verifyOAuthState('facebook', state);
   
   const appId = process.env.META_APP_ID;
   const appSecret = process.env.META_APP_SECRET;
-  if (!appId || !appSecret) throw new Error('Meta app credentials not configured');
+  if (!appId || !appSecret) throw new Error('I need META_APP_ID and META_APP_SECRET before I can finish Facebook connection.');
   
   const redirectUri = 'https://imc.goodcreativemedia.com/api/oauth?action=fb-callback';
   
@@ -149,7 +149,7 @@ async function handleFacebookCallback({ code, state, error, error_description })
     const tokenData = await tokenResponse.json();
     
     if (tokenData.error) {
-      throw new Error(`Token exchange failed: ${tokenData.error.message}`);
+      throw new Error(`I could not exchange the Facebook token yet: ${tokenData.error.message}`);
     }
     
     const shortLivedToken = tokenData.access_token;
@@ -164,7 +164,7 @@ async function handleFacebookCallback({ code, state, error, error_description })
     const longLivedData = await longLivedResponse.json();
     
     if (longLivedData.error) {
-      throw new Error(`Long-lived token exchange failed: ${longLivedData.error.message}`);
+      throw new Error(`I could not get the long-lived Facebook token yet: ${longLivedData.error.message}`);
     }
     
     const longLivedUserToken = longLivedData.access_token;
@@ -177,11 +177,11 @@ async function handleFacebookCallback({ code, state, error, error_description })
     const pagesData = await pagesResponse.json();
     
     if (pagesData.error) {
-      throw new Error(`Failed to get pages: ${pagesData.error.message}`);
+      throw new Error(`I could not read your Facebook pages yet: ${pagesData.error.message}`);
     }
     
     if (!pagesData.data || pagesData.data.length === 0) {
-      throw new Error('No Facebook pages found. You need to be an admin of a Facebook page to connect.');
+      throw new Error('I could not find any Facebook Pages on this account. Make sure you are a Page admin, then try again.');
     }
     
     // Use the first page (in a real app, you might let user choose)
@@ -242,7 +242,7 @@ async function handleFacebookCallback({ code, state, error, error_description })
 
 async function getYouTubeAuthUrl() {
   const clientId = process.env.YOUTUBE_CLIENT_ID;
-  if (!clientId) throw new Error('YOUTUBE_CLIENT_ID not configured');
+  if (!clientId) throw new Error('I need YOUTUBE_CLIENT_ID before I can open YouTube OAuth.');
   
   const redirectUri = 'https://imc.goodcreativemedia.com/api/oauth?action=yt-callback';
   const scopes = [
@@ -268,17 +268,17 @@ async function getYouTubeAuthUrl() {
 
 async function handleYouTubeCallback({ code, state, error }) {
   if (error) {
-    throw new Error(`YouTube OAuth error: ${error}`);
+    throw new Error(`YouTube OAuth pushed back: ${error}`);
   }
   
-  if (!code) throw new Error('No authorization code received from YouTube');
+  if (!code) throw new Error('I did not receive a YouTube authorization code.');
   
   // Verify state parameter
   await verifyOAuthState('youtube', state);
   
   const clientId = process.env.YOUTUBE_CLIENT_ID;
   const clientSecret = process.env.YOUTUBE_CLIENT_SECRET;
-  if (!clientId || !clientSecret) throw new Error('YouTube credentials not configured');
+  if (!clientId || !clientSecret) throw new Error('I need YouTube client credentials before I can finish this connection.');
   
   const redirectUri = 'https://imc.goodcreativemedia.com/api/oauth?action=yt-callback';
   
@@ -299,13 +299,13 @@ async function handleYouTubeCallback({ code, state, error }) {
     const tokenData = await tokenResponse.json();
     
     if (tokenData.error) {
-      throw new Error(`Token exchange failed: ${tokenData.error_description || tokenData.error}`);
+      throw new Error(`I could not exchange the YouTube token yet: ${tokenData.error_description || tokenData.error}`);
     }
     
     const { access_token, refresh_token, expires_in } = tokenData;
     
     if (!refresh_token) {
-      throw new Error('No refresh token received. User may have already granted access. Try revoking access first.');
+      throw new Error('I did not get a YouTube refresh token. Revoke access in Google and reconnect once, then we should be good.');
     }
     
     // Get channel information
@@ -315,11 +315,11 @@ async function handleYouTubeCallback({ code, state, error }) {
     const channelData = await channelResponse.json();
     
     if (channelData.error) {
-      throw new Error(`Failed to get channel info: ${channelData.error.message}`);
+      throw new Error(`I could not read YouTube channel info yet: ${channelData.error.message}`);
     }
     
     if (!channelData.items || channelData.items.length === 0) {
-      throw new Error('No YouTube channel found for this account');
+      throw new Error('I could not find a YouTube channel on this account yet.');
     }
     
     const channel = channelData.items[0];
@@ -354,7 +354,7 @@ async function handleYouTubeCallback({ code, state, error }) {
 
 async function getLinkedInAuthUrl() {
   const clientId = (process.env.LINKEDIN_CLIENT_ID || '').replace(/[\s"\\n]+/g, '').trim();
-  if (!clientId) throw new Error('LINKEDIN_CLIENT_ID not configured');
+  if (!clientId) throw new Error('I need LINKEDIN_CLIENT_ID before I can open LinkedIn OAuth.');
   
   const redirectUri = 'https://imc.goodcreativemedia.com/api/oauth?action=li-callback';
   const scopes = [
@@ -380,17 +380,17 @@ async function getLinkedInAuthUrl() {
 
 async function handleLinkedInCallback({ code, state, error, error_description }) {
   if (error) {
-    throw new Error(`LinkedIn OAuth error: ${error_description || error}`);
+    throw new Error(`LinkedIn OAuth pushed back: ${error_description || error}`);
   }
   
-  if (!code) throw new Error('No authorization code received from LinkedIn');
+  if (!code) throw new Error('I did not receive a LinkedIn authorization code.');
   
   // Verify state parameter
   await verifyOAuthState('linkedin', state);
   
   const clientId = (process.env.LINKEDIN_CLIENT_ID || '').replace(/[\s"\\n]+/g, '').trim();
   const clientSecret = (process.env.LINKEDIN_CLIENT_SECRET || '').replace(/[\s"\\n]+/g, '').trim();
-  if (!clientId || !clientSecret) throw new Error('LinkedIn credentials not configured');
+  if (!clientId || !clientSecret) throw new Error('I need LinkedIn client credentials before I can finish this connection.');
   
   const redirectUri = 'https://imc.goodcreativemedia.com/api/oauth?action=li-callback';
   
@@ -412,10 +412,10 @@ async function handleLinkedInCallback({ code, state, error, error_description })
     console.log('LinkedIn token response:', tokenResponse.status, tokenText.slice(0, 500));
     
     let tokenData;
-    try { tokenData = JSON.parse(tokenText); } catch { throw new Error(`LinkedIn non-JSON response: ${tokenText.slice(0, 200)}`); }
+    try { tokenData = JSON.parse(tokenText); } catch { throw new Error(`LinkedIn returned an unexpected response: ${tokenText.slice(0, 200)}`); }
     
     if (tokenData.error) {
-      throw new Error(`Token exchange failed: ${tokenData.error_description || tokenData.error} (HTTP ${tokenResponse.status})`);
+      throw new Error(`I could not exchange the LinkedIn token yet: ${tokenData.error_description || tokenData.error} (HTTP ${tokenResponse.status})`);
     }
     
     const { access_token, expires_in } = tokenData;
@@ -430,7 +430,7 @@ async function handleLinkedInCallback({ code, state, error, error_description })
     const profileData = await profileResponse.json();
     
     if (profileData.error) {
-      throw new Error(`Failed to get profile: ${profileData.error.message}`);
+      throw new Error(`I could not read the LinkedIn profile yet: ${profileData.error.message}`);
     }
     
     // Get organizations user can post to (may fail without rw_organization_admin scope)
@@ -493,7 +493,7 @@ async function storeConnection(connectionData) {
     
   if (error) {
     console.error('Error storing connection:', error);
-    throw new Error(`Failed to store ${connectionData.platform} connection`);
+    throw new Error(`I could not save the ${connectionData.platform} connection yet.`);
   }
   
   return data;
@@ -514,7 +514,7 @@ async function checkAllConnections() {
     ['facebook', 'instagram', 'youtube', 'linkedin'].forEach(platform => {
       connections[platform] = {
         connected: false,
-        status: 'Not connected'
+        status: 'Ready to connect'
       };
     });
     
@@ -526,7 +526,7 @@ async function checkAllConnections() {
       if (platform === 'facebook') {
         connections.facebook = {
           connected: true,
-          status: 'Connected',
+          status: 'Connected and ready',
           page_name: conn.page_name,
           connected_at: conn.connected_at
         };
@@ -534,7 +534,7 @@ async function checkAllConnections() {
         if (conn.instagram_account) {
           connections.instagram = {
             connected: true,
-            status: 'Connected',
+            status: 'Connected and ready',
             username: conn.instagram_account.username,
             connected_at: conn.connected_at
           };
@@ -544,7 +544,7 @@ async function checkAllConnections() {
         const hasRefresh = !!conn.refresh_token;
         connections.youtube = {
           connected: hasRefresh,
-          status: hasRefresh ? 'Connected' : 'Token expired',
+          status: hasRefresh ? 'Connected and ready' : 'Reconnect needed',
           channel_name: conn.channel_name,
           expires_at: conn.expires_at,
           connected_at: conn.connected_at
@@ -555,7 +555,7 @@ async function checkAllConnections() {
         
         connections.linkedin = {
           connected: !isExpired,
-          status: isExpired ? 'Token expired' : daysLeft > 30 ? 'Connected' : `Expires in ${daysLeft} days`,
+          status: isExpired ? 'Reconnect needed' : daysLeft > 30 ? 'Connected and ready' : `Reconnect in about ${daysLeft} days`,
           user_name: conn.user_name,
           organizations: conn.organizations,
           expires_at: conn.expires_at,
@@ -573,7 +573,7 @@ async function checkAllConnections() {
 }
 
 async function disconnectService(platform) {
-  if (!platform) throw new Error('Platform parameter required');
+  if (!platform) throw new Error('Tell me which platform you want to disconnect.');
   
   const { error } = await supabase
     .from('app_settings')
@@ -590,7 +590,7 @@ async function disconnectService(platform) {
       .eq('key', 'oauth_instagram');
   }
   
-  return { message: `${platform} disconnected successfully` };
+  return { message: `${platform} is disconnected. You can reconnect anytime.` };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -609,7 +609,7 @@ async function storeOAuthState(platform, state) {
 }
 
 async function verifyOAuthState(platform, state) {
-  if (!state) throw new Error('Missing state parameter');
+  if (!state) throw new Error('I did not receive OAuth state for verification.');
   
   const { data, error } = await supabase
     .from('app_settings')
@@ -618,7 +618,7 @@ async function verifyOAuthState(platform, state) {
     .single();
     
   if (error || !data) {
-    throw new Error('Invalid OAuth state');
+    throw new Error('This OAuth session token is invalid. Start the connection again and I will pick it up.');
   }
   
   const storedState = data.value.state;
@@ -627,7 +627,7 @@ async function verifyOAuthState(platform, state) {
   
   // State should match and be less than 10 minutes old
   if (storedState !== state || (now - createdAt) > 10 * 60 * 1000) {
-    throw new Error('Invalid or expired OAuth state');
+    throw new Error('That OAuth session token expired. Start the connection again and I will continue from there.');
   }
   
   // Clean up used state

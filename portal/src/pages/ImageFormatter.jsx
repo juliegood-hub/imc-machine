@@ -31,7 +31,7 @@ export default function ImageFormatter() {
       setSourceImage({ url, width: img.naturalWidth, height: img.naturalHeight, name: 'image' });
       setStep(1);
     };
-    img.onerror = () => alert('Could not load image from URL');
+    img.onerror = () => alert('I could not load that image URL yet. Check the link and try again.');
     img.src = url;
   };
 

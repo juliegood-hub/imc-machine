@@ -24,14 +24,14 @@ export default function Settings() {
   });
 
   const [connections, setConnections] = useState({
-    openai: { connected: false, status: 'Not connected' },
-    google_drive: { connected: false, status: 'Not connected' },
-    facebook: { connected: false, status: 'Not connected' },
-    instagram: { connected: false, status: 'Not connected' },
-    youtube: { connected: false, status: 'Not connected' },
-    linkedin: { connected: false, status: 'Not connected' },
-    eventbrite: { connected: false, status: 'Not connected' },
-    mailchimp: { connected: false, status: 'Not connected' },
+    openai: { connected: false, status: 'Ready to connect' },
+    google_drive: { connected: false, status: 'Ready to connect' },
+    facebook: { connected: false, status: 'Ready to connect' },
+    instagram: { connected: false, status: 'Ready to connect' },
+    youtube: { connected: false, status: 'Ready to connect' },
+    linkedin: { connected: false, status: 'Ready to connect' },
+    eventbrite: { connected: false, status: 'Ready to connect' },
+    mailchimp: { connected: false, status: 'Ready to connect' },
   });
 
   const [saving, setSaving] = useState(false);
@@ -83,19 +83,19 @@ export default function Settings() {
           ...data.connections,
           openai: { 
             connected: !!import.meta.env.VITE_OPENAI_API_KEY, 
-            status: import.meta.env.VITE_OPENAI_API_KEY ? 'Connected' : 'API key required' 
+            status: import.meta.env.VITE_OPENAI_API_KEY ? 'Connected and ready' : 'Needs API key' 
           },
           google_drive: { 
             connected: !!venue.driveRootFolderId, 
-            status: venue.driveRootFolderId ? 'Connected' : 'Not connected' 
+            status: venue.driveRootFolderId ? 'Connected and ready' : 'Ready to connect' 
           },
           eventbrite: { 
             connected: !!import.meta.env.VITE_EVENTBRITE_TOKEN, 
-            status: import.meta.env.VITE_EVENTBRITE_TOKEN ? 'Connected' : 'Token required' 
+            status: import.meta.env.VITE_EVENTBRITE_TOKEN ? 'Connected and ready' : 'Needs token' 
           },
           mailchimp: { 
             connected: !!import.meta.env.VITE_MAILCHIMP_API_KEY, 
-            status: import.meta.env.VITE_MAILCHIMP_API_KEY ? 'Connected' : 'API key required' 
+            status: import.meta.env.VITE_MAILCHIMP_API_KEY ? 'Connected and ready' : 'Needs API key' 
           },
         }));
       }
@@ -113,14 +113,14 @@ export default function Settings() {
       if (status === 'success') {
         setShowToast({
           type: 'success',
-          message: `Successfully connected to ${connected.charAt(0).toUpperCase() + connected.slice(1)}!`
+          message: `Beautiful. ${connected.charAt(0).toUpperCase() + connected.slice(1)} is connected.`
         });
         // Refresh connection status
         setTimeout(checkConnectionStatuses, 1000);
       } else if (status === 'error') {
         setShowToast({
           type: 'error', 
-          message: `Failed to connect to ${connected}: ${message || 'Unknown error'}`
+          message: `I could not connect ${connected} yet: ${message || 'Unknown error'}`
         });
       }
       
@@ -139,10 +139,10 @@ export default function Settings() {
         // Store writing tone as a custom field
         writingTone: venueDefaults.defaultWritingTone,
       });
-      alert('Venue defaults saved successfully!');
+      alert('Perfect. Venue defaults are saved.');
     } catch (err) {
       console.error('Failed to save venue defaults:', err);
-      alert('Failed to save settings: ' + err.message);
+      alert('I hit a snag saving settings: ' + err.message);
     } finally {
       setSaving(false);
     }
@@ -154,16 +154,16 @@ export default function Settings() {
         notifications,
         updatedAt: new Date().toISOString(),
       }));
-      alert('Notification preferences saved!');
+      alert('Done. Notification preferences are saved.');
     } catch (err) {
       console.error('Failed to save notifications:', err);
-      alert('Failed to save notification preferences');
+      alert('I hit a snag saving notification preferences.');
     }
   };
 
   const handleDeleteAccount = async () => {
     if (deleteConfirmation !== user.email) {
-      alert('Please type your email address exactly to confirm deletion.');
+      alert('Type your email exactly as shown so I can confirm deletion.');
       return;
     }
 
@@ -173,18 +173,18 @@ export default function Settings() {
 
     try {
       // In a real implementation, this would call a secure delete endpoint
-      alert('Account deletion request submitted. This feature requires admin approval for safety.');
+      alert('Account deletion request is submitted. For safety, an admin review is required.');
       setShowDeleteAccount(false);
       setDeleteConfirmation('');
     } catch (err) {
       console.error('Failed to delete account:', err);
-      alert('Failed to delete account: ' + err.message);
+      alert('I hit a snag deleting the account: ' + err.message);
     }
   };
 
   const connectService = async (service) => {
     if (['openai', 'google_drive', 'eventbrite', 'mailchimp'].includes(service)) {
-      alert(`Connecting to ${service}... This feature requires manual API key configuration. Contact admin for setup.`);
+      alert(`To connect ${service}, add the API keys in admin setup first. Once that is done, I can handle the rest.`);
       return;
     }
 
@@ -204,7 +204,7 @@ export default function Settings() {
           authAction = 'li-auth-url';
           break;
         default:
-          alert(`OAuth not supported for ${service}`);
+          alert(`OAuth is not wired for ${service} yet.`);
           return;
       }
       
@@ -215,11 +215,11 @@ export default function Settings() {
         // Redirect to OAuth provider
         window.location.href = data.authUrl;
       } else {
-        throw new Error(data.error || 'Failed to get authorization URL');
+        throw new Error(data.error || 'I could not get the authorization URL yet.');
       }
     } catch (err) {
       console.error(`Failed to connect to ${service}:`, err);
-      alert(`Failed to connect to ${service}: ${err.message}`);
+      alert(`I hit a snag connecting ${service}: ${err.message}`);
     } finally {
       setConnectingTo(null);
     }
@@ -239,22 +239,22 @@ export default function Settings() {
       if (data.success) {
         setShowToast({
           type: 'success',
-          message: `Successfully disconnected ${service}`
+          message: `${service} is disconnected. You can reconnect anytime.`
         });
         await checkConnectionStatuses();
       } else {
-        throw new Error(data.error || 'Failed to disconnect');
+        throw new Error(data.error || 'I could not disconnect that service yet.');
       }
     } catch (err) {
       console.error(`Failed to disconnect ${service}:`, err);
-      alert(`Failed to disconnect ${service}: ${err.message}`);
+      alert(`I hit a snag disconnecting ${service}: ${err.message}`);
     }
   };
 
   return (
     <div className="p-4 md:p-8 max-w-4xl">
       <h1 className="text-3xl mb-6">⚙️ Settings</h1>
-      <p className="text-xs text-gray-400 mb-6">* Required fields</p>
+      <p className="text-xs text-gray-400 mb-6">Use this page to tune defaults, notifications, and integrations in one place.</p>
 
       {/* Account Information */}
       <div className="card mb-6">
@@ -407,7 +407,7 @@ export default function Settings() {
               <div>
                 <div className="font-medium text-green-800">Connected ✅</div>
                 <p className="text-sm text-green-600 mt-1">
-                  Your Google Drive folder is set up. New events will automatically get Drive folders.
+                  Your Drive folder is ready. New events will get folders automatically.
                 </p>
               </div>
               <a
@@ -424,15 +424,15 @@ export default function Settings() {
           <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
             <div className="flex items-center justify-between">
               <div>
-                <div className="font-medium text-gray-700">Not connected</div>
+                <div className="font-medium text-gray-700">Ready to connect</div>
                 <p className="text-sm text-gray-500 mt-1">
-                  Set up Google Drive to auto-organize all your event content, press releases, and images.
+                  Connect Google Drive and I will auto-organize event content, press releases, and images.
                 </p>
               </div>
               <button
                 onClick={async () => {
                   if (!venue.name && !venue.businessName) {
-                    alert('Please set up your venue/business name first in Venue Setup.');
+                    alert('Set your venue or business name first in Venue Setup, then come right back.');
                     return;
                   }
                   setConnectingTo('google_drive');
@@ -453,13 +453,13 @@ export default function Settings() {
                         driveRootFolderId: data.driveRootFolderId,
                         driveBrandFolderId: data.driveBrandFolderId,
                       });
-                      setShowToast({ type: 'success', message: 'Google Drive folder created! 📁' });
+                      setShowToast({ type: 'success', message: 'Done. Google Drive folder is ready. 📁' });
                     } else {
-                      throw new Error(data.error || 'Failed to create Drive folder');
+                      throw new Error(data.error || 'I could not create the Drive folder yet.');
                     }
                   } catch (err) {
                     console.error('Drive setup failed:', err);
-                    setShowToast({ type: 'error', message: 'Drive setup failed: ' + err.message });
+                    setShowToast({ type: 'error', message: 'Drive setup hit a snag: ' + err.message });
                   } finally {
                     setConnectingTo(null);
                   }
@@ -471,7 +471,7 @@ export default function Settings() {
                     : 'bg-[#c8a45e] text-white hover:bg-[#b8945e]'
                 }`}
               >
-                {connectingTo === 'google_drive' ? 'Setting up...' : 'Set Up Google Drive'}
+                {connectingTo === 'google_drive' ? 'Setting up...' : 'Connect Google Drive'}
               </button>
             </div>
           </div>
@@ -552,7 +552,7 @@ export default function Settings() {
                           : 'bg-[#c8a45e] text-white hover:bg-[#b8945e]'
                       }`}
                     >
-                      {connectingTo === service ? 'Connecting...' : 'Connect'}
+                      {connectingTo === service ? 'Connecting...' : 'Connect It'}
                     </button>
                   )}
                 </div>
@@ -564,7 +564,7 @@ export default function Settings() {
 
       {/* Danger Zone */}
       <div className="card border-red-200 bg-red-50">
-        <h3 className="text-lg mb-4 text-red-700">Danger Zone</h3>
+        <h3 className="text-lg mb-4 text-red-700">Use With Care</h3>
         
         <div className="space-y-4">
           <div className="p-4 bg-white border border-red-200 rounded-lg">
@@ -572,7 +572,7 @@ export default function Settings() {
               <div>
                 <h4 className="font-medium text-red-700">Delete Account</h4>
                 <p className="text-sm text-red-600 mt-1">
-                  Permanently delete your account and all data. This action cannot be undone.
+                  Permanently delete your account and all data. This cannot be undone.
                 </p>
               </div>
               <button 
@@ -589,7 +589,7 @@ export default function Settings() {
               <div>
                 <h4 className="font-medium text-yellow-700">Sign Out</h4>
                 <p className="text-sm text-yellow-600 mt-1">
-                  Sign out of your account on this device
+                  Sign out on this device.
                 </p>
               </div>
               <button 
@@ -626,7 +626,7 @@ export default function Settings() {
           <div className="bg-white rounded-xl max-w-md w-full p-6">
             <h3 className="text-lg font-semibold mb-3 text-red-700">Delete Account</h3>
             <p className="text-gray-700 mb-4">
-              This will permanently delete your account and all associated data including:
+              This will permanently delete your account and all associated data, including:
             </p>
             <ul className="text-sm text-gray-600 mb-4 space-y-1">
               <li>• All events and campaigns</li>
@@ -635,7 +635,7 @@ export default function Settings() {
               <li>• All preferences and connections</li>
             </ul>
             <p className="text-sm font-medium text-red-700 mb-4">
-              This action cannot be undone.
+              This cannot be undone.
             </p>
             
             <div className="mb-4">

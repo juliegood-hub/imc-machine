@@ -7,17 +7,17 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Send this endpoint a POST request and I can send it.' });
 
   const { to, toName, from, fromName, subject, html, replyTo } = req.body;
 
   if (!to || !subject || !html) {
-    return res.status(400).json({ error: 'Missing required fields: to, subject, html' });
+    return res.status(400).json({ error: 'I need `to`, `subject`, and `html` before I can send this email.' });
   }
 
   const RESEND_KEY = process.env.RESEND_API_KEY;
   if (!RESEND_KEY) {
-    return res.status(500).json({ error: 'Resend API key not configured' });
+    return res.status(500).json({ error: 'I need RESEND_API_KEY before I can send email from here.' });
   }
 
   try {
@@ -39,9 +39,9 @@ export default async function handler(req, res) {
     const data = await response.json();
 
     if (data.id) {
-      return res.status(200).json({ success: true, id: data.id, message: `Email sent to ${to}` });
+      return res.status(200).json({ success: true, id: data.id, message: `Perfect. I sent that email to ${to}.` });
     } else {
-      return res.status(400).json({ success: false, error: data.message || 'Send failed' });
+      return res.status(400).json({ success: false, error: data.message || 'I could not send that email yet.' });
     }
   } catch (err) {
     console.error('Email send error:', err);

@@ -1,8 +1,8 @@
 import { parseLocalDate } from '../lib/dateUtils';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useVenue } from '../context/VenueContext';
 import { useAuth } from '../context/AuthContext';
-import { upsertCampaign, saveGeneratedContent } from '../lib/supabase';
+import { upsertCampaign } from '../lib/supabase';
 import { supabase } from '../lib/supabase';
 import ChannelToggle from '../components/ChannelToggle';
 import GeneratedContent from '../components/GeneratedContent';
@@ -15,17 +15,24 @@ const CHANNELS = [
   { key: 'email', label: 'Email', icon: '📧' },
   { key: 'sms', label: 'SMS', icon: '💬' },
   { key: 'social', label: 'Social (FB / IG / X / LinkedIn)', icon: '📱' },
+  { key: 'video', label: 'Video (FB Reels / IG Reel+Story / YouTube / LinkedIn)', icon: '🎬' },
 ];
 
 export default function IMCComposer() {
   const { events, venue, updateEvent } = useVenue();
   const { user } = useAuth();
   const [selectedEventId, setSelectedEventId] = useState('');
-  const [channels, setChannels] = useState({ press: true, calendar: true, email: true, sms: true, social: true });
+  const [channels, setChannels] = useState({ press: true, calendar: true, email: true, sms: true, social: true, video: true });
   const [generated, setGenerated] = useState({});
   const [generating, setGenerating] = useState(false);
   const [generatingChannel, setGeneratingChannel] = useState('');
   const [images, setImages] = useState([]);
+  const [videoAsset, setVideoAsset] = useState(null);
+  const [uploadingVideo, setUploadingVideo] = useState(false);
+  const [videoVariantJobId, setVideoVariantJobId] = useState('');
+  const [videoVariantJob, setVideoVariantJob] = useState(null);
+  const [videoVariants, setVideoVariants] = useState(null);
+  const [queuingVariants, setQueuingVariants] = useState(false);
   const [generatingImages, setGeneratingImages] = useState(false);
   const [distributed, setDistributed] = useState({});
   const [research, setResearch] = useState(null);
@@ -53,6 +60,43 @@ export default function IMCComposer() {
     })();
   }, [selectedEventId]);
 
+  useEffect(() => {
+    if (!videoVariantJobId) return;
+    let stopped = false;
+    let timer = null;
+
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/distribute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'get-video-variant-job', jobId: videoVariantJobId }),
+        });
+        const data = await res.json();
+        if (!stopped && data.success && data.job) {
+          setVideoVariantJob(data.job);
+          setVideoVariants(data.job.outputs || null);
+          if (['pending', 'processing'].includes(data.job.status)) {
+            timer = setTimeout(poll, 5000);
+            return;
+          }
+        }
+      } catch (err) {
+        if (!stopped) {
+          timer = setTimeout(poll, 7000);
+          return;
+        }
+      }
+      timer = null;
+    };
+
+    poll();
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [videoVariantJobId]);
+
   // Build venue object from the event's own venue fields (not the logged-in user's profile)
   function getEventVenue(event) {
     if (!event) return venue; // fallback to profile venue
@@ -71,22 +115,166 @@ export default function IMCComposer() {
     };
   }
 
+  function cleanText(value) {
+    return String(value || '').trim();
+  }
+
+  function normalizeEventDate(value) {
+    const raw = cleanText(value);
+    const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+    return match ? match[1] : raw;
+  }
+
+  function buildQrCodeImageUrl(value, size = 320) {
+    const url = cleanText(value);
+    if (!/^https?:\/\//i.test(url)) return '';
+    return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&margin=0&data=${encodeURIComponent(url)}`;
+  }
+
+  function pickFirstValidUrl(...values) {
+    for (const value of values.flat()) {
+      const candidate = cleanText(value);
+      if (!candidate) continue;
+      if (/^https?:\/\//i.test(candidate)) return candidate;
+    }
+    return '';
+  }
+
+  function buildDistributionPayload(event) {
+    const eventVenue = getEventVenue(event);
+    const ticketLink = pickFirstValidUrl(
+      event?.ticketLink,
+      event?.ticket_link,
+      event?.registrationLink,
+      event?.rsvpLink,
+      event?.signupLink,
+      event?.eventUrl,
+      event?.url,
+      eventVenue?.website,
+      event?.venueWebsite
+    );
+
+    const normalizedEvent = {
+      ...event,
+      title: cleanText(event?.title),
+      description: cleanText(event?.description),
+      date: normalizeEventDate(event?.date),
+      time: cleanText(event?.time),
+      endTime: cleanText(event?.endTime),
+      venue: cleanText(eventVenue?.name || event?.venue),
+      venueAddress: cleanText(eventVenue?.address || event?.venueAddress),
+      venueCity: cleanText(eventVenue?.city || event?.venueCity),
+      venueState: cleanText(eventVenue?.state || event?.venueState),
+      venueZip: cleanText(eventVenue?.zip || event?.venueZip),
+      venueWebsite: cleanText(eventVenue?.website || event?.venueWebsite),
+      ticketLink,
+    };
+
+    const normalizedVenue = {
+      ...eventVenue,
+      name: normalizedEvent.venue,
+      address: normalizedEvent.venueAddress,
+      city: normalizedEvent.venueCity,
+      state: normalizedEvent.venueState,
+      zip: normalizedEvent.venueZip,
+      website: normalizedEvent.venueWebsite,
+    };
+
+    return { event: normalizedEvent, venue: normalizedVenue, ctaLink: ticketLink };
+  }
+
+  function getEventCompleteness(payload) {
+    const event = payload?.event || {};
+    const venueData = payload?.venue || {};
+    const missing = [];
+
+    if (!cleanText(event.title)) missing.push('title');
+    if (!cleanText(event.date)) missing.push('date');
+    if (!cleanText(event.time)) missing.push('start time');
+    if (!cleanText(event.venue || venueData.name)) missing.push('venue name');
+    if (!cleanText(event.venueCity || venueData.city)) missing.push('venue city');
+    if (!cleanText(event.venueState || venueData.state)) missing.push('venue state');
+    if (!cleanText(payload?.ctaLink)) missing.push('CTA link (ticket/RSVP/registration URL)');
+
+    return {
+      ready: missing.length === 0,
+      missing,
+    };
+  }
+
   // Track distribution results in campaigns table
   async function trackCampaign(channel, status, externalUrl, extra = {}) {
-    if (!selectedEventId) return;
+    if (!selectedEventId) return false;
     try {
       await upsertCampaign({
         event_id: selectedEventId,
         channel,
         status,
         external_url: externalUrl || null,
+        external_id: extra.externalId || null,
         sent_at: status === 'sent' || status === 'published' || status === 'created' ? new Date().toISOString() : null,
         recipients: extra.recipients || null,
         error_message: extra.error || null,
+        metadata: extra.metadata || {},
       });
+      return true;
     } catch (err) {
       console.warn(`[Campaign Track] ${channel}:`, err.message);
+      return false;
     }
+  }
+
+  function extractFacebookEventId(url) {
+    const candidate = cleanText(url);
+    if (!candidate) return null;
+    const match = candidate.match(/facebook\.com\/events\/(?:[^/?#]+\/)*(\d+)/i);
+    if (match) return match[1];
+    const queryMatch = candidate.match(/[?&](?:event_id|eid)=(\d+)/i);
+    if (queryMatch) return queryMatch[1];
+    const pathTailMatch = candidate.match(/\/(\d{8,})(?:[/?#]|$)/);
+    if (pathTailMatch) return pathTailMatch[1];
+    return null;
+  }
+
+  function isFacebookEventUrl(url) {
+    const candidate = cleanText(url);
+    if (!/^https?:\/\/(?:www\.)?facebook\.com\/events\//i.test(candidate)) return false;
+    return !!extractFacebookEventId(candidate);
+  }
+
+  async function handleSaveFacebookEventUrl(rawUrl) {
+    const url = cleanText(rawUrl);
+    if (!isFacebookEventUrl(url)) {
+      return { success: false, error: 'Drop in the full Facebook Event URL, like https://www.facebook.com/events/123456789' };
+    }
+
+    const eventId = extractFacebookEventId(url);
+    const saved = await trackCampaign('facebook_event', 'created', url, {
+      externalId: eventId,
+      metadata: {
+        source: 'manual',
+        saved_at: new Date().toISOString(),
+      },
+    });
+    if (!saved) return { success: false, error: 'I could not save that Facebook Event URL yet. Try once more.' };
+
+    setDistributionResults((prev) => ({
+      ...prev,
+      social: {
+        ...(prev?.social || {}),
+        facebook: {
+          ...(prev?.social?.facebook || {}),
+          event: {
+            success: true,
+            source: 'manual',
+            manual: true,
+            eventId,
+            eventUrl: url,
+          },
+        },
+      },
+    }));
+    return { success: true, eventId, eventUrl: url };
   }
 
   function parseSocialContent(socialText) {
@@ -113,6 +301,37 @@ export default function IMCComposer() {
     return sections;
   }
 
+  function parseVideoContent(videoText) {
+    if (!videoText) return {};
+    const sections = {};
+    const regex = /(?:^|\n)\s*(?:\*{1,2}|#{1,3}\s*)?(?:\d+\.\s*)?(?:\*{0,2})(Facebook Reel Caption|Instagram Reel Caption|Instagram Story Overlay Text|LinkedIn Video Post|YouTube Title|YouTube Description|YouTube Tags)(?:\*{0,2})\s*:?\s*\n/gi;
+    let lastKey = null;
+    let lastIndex = 0;
+    const matches = [...videoText.matchAll(regex)];
+    const mapKey = (name) => {
+      const n = name.toLowerCase();
+      if (n.includes('facebook')) return 'facebookReelCaption';
+      if (n.includes('instagram reel')) return 'instagramReelCaption';
+      if (n.includes('instagram story')) return 'instagramStoryOverlayText';
+      if (n.includes('linkedin')) return 'linkedinVideoPost';
+      if (n.includes('youtube title')) return 'youtubeTitle';
+      if (n.includes('youtube description')) return 'youtubeDescription';
+      if (n.includes('youtube tags')) return 'youtubeTags';
+      return null;
+    };
+    matches.forEach((match) => {
+      if (lastKey) {
+        sections[lastKey] = videoText.substring(lastIndex, match.index).trim();
+      }
+      lastKey = mapKey(match[1] || '');
+      lastIndex = match.index + match[0].length;
+    });
+    if (lastKey) {
+      sections[lastKey] = videoText.substring(lastIndex).trim();
+    }
+    return sections;
+  }
+
   const handleGenerate = async () => {
     if (!selectedEvent) return;
     setGenerating(true);
@@ -125,7 +344,7 @@ export default function IMCComposer() {
     try {
       // Step 1: Research (optional, with timeout)
       setResearching(true);
-      setGeneratingChannel('Researching context...');
+      setGeneratingChannel('Researching the context...');
       
       let researchBrief = null;
       try {
@@ -137,14 +356,14 @@ export default function IMCComposer() {
           fetch('/api/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+          body: JSON.stringify({
               action: 'research-context',
               event: selectedEvent,
               venue: getEventVenue(selectedEvent),
               artists: artists
             }),
           }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Research timeout')), 12000)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Research timed out')), 12000)),
         ]);
         
         if (researchRes.ok) {
@@ -162,7 +381,7 @@ export default function IMCComposer() {
       // Step 2: Generate all content types
       const results = {};
       for (const channelKey of activeKeys) {
-        setGeneratingChannel(`Generating ${channelKey}...`);
+        setGeneratingChannel(`Writing ${channelKey}...`);
         
         try {
           const res = await fetch('/api/generate', {
@@ -181,10 +400,10 @@ export default function IMCComposer() {
           if (data.success && data.content) {
             results[channelKey] = data.content[getContentType(channelKey)] || data.content;
           } else {
-            results[channelKey] = `[Error: ${data.error || 'Generation failed'}]`;
+            results[channelKey] = `[I hit a snag: ${data.error || 'Generation did not finish this round.'}]`;
           }
         } catch (err) {
-          results[channelKey] = `[Error generating ${channelKey}: ${err.message}]`;
+          results[channelKey] = `[I hit a snag writing ${channelKey}: ${err.message}]`;
         }
       }
 
@@ -207,7 +426,7 @@ export default function IMCComposer() {
       }
     } catch (err) {
       console.error('Generation error:', err);
-      alert('Error generating content: ' + err.message);
+      alert('Hmm. I hit a snag generating that content: ' + err.message);
     } finally {
       setGenerating(false);
       setResearching(false);
@@ -222,7 +441,8 @@ export default function IMCComposer() {
       'calendar': 'event_listing',
       'email': 'email_blast',
       'sms': 'sms_blast',
-      'social': 'social_post'
+      'social': 'social_post',
+      'video': 'video_social_post',
     };
     return mapping[channelKey] || channelKey;
   }
@@ -265,14 +485,129 @@ export default function IMCComposer() {
           formatKey: 'poster'
         }]);
       } else {
-        throw new Error(data.error || 'Image generation failed');
+        throw new Error(data.error || 'Image generation did not finish this round.');
       }
     } catch (err) {
       console.error('Image generation error:', err);
-      alert('Error generating graphics: ' + err.message);
+      alert('Hmm. I hit a snag generating graphics: ' + err.message);
     } finally {
       setGeneratingImages(false);
       setImageProgress(null);
+    }
+  };
+
+  const queueVideoVariants = async (asset, silent = false) => {
+    if (!selectedEvent || !asset?.url) return;
+    setQueuingVariants(true);
+    try {
+      const res = await fetch('/api/distribute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'queue-video-variants',
+          event: selectedEvent,
+          video: {
+            url: asset.url,
+            path: asset.path,
+            duration: asset.duration,
+            width: asset.width,
+            height: asset.height,
+            size: asset.size,
+            mimeType: asset.type,
+            name: asset.name,
+          },
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Variant queue did not complete.');
+      setVideoVariantJobId(data.job.id);
+      setVideoVariantJob(data.job);
+      setVideoVariants(data.job.outputs || null);
+      if (!silent) alert('🎬 Perfect. I queued the video variants: 9:16, 1:1, and 16:9.');
+    } catch (err) {
+      if (!silent) alert(`⚠️ I could not queue video variants yet: ${err.message}`);
+    } finally {
+      setQueuingVariants(false);
+    }
+  };
+
+  const readVideoMetadata = (file) => new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const el = document.createElement('video');
+    el.preload = 'metadata';
+    el.onloadedmetadata = () => {
+      const meta = {
+        duration: Number(el.duration || 0),
+        width: Number(el.videoWidth || 0),
+        height: Number(el.videoHeight || 0),
+      };
+      URL.revokeObjectURL(objectUrl);
+      resolve(meta);
+    };
+    el.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('I could not read that video metadata.'));
+    };
+    el.src = objectUrl;
+  });
+
+  const handleVideoUpload = async (file) => {
+    if (!file) return;
+    setUploadingVideo(true);
+    setVideoVariantJobId('');
+    setVideoVariantJob(null);
+    setVideoVariants(null);
+    try {
+      const allowed = ['video/mp4', 'video/quicktime', 'video/webm', 'video/x-m4v'];
+      if (!allowed.includes(file.type)) {
+        throw new Error('That format is not supported yet. Upload MP4, MOV, M4V, or WEBM.');
+      }
+
+      const meta = await readVideoMetadata(file);
+      const roundedDuration = Math.round(meta.duration);
+      if (roundedDuration > 65) {
+        throw new Error('That video is too long. Keep uploads at 15s, 30s, or 60s.');
+      }
+      if (![15, 30, 60].includes(roundedDuration)) {
+        alert(`⚠️ Your video is ${roundedDuration}s. Best results are 15s, 30s, or 60s.`);
+      }
+
+      const prepRes = await fetch('/api/distribute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create-upload-url',
+          filename: file.name,
+          contentType: file.type,
+          folder: 'videos',
+        }),
+      });
+      const prepData = await prepRes.json();
+      if (!prepData.success) throw new Error(prepData.error || 'I could not prepare the upload yet.');
+
+      const { error: uploadErr } = await supabase.storage
+        .from(prepData.bucket || 'media')
+        .uploadToSignedUrl(prepData.path, prepData.token, file);
+      if (uploadErr) throw new Error(uploadErr.message);
+
+      const uploadedAsset = {
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        url: prepData.publicUrl,
+        path: prepData.path,
+        duration: roundedDuration,
+        width: meta.width,
+        height: meta.height,
+      };
+      setVideoAsset(uploadedAsset);
+
+      // Auto-queue transcode variants in background (9:16, 1:1, 16:9).
+      await queueVideoVariants(uploadedAsset, true);
+    } catch (err) {
+      alert(`🎬 I hit a snag uploading that video: ${err.message}`);
+    } finally {
+      setUploadingVideo(false);
     }
   };
 
@@ -283,8 +618,21 @@ export default function IMCComposer() {
   const [distributionResults, setDistributionResults] = useState(null);
   const [updatingImages, setUpdatingImages] = useState(false);
 
-  const handleDistribute = async (channelKey, text) => {
+  const handleDistribute = async (channelKey, text, preparedPayload = null) => {
+    if (!selectedEvent) return;
     setDistributed(prev => ({ ...prev, [channelKey]: 'sending' }));
+
+    const payload = preparedPayload || buildDistributionPayload(selectedEvent);
+    const readiness = getEventCompleteness(payload);
+    if (!readiness.ready) {
+      const list = readiness.missing.map((item) => `• ${item}`).join('\n');
+      alert(`Before I distribute, I need a few details:\n\n${list}`);
+      setDistributed(prev => ({ ...prev, [channelKey]: false }));
+      return;
+    }
+
+    const distributionEvent = payload.event;
+    const distributionVenue = payload.venue;
     
     try {
       if (channelKey === 'press') {
@@ -294,8 +642,8 @@ export default function IMCComposer() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: 'send-press-release',
-            event: selectedEvent,
-            venue: getEventVenue(selectedEvent),
+            event: distributionEvent,
+            venue: distributionVenue,
             content: text || generated.press
           }),
         });
@@ -304,22 +652,21 @@ export default function IMCComposer() {
         if (data.success) {
           setDistributed(prev => ({ ...prev, [channelKey]: true }));
           setDistributionResults(prev => ({ ...prev, press: data.results }));
-          alert(`📰 Press release SENT to ${data.sent} media contacts!\n\nSent from: events@goodcreativemedia.com\nRecipients: KSAT 12, KENS 5, TPR, Express-News, SA Current...`);
+          alert(`📰 Beautiful. I sent the press release to ${data.sent} media contacts.\n\nFrom: events@goodcreativemedia.com\nIncludes: KSAT 12, KENS 5, TPR, Express-News, SA Current, and more.`);
           trackCampaign('press', 'sent', null, { recipients: data.sent });
         } else {
           throw new Error(data.error);
         }
       } else if (channelKey === 'calendar') {
         // Submit to Eventbrite with full description + banner image
-        const eventVenue = getEventVenue(selectedEvent);
         const bannerImage = images?.length ? images[0]?.url : null;
         const res = await fetch('/api/distribute', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: 'create-eventbrite',
-            event: selectedEvent,
-            venue: eventVenue,
+            event: distributionEvent,
+            venue: distributionVenue,
             options: {
               description: generated.press || null,
               bannerImage,
@@ -331,7 +678,7 @@ export default function IMCComposer() {
         if (data.success) {
           setDistributed(prev => ({ ...prev, [channelKey]: true }));
           setDistributionResults(prev => ({ ...prev, calendar: data }));
-          alert(`📅 Calendar listing created!\n\n• Eventbrite: ${data.eventUrl || 'CREATED'}${data.logoUrl ? ' (with banner!)' : ''}\n• Do210 & TPR: Auto-submit via calendar worker\n• SA Current & Evvnt: Use wizards below (Cloudflare-protected)`);
+          alert(`📅 Nice. Your calendar distribution is moving.\n\n• Eventbrite: ${data.eventUrl || 'Created'}${data.logoUrl ? ' (banner included)' : ''}\n• Do210 + TPR: queued automatically\n• SA Current + Evvnt: use the wizards below`);
           trackCampaign('eventbrite', 'created', data.eventUrl);
         } else {
           throw new Error(data.error);
@@ -340,7 +687,6 @@ export default function IMCComposer() {
         const parsed = parseSocialContent(text || generated.social);
         const results = {};
         const errors = [];
-        const eventVenue = getEventVenue(selectedEvent);
 
         try {
           const fbRes = await fetch('/api/distribute', {
@@ -348,8 +694,8 @@ export default function IMCComposer() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               action: 'post-facebook',
-              event: selectedEvent,
-              venue: eventVenue,
+              event: distributionEvent,
+              venue: distributionVenue,
               content: { socialFacebook: parsed.facebook || text || generated.social },
               images: images?.length ? { fb_post_landscape: images[0]?.url, fb_event_banner: images[0]?.url } : undefined
             }),
@@ -367,8 +713,8 @@ export default function IMCComposer() {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 action: 'post-instagram',
-                event: selectedEvent,
-                venue: eventVenue,
+                event: distributionEvent,
+                venue: distributionVenue,
                 content: { instagramCaption: parsed.instagram || '' },
                 images: { ig_post_square: images[0]?.url, ig_post_portrait: images[0]?.url }
               }),
@@ -376,7 +722,7 @@ export default function IMCComposer() {
             results.instagram = await igRes.json();
           } catch (err) { errors.push(`Instagram: ${err.message}`); results.instagram = { success: false, error: err.message }; }
         } else {
-          results.instagram = { success: false, error: 'No image available. Generate graphics first.' };
+          results.instagram = { success: false, error: 'I need an image first. Generate graphics, then I can post to Instagram.' };
         }
 
         await new Promise(r => setTimeout(r, 500));
@@ -387,8 +733,8 @@ export default function IMCComposer() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               action: 'post-linkedin',
-              event: selectedEvent,
-              venue: eventVenue,
+              event: distributionEvent,
+              venue: distributionVenue,
               content: { linkedinPost: parsed.linkedin || parsed.facebook || text || generated.social },
               images: images?.length ? { linkedin_post: images[0]?.url } : undefined
             }),
@@ -404,7 +750,7 @@ export default function IMCComposer() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               action: 'post-twitter',
-              event: selectedEvent,
+              event: distributionEvent,
               content: { twitterPost: parsed.twitter || '' }
             }),
           });
@@ -417,8 +763,8 @@ export default function IMCComposer() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               action: 'submit-calendars',
-              event: selectedEvent,
-              venue: eventVenue,
+              event: distributionEvent,
+              venue: distributionVenue,
               content: { calendarListing: generated.calendar || '' }
             }),
           });
@@ -428,8 +774,17 @@ export default function IMCComposer() {
         setDistributed(prev => ({ ...prev, [channelKey]: true }));
         setDistributionResults(prev => ({ ...prev, social: results }));
 
+        const fbEvent = results.facebook?.event || null;
+        const fbFeed = results.facebook?.feedPost || null;
+        const fbEventCreated = !!fbEvent?.success;
+        const fbEventId = fbEvent?.eventId || results.facebook?.event_id || null;
+        const fbEventUrl = fbEvent?.eventUrl || results.facebook?.event_url || null;
+        const fbFeedUrl = fbFeed?.postUrl || (fbFeed?.postId ? `https://facebook.com/${fbFeed.postId}` : null);
+        const fbEventFailure = fbEvent?.error || results.facebook?.fallback?.reason || results.facebook?.error || 'Not created';
+
         const summary = [
-          results.facebook?.feedPost?.success ? '✅ Facebook: Feed post published (create Event manually at fb.com/goodcreativemedia/events)' : `⚠️ Facebook: ${results.facebook?.feedPost?.error || results.facebook?.error || 'Not connected'}`,
+          fbEventCreated ? `✅ Facebook Event: Created${fbEventUrl ? ` · ${fbEventUrl}` : ''}` : `⚠️ Facebook Event: ${fbEventFailure}`,
+          fbFeed?.success ? `✅ Facebook Feed: Posted${fbFeedUrl ? ` · ${fbFeedUrl}` : ''}` : `⚠️ Facebook Feed: ${fbFeed?.error || 'Not posted'}`,
           results.instagram?.success ? '✅ Instagram: Posted' : `⚠️ Instagram: ${results.instagram?.error || 'Not connected'}`,
           results.linkedin?.success ? '✅ LinkedIn: Posted' : `⚠️ LinkedIn: ${results.linkedin?.error || 'Not connected'}`,
           results.twitter?.success ? '✅ Twitter/X: Tweeted' : `⚠️ Twitter/X: ${results.twitter?.error || 'Not connected'}`,
@@ -438,37 +793,214 @@ export default function IMCComposer() {
         alert(`📱 Social Distribution:\n\n${summary}`);
 
         // Track each social platform
-        if (results.facebook?.feedPost?.success) trackCampaign('social_facebook', 'published', results.facebook.feedPost?.postId ? `https://facebook.com/${results.facebook.feedPost.postId}` : null);
-        else trackCampaign('social_facebook', 'failed', null, { error: results.facebook?.feedPost?.error || results.facebook?.error });
+        if (fbEventCreated) {
+          trackCampaign('facebook_event', 'created', fbEventUrl, {
+            externalId: fbEventId,
+            metadata: {
+              source: fbEvent?.source || 'graph_api',
+              reused: !!fbEvent?.reused,
+              mode: results.facebook?.mode || null,
+            },
+          });
+        } else {
+          trackCampaign('facebook_event', 'failed', null, {
+            error: fbEventFailure,
+            metadata: {
+              mode: results.facebook?.mode || null,
+              fallback: results.facebook?.fallback || null,
+            },
+          });
+        }
+        if (fbFeed?.success) {
+          trackCampaign('social_facebook', 'published', fbFeedUrl, {
+            externalId: fbFeed?.postId || results.facebook?.post_id || null,
+            metadata: {
+              mode: results.facebook?.mode || null,
+              fallbackTriggered: !!results.facebook?.fallback?.triggered,
+            },
+          });
+        } else {
+          trackCampaign('social_facebook', 'failed', null, {
+            error: fbFeed?.error || results.facebook?.error,
+            metadata: { mode: results.facebook?.mode || null },
+          });
+        }
         if (results.instagram?.success) trackCampaign('social_instagram', 'published', null);
         else trackCampaign('social_instagram', 'failed', null, { error: results.instagram?.error });
         if (results.linkedin?.success) trackCampaign('social_linkedin', 'published', results.linkedin.postUrl);
         else trackCampaign('social_linkedin', 'failed', null, { error: results.linkedin?.error });
         if (results.twitter?.success) trackCampaign('social_twitter', 'published', results.twitter.tweetUrl);
         if (results.calendars?.success) trackCampaign('calendar_do210', 'queued', null);
+      } else if (channelKey === 'video') {
+        if (!videoAsset?.url || !videoAsset.url.startsWith('https://')) {
+          throw new Error('Upload a public HTTPS video first (15s, 30s, or 60s).');
+        }
+        const parsed = parseVideoContent(text || generated.video || '');
+        const results = {};
+        const verticalVariantUrl = videoVariants?.vertical_9_16?.url || videoAsset.url;
+        const squareVariantUrl = videoVariants?.square_1_1?.url || videoAsset.url;
+        const landscapeVariantUrl = videoVariants?.landscape_16_9?.url || videoAsset.url;
+        const hasVerticalSource = !!(videoVariants?.vertical_9_16?.url || Number(videoAsset.height || 0) > Number(videoAsset.width || 0));
+        const shouldYouTubeShort = Number(videoAsset.duration || 0) <= 60 && hasVerticalSource;
+
+        const baseVideoPayload = {
+          duration: videoAsset.duration,
+          size: videoAsset.size,
+          mimeType: videoAsset.type,
+          name: videoAsset.name,
+          path: videoAsset.path,
+        };
+        const buildVideoPayload = (url, width, height) => ({
+          ...baseVideoPayload,
+          url,
+          width,
+          height,
+        });
+
+        const fbVideoPayload = buildVideoPayload(
+          verticalVariantUrl,
+          verticalVariantUrl === videoAsset.url ? videoAsset.width : 1080,
+          verticalVariantUrl === videoAsset.url ? videoAsset.height : 1920
+        );
+        const igVideoPayload = buildVideoPayload(
+          verticalVariantUrl,
+          verticalVariantUrl === videoAsset.url ? videoAsset.width : 1080,
+          verticalVariantUrl === videoAsset.url ? videoAsset.height : 1920
+        );
+        const linkedinVideoPayload = buildVideoPayload(
+          squareVariantUrl,
+          squareVariantUrl === videoAsset.url ? videoAsset.width : 1080,
+          squareVariantUrl === videoAsset.url ? videoAsset.height : 1080
+        );
+        const youtubeSourceUrl = shouldYouTubeShort ? verticalVariantUrl : landscapeVariantUrl;
+        const youtubeVideoPayload = buildVideoPayload(
+          youtubeSourceUrl,
+          youtubeSourceUrl === videoAsset.url ? videoAsset.width : (shouldYouTubeShort ? 1080 : 1920),
+          youtubeSourceUrl === videoAsset.url ? videoAsset.height : (shouldYouTubeShort ? 1920 : 1080)
+        );
+
+        try {
+          const fbRes = await fetch('/api/distribute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'post-facebook-video',
+              event: distributionEvent,
+              venue: distributionVenue,
+              video: fbVideoPayload,
+              content: {
+                facebookReelCaption: parsed.facebookReelCaption || parsed.instagramReelCaption || distributionEvent.title,
+              },
+            }),
+          });
+          results.facebook = await fbRes.json();
+        } catch (err) { results.facebook = { success: false, error: err.message }; }
+
+        await new Promise((r) => setTimeout(r, 500));
+
+        try {
+          const igRes = await fetch('/api/distribute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'post-instagram-video',
+              event: distributionEvent,
+              venue: distributionVenue,
+              video: igVideoPayload,
+              modes: ['reel', 'story'],
+              content: {
+                instagramReelCaption: parsed.instagramReelCaption || parsed.facebookReelCaption || '',
+                instagramStoryOverlayText: parsed.instagramStoryOverlayText || '',
+              },
+            }),
+          });
+          results.instagram = await igRes.json();
+        } catch (err) { results.instagram = { success: false, error: err.message }; }
+
+        await new Promise((r) => setTimeout(r, 500));
+
+        try {
+          const liRes = await fetch('/api/distribute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'post-linkedin-video',
+              event: distributionEvent,
+              venue: distributionVenue,
+              video: linkedinVideoPayload,
+              content: {
+                linkedinVideoPost: parsed.linkedinVideoPost || parsed.facebookReelCaption || distributionEvent.title,
+              },
+            }),
+          });
+          results.linkedin = await liRes.json();
+        } catch (err) { results.linkedin = { success: false, error: err.message }; }
+
+        await new Promise((r) => setTimeout(r, 500));
+
+        try {
+          const ytRes = await fetch('/api/distribute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'post-youtube-video',
+              event: distributionEvent,
+              venue: distributionVenue,
+              video: youtubeVideoPayload,
+              content: {
+                youtubeTitle: parsed.youtubeTitle || distributionEvent.title,
+                youtubeDescription: parsed.youtubeDescription || distributionEvent.description || '',
+                youtubeTags: parsed.youtubeTags || '',
+              },
+            }),
+          });
+          results.youtube = await ytRes.json();
+        } catch (err) { results.youtube = { success: false, error: err.message }; }
+
+        setDistributed(prev => ({ ...prev, [channelKey]: true }));
+        setDistributionResults(prev => ({ ...prev, video: results }));
+
+        const summary = [
+          results.facebook?.success ? `✅ Facebook: ${results.facebook.mode === 'reel' ? 'Reel posted' : 'Video posted'}` : `⚠️ Facebook: ${results.facebook?.error || 'Not connected'}`,
+          results.instagram?.reel?.success || results.instagram?.story?.success ? `✅ Instagram: ${results.instagram?.reel?.success ? 'Reel' : ''}${results.instagram?.reel?.success && results.instagram?.story?.success ? ' + ' : ''}${results.instagram?.story?.success ? 'Story' : ''} posted` : `⚠️ Instagram: ${results.instagram?.error || results.instagram?.reel?.error || results.instagram?.story?.error || 'Not connected'}`,
+          results.linkedin?.success ? '✅ LinkedIn: Video posted' : `⚠️ LinkedIn: ${results.linkedin?.error || 'Not connected'}`,
+          results.youtube?.success ? `✅ YouTube: ${results.youtube?.isShort ? 'Short uploaded' : 'Video uploaded'}` : `⚠️ YouTube: ${results.youtube?.error || 'Not connected'}`,
+        ].join('\n');
+        alert(`🎬 Video Distribution:\n\n${summary}`);
+
+        if (results.facebook?.success) trackCampaign('video_facebook_reels', 'published', results.facebook.reelUrl || results.facebook.videoUrl || null, { warning: results.facebook.warning });
+        else trackCampaign('video_facebook_reels', 'failed', null, { error: results.facebook?.error });
+
+        if (results.instagram?.reel?.success || results.instagram?.story?.success) trackCampaign('video_instagram', 'published', null);
+        else trackCampaign('video_instagram', 'failed', null, { error: results.instagram?.error || results.instagram?.reel?.error || results.instagram?.story?.error });
+
+        if (results.linkedin?.success) trackCampaign('video_linkedin', 'published', results.linkedin.postUrl || null);
+        else trackCampaign('video_linkedin', 'failed', null, { error: results.linkedin?.error });
+
+        if (results.youtube?.success) trackCampaign('video_youtube', 'published', results.youtube.videoUrl || null);
+        else trackCampaign('video_youtube', 'failed', null, { error: results.youtube?.error });
       } else if (channelKey === 'email') {
-        const eventVenue = getEventVenue(selectedEvent);
         try {
           const res = await fetch('/api/distribute', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               action: 'send-email-blast',
-              event: selectedEvent,
-              venue: eventVenue,
+              event: distributionEvent,
+              venue: distributionVenue,
               content: text || generated.email
             }),
           });
           const data = await res.json();
           if (data.success) {
             setDistributed(prev => ({ ...prev, [channelKey]: true }));
-            alert(`📧 Email blast sent to ${data.sent} subscribers!`);
+            alert(`📧 Perfect. I sent the email blast to ${data.sent} subscribers.`);
           trackCampaign('email_campaign', 'sent', null, { recipients: data.sent });
           } else {
             throw new Error(data.error);
           }
         } catch (err) {
-          alert(`📧 Email error: ${err.message}`);
+          alert(`📧 I hit a snag with email: ${err.message}`);
           setDistributed(prev => ({ ...prev, [channelKey]: false }));
         }
       } else if (channelKey === 'sms') {
@@ -478,21 +1010,21 @@ export default function IMCComposer() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               action: 'send-sms',
-              event: selectedEvent,
+              event: distributionEvent,
               content: { smsText: text || generated.sms }
             }),
           });
           const data = await res.json();
           if (data.success) {
             setDistributed(prev => ({ ...prev, [channelKey]: true }));
-            alert(`💬 SMS sent to ${data.sent} recipients!`);
+            alert(`💬 Done. I sent SMS to ${data.sent} recipients.`);
           trackCampaign('sms_blast', 'sent', null, { recipients: data.sent });
           } else {
-            alert(`💬 SMS: ${data.error}`);
+            alert(`💬 SMS update: ${data.error}`);
             setDistributed(prev => ({ ...prev, [channelKey]: 'ready' }));
           }
         } catch (err) {
-          alert(`💬 SMS error: ${err.message}`);
+          alert(`💬 I hit a snag with SMS: ${err.message}`);
           setDistributed(prev => ({ ...prev, [channelKey]: false }));
         }
       } else {
@@ -500,28 +1032,35 @@ export default function IMCComposer() {
       }
     } catch (err) {
       console.error('Distribution error:', err);
-      alert(`Distribution error: ${err.message}`);
+      alert(`Hmm. Distribution hit a snag: ${err.message}`);
       setDistributed(prev => ({ ...prev, [channelKey]: false }));
     }
   };
 
   const handleDistributeAll = async () => {
     if (!selectedEvent) return;
+    const payload = buildDistributionPayload(selectedEvent);
+    const readiness = getEventCompleteness(payload);
+    if (!readiness.ready) {
+      const list = readiness.missing.map((item) => `• ${item}`).join('\n');
+      alert(`Before I distribute everything, I need these details:\n\n${list}`);
+      return;
+    }
+
     setDistributing(true);
     
     try {
-      const results = {};
       const activeKeys = CHANNELS.filter(c => channels[c.key] && generated[c.key]).map(c => c.key);
       
       for (const channelKey of activeKeys) {
         try {
-          await handleDistribute(channelKey, generated[channelKey]);
+          await handleDistribute(channelKey, generated[channelKey], payload);
         } catch (err) {
           console.error(`Distribution failed for ${channelKey}:`, err);
         }
       }
       
-      alert(`🚀 Distribution initiated for ${activeKeys.length} channels!\n\nCheck individual channel status above.`);
+      alert(`🚀 Perfect. I started distribution on ${activeKeys.length} channels.\n\nYou can review each channel status right above.`);
 
       // Send admin notification email with all distribution URLs
       try {
@@ -530,8 +1069,8 @@ export default function IMCComposer() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: 'notify-admin-distribution',
-            event: selectedEvent,
-            venue: getEventVenue(selectedEvent),
+            event: payload.event,
+            venue: payload.venue,
             distributionResults: distributionResults,
             channels: activeKeys,
             distributedBy: user?.email || user?.name || 'Unknown user',
@@ -542,7 +1081,7 @@ export default function IMCComposer() {
       }
     } catch (err) {
       console.error('Distribution error:', err);
-      alert('Distribution error: ' + err.message);
+      alert('Hmm. I hit a snag distributing: ' + err.message);
     } finally {
       setDistributing(false);
     }
@@ -555,7 +1094,7 @@ export default function IMCComposer() {
     const eventVenue = getEventVenue(selectedEvent);
     const publicImage = images.find(img => img.url && !img.url.startsWith('data:'));
     if (!publicImage) {
-      alert('⚠️ No publicly accessible image found. Images must be uploaded to get a public URL first.');
+      alert('⚠️ I do not see a public image URL yet. Upload the image first, then I can push it to platforms.');
       setUpdatingImages(false);
       return;
     }
@@ -584,12 +1123,12 @@ export default function IMCComposer() {
       if (data.success) {
         const updated = data.results.filter(r => r.success).map(r => r.platform);
         const failed = data.results.filter(r => !r.success).map(r => `${r.platform}: ${r.error}`);
-        alert(`🎨 Platform Images Updated!\n\n${updated.length ? '✅ ' + updated.join(', ') : ''}${failed.length ? '\n⚠️ ' + failed.join('\n⚠️ ') : ''}`);
+        alert(`🎨 Great. I pushed image updates.\n\n${updated.length ? '✅ ' + updated.join(', ') : ''}${failed.length ? '\n⚠️ ' + failed.join('\n⚠️ ') : ''}`);
       } else {
-        alert(`⚠️ Image update error: ${data.error}`);
+        alert(`⚠️ I hit a snag updating images: ${data.error}`);
       }
     } catch (err) {
-      alert(`⚠️ Image update error: ${err.message}`);
+      alert(`⚠️ I hit a snag updating images: ${err.message}`);
     }
     setUpdatingImages(false);
   };
@@ -633,17 +1172,17 @@ export default function IMCComposer() {
           if (data.success && data.content) {
             results[channelKey] = data.content[getContentType(channelKey)] || Object.values(data.content)[0] || data.content;
           } else {
-            results[channelKey] = `[Error: ${data.error || 'Generation failed'}]`;
+            results[channelKey] = `[I hit a snag: ${data.error || 'Generation did not finish this round.'}]`;
           }
         } catch (err) {
-          results[channelKey] = `[Error: ${err.message}]`;
+          results[channelKey] = `[I hit a snag: ${err.message}]`;
         }
       }
 
       setGenerated(results);
     } catch (err) {
       console.error('Generation error:', err);
-      alert('Error generating content: ' + err.message);
+      alert('Hmm. I hit a snag generating content: ' + err.message);
     } finally {
       setGenerating(false);
       setGeneratingChannel('');
@@ -652,7 +1191,7 @@ export default function IMCComposer() {
 
   // Regenerate individual content type
   const handleRegenerate = async (channelKey) => {
-    setGeneratingChannel(`Regenerating ${channelKey}...`);
+    setGeneratingChannel(`Rewriting ${channelKey}...`);
     
     try {
       const res = await fetch('/api/generate', {
@@ -671,24 +1210,69 @@ export default function IMCComposer() {
         const newContent = data.content[getContentType(channelKey)] || Object.values(data.content)[0] || data.content;
         setGenerated(prev => ({ ...prev, [channelKey]: newContent }));
       } else {
-        alert(`Error regenerating ${channelKey}: ${data.error || 'Generation failed'}`);
+        alert(`I hit a snag rewriting ${channelKey}: ${data.error || 'Generation did not finish this round.'}`);
       }
     } catch (err) {
       console.error('Regeneration error:', err);
-      alert(`Error regenerating ${channelKey}: ${err.message}`);
+      alert(`I hit a snag rewriting ${channelKey}: ${err.message}`);
     } finally {
       setGeneratingChannel('');
     }
   };
+
+  const videoDuration = Number(videoAsset?.duration || 0);
+  const roundedVideoDuration = Math.round(videoDuration);
+  const videoIsPublicHttps = !!(videoAsset?.url && videoAsset.url.startsWith('https://'));
+  const videoIsDurationBucket = [15, 30, 60].includes(roundedVideoDuration);
+  const videoIsShortDuration = videoDuration > 0 && videoDuration <= 60;
+  const videoAspect = !videoAsset ? 'unknown' : (videoAsset.height > videoAsset.width ? 'vertical' : videoAsset.width > videoAsset.height ? 'landscape' : 'square');
+
+  const hasVerticalVariant = !!videoVariants?.vertical_9_16?.url;
+  const hasSquareVariant = !!videoVariants?.square_1_1?.url;
+  const hasLandscapeVariant = !!videoVariants?.landscape_16_9?.url;
+  const variantJobStatus = videoVariantJob?.status || (queuingVariants ? 'pending' : '');
+
+  const fbReelReady = !!videoAsset && videoIsPublicHttps && videoIsShortDuration && (videoAspect === 'vertical' || hasVerticalVariant);
+  const igReelReady = fbReelReady;
+  const igStoryReady = fbReelReady;
+  const linkedinVideoReady = !!videoAsset && videoIsPublicHttps && (hasSquareVariant || hasLandscapeVariant || videoAspect !== 'unknown');
+  const youtubeShortReady = !!videoAsset && videoIsPublicHttps && videoIsShortDuration && (videoAspect === 'vertical' || hasVerticalVariant);
+  const youtubeVideoReady = !!videoAsset && videoIsPublicHttps && (hasLandscapeVariant || videoAspect !== 'unknown');
+  const youtubeTargetMode = youtubeShortReady ? 'Short' : 'Standard Video';
+
+  const eventDistributionPayload = selectedEvent ? buildDistributionPayload(selectedEvent) : null;
+  const eventCompleteness = eventDistributionPayload ? getEventCompleteness(eventDistributionPayload) : { ready: false, missing: [] };
+  const missingEventFields = eventCompleteness?.missing || [];
+  const eventReadyForDistribution = !!selectedEvent && eventCompleteness.ready;
+  const facebookEventUrlForQr = cleanText(
+    distributionResults?.social?.facebook?.event?.eventUrl
+    || distributionResults?.social?.facebook?.event_url
+    || ''
+  );
+  const facebookEventIdForQr = cleanText(
+    distributionResults?.social?.facebook?.event?.eventId
+    || distributionResults?.social?.facebook?.event_id
+    || extractFacebookEventId(facebookEventUrlForQr)
+    || ''
+  );
+  const facebookEventQrImageUrl = buildQrCodeImageUrl(facebookEventUrlForQr, 320);
+
+  const requiresVideoUpload = !!(channels.video && generated.video && !videoAsset);
+  const distributeAllDisabled = distributing || requiresVideoUpload || !eventReadyForDistribution;
+  const distributeAllTitle = requiresVideoUpload
+    ? 'Upload a short video first so I can distribute video posts'
+    : !eventReadyForDistribution
+      ? `I still need event details first: ${missingEventFields.join(', ')}`
+      : '';
 
   return (
     <div className="p-4 md:p-8 max-w-4xl">
       <div className="flex items-center justify-between flex-wrap gap-4 mb-6">
         <div>
           <h1 className="text-3xl mb-1">🎯 IMC Composer</h1>
-          <p className="text-gray-500 m-0">AI-powered press releases, social posts, calendar listings & graphics</p>
+          <p className="text-gray-500 m-0">Tell me what you are promoting, and I will write, format, and distribute the campaign with you.</p>
         </div>
-        <a href="#" onClick={e => { e.preventDefault(); alert('Google Drive integration coming soon!'); }}
+        <a href="#" onClick={e => { e.preventDefault(); alert('Google Drive is next up. I will wire it in here soon.'); }}
           className="text-sm text-[#c8a45e] font-semibold no-underline hover:underline">
           📁 View assets in Drive →
         </a>
@@ -696,13 +1280,13 @@ export default function IMCComposer() {
 
       {/* Event Selector */}
       <div className="card mb-6">
-        <label className="block text-sm font-medium text-gray-700 mb-2">Select Event</label>
-        <select value={selectedEventId} onChange={e => { setSelectedEventId(e.target.value); setGenerated({}); setImages([]); setDistributed({}); }}
+        <label className="block text-sm font-medium text-gray-700 mb-2">Pick Your Event</label>
+        <select value={selectedEventId} onChange={e => { setSelectedEventId(e.target.value); setGenerated({}); setImages([]); setVideoAsset(null); setVideoVariants(null); setVideoVariantJob(null); setVideoVariantJobId(''); setDistributed({}); }}
           className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-[#c8a45e] bg-white">
           <option value="">Choose an event...</option>
           {events.map(e => <option key={e.id} value={e.id}>{e.title} · {parseLocalDate(e.date).toLocaleDateString()}</option>)}
         </select>
-        {events.length === 0 && <p className="text-xs text-gray-400 mt-2">No events yet. <a href="/events/create" className="text-[#c8a45e]">Create one first →</a></p>}
+        {events.length === 0 && <p className="text-xs text-gray-400 mt-2">No events yet. <a href="/events/create" className="text-[#c8a45e]">Start your first one →</a></p>}
       </div>
 
       {selectedEvent && (
@@ -716,9 +1300,19 @@ export default function IMCComposer() {
             {selectedEvent.description && <p className="text-sm opacity-70 mt-2 m-0">{selectedEvent.description}</p>}
           </div>
 
+          {!eventReadyForDistribution && (
+            <div className="card mb-6 border-l-4 border-amber-500 bg-amber-50">
+              <p className="text-sm font-semibold text-amber-800 m-0">I am pausing distribution because a few event details are missing.</p>
+              <p className="text-xs text-amber-700 mt-2 mb-1">Add these first, then I can publish everywhere:</p>
+              <ul className="text-xs text-amber-700 m-0 ml-5">
+                {missingEventFields.map((field) => <li key={field}>{field}</li>)}
+              </ul>
+            </div>
+          )}
+
           {/* Channel Toggles */}
           <div className="card mb-6">
-            <h3 className="text-lg mb-3">Distribution Channels</h3>
+            <h3 className="text-lg mb-3">Where We Are Sending It</h3>
             <div className="flex flex-wrap gap-2">
               {CHANNELS.map(c => (
                 <ChannelToggle key={c.key} label={c.label} icon={c.icon} enabled={channels[c.key]}
@@ -728,7 +1322,7 @@ export default function IMCComposer() {
             <p className="text-xs text-gray-400 mt-3">
               📰 Press → KSAT, KENS5, TPR, Express-News, SA Current, SA Report &nbsp;|&nbsp;
               📅 Calendar → Do210, SA Current, Evvnt (→ Express-News/MySA) &nbsp;|&nbsp;
-              📱 Social → FB, IG, X, LinkedIn
+              📱 Social → FB, IG, X, LinkedIn &nbsp;|&nbsp; 🎬 Video → FB Reels, IG Reels/Stories, YouTube, LinkedIn
             </p>
           </div>
 
@@ -737,9 +1331,9 @@ export default function IMCComposer() {
             <button onClick={handleGenerateAll} disabled={generating || activeChannels.length === 0}
               className="btn-primary flex items-center gap-2 disabled:opacity-50">
               {generating ? (
-                <><span className="animate-spin inline-block">⟳</span> {generatingChannel || 'Generating...'}</>
+                <><span className="animate-spin inline-block">⟳</span> {generatingChannel || 'Writing...'}</>
               ) : (
-                '✨ Generate All Content'
+                '✨ Write Everything'
               )}
             </button>
             <div className="flex items-center gap-2">
@@ -753,12 +1347,76 @@ export default function IMCComposer() {
               <button onClick={handleGenerateGraphics} disabled={generatingImages || !selectedEvent}
                 className="btn-secondary flex items-center gap-2 disabled:opacity-50">
                 {generatingImages ? (
-                  <><span className="animate-spin inline-block">⟳</span> {imageProgress ? `${imageProgress.current}/${imageProgress.total}: ${imageProgress.label}` : 'Creating graphics...'}</>
+                  <><span className="animate-spin inline-block">⟳</span> {imageProgress ? `${imageProgress.current}/${imageProgress.total}: ${imageProgress.label}` : 'Designing graphics...'}</>
                 ) : (
-                  '🎨 Generate Graphics'
+                  '🎨 Create Graphics'
                 )}
               </button>
             </div>
+          </div>
+
+          {/* Video Upload */}
+          <div className="card mb-6">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <h3 className="text-lg m-0">🎬 Video Upload (15s / 30s / 60s)</h3>
+                <p className="text-xs text-gray-500 m-0">Upload once, and I will prep it for Facebook Reels, Instagram Reels/Stories, YouTube, and LinkedIn.</p>
+              </div>
+              <label className={`btn-secondary text-sm ${uploadingVideo ? 'opacity-50 pointer-events-none' : ''}`} style={{ cursor: uploadingVideo ? 'not-allowed' : 'pointer' }}>
+                {uploadingVideo ? '⏳ Uploading...' : 'Upload Video'}
+                <input
+                  type="file"
+                  accept="video/mp4,video/quicktime,video/webm,video/x-m4v"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleVideoUpload(file);
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+            </div>
+
+            {videoAsset ? (
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-[220px,1fr] gap-4 items-start">
+                <video src={videoAsset.url} controls className="w-full rounded-lg border border-gray-200 bg-black" />
+                <div className="text-sm text-gray-700 space-y-1">
+                  <p className="m-0"><strong>File:</strong> {videoAsset.name}</p>
+                  <p className="m-0"><strong>Length:</strong> {videoAsset.duration}s</p>
+                  <p className="m-0"><strong>Dimensions:</strong> {videoAsset.width}x{videoAsset.height}</p>
+                  <p className="m-0"><strong>Type:</strong> {videoAsset.type}</p>
+                  <p className="m-0 break-all"><strong>Public URL:</strong> <a href={videoAsset.url} target="_blank" rel="noreferrer" className="text-[#c8a45e]">{videoAsset.url}</a></p>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-gray-400 mt-3 m-0">No video yet. Upload one when you are ready.</p>
+            )}
+
+            {videoAsset && (
+              <div className="mt-4 p-3 bg-gray-50 rounded-lg text-sm space-y-1">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <p className="font-semibold text-gray-700 m-0">✅ Video Readiness</p>
+                  <button
+                    type="button"
+                    onClick={() => queueVideoVariants(videoAsset, false)}
+                    disabled={queuingVariants || (videoVariantJob?.status === 'pending' || videoVariantJob?.status === 'processing')}
+                    className="btn-secondary text-xs disabled:opacity-50"
+                  >
+                    {queuingVariants ? '⏳ Queueing...' : (videoVariantJob?.status === 'pending' || videoVariantJob?.status === 'processing') ? `⏳ Variants: ${videoVariantJob.status}` : '🎛 Build/Refresh Variants'}
+                  </button>
+                </div>
+                <p className="m-0 ml-2">{videoIsPublicHttps ? '✅' : '⚠️'} Public URL: {videoIsPublicHttps ? 'OK' : 'Needs HTTPS public URL'}</p>
+                <p className="m-0 ml-2">{videoIsShortDuration ? '✅' : '⚠️'} Duration: {roundedVideoDuration || 0}s {videoIsShortDuration ? '(Reels/Stories/Shorts compatible)' : '(too long for short-form targets)'}</p>
+                <p className="m-0 ml-2">{videoIsDurationBucket ? '✅' : '⚠️'} Preferred length: {videoIsDurationBucket ? '15/30/60s bucket matched' : 'recommended 15s, 30s, or 60s'}</p>
+                <p className="m-0 ml-2">{(videoAspect === 'vertical' || hasVerticalVariant) ? '✅' : '⚠️'} Vertical readiness: {videoAspect === 'vertical' ? 'Source is vertical' : hasVerticalVariant ? '9:16 variant ready' : 'Need 9:16 source/variant'}</p>
+                <p className="m-0 ml-2">{(hasSquareVariant && hasLandscapeVariant) ? '✅' : '⚠️'} Variants: 9:16 ({hasVerticalVariant ? 'ready' : 'pending'}) · 1:1 ({hasSquareVariant ? 'ready' : 'pending'}) · 16:9 ({hasLandscapeVariant ? 'ready' : 'pending'}){variantJobStatus ? ` · job: ${variantJobStatus}` : ''}</p>
+                <p className="m-0 ml-2">{fbReelReady ? '✅' : '⚠️'} Facebook Reels</p>
+                <p className="m-0 ml-2">{igReelReady ? '✅' : '⚠️'} Instagram Reels</p>
+                <p className="m-0 ml-2">{igStoryReady ? '✅' : '⚠️'} Instagram Stories</p>
+                <p className="m-0 ml-2">{linkedinVideoReady ? '✅' : '⚠️'} LinkedIn Video Posts</p>
+                <p className="m-0 ml-2">{youtubeVideoReady ? '✅' : '⚠️'} YouTube: {youtubeTargetMode}</p>
+              </div>
+            )}
           </div>
 
           {/* Generated Content */}
@@ -766,8 +1424,8 @@ export default function IMCComposer() {
             <div className="space-y-4 mb-6">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg">✅ Generated Content</h3>
-                <button onClick={handleDistributeAll} disabled={distributing || images.length === 0} className="btn-primary text-sm disabled:opacity-50" title={images.length === 0 ? 'Generate graphics first so images are included in posts' : ''}>
-                  {distributing ? '⏳ Distributing...' : images.length === 0 ? '🚀 Distribute All (generate graphics first)' : '🚀 Distribute All'}
+                <button onClick={handleDistributeAll} disabled={distributeAllDisabled} className="btn-primary text-sm disabled:opacity-50" title={distributeAllTitle}>
+                  {distributing ? '⏳ Distributing...' : requiresVideoUpload ? '🚀 Distribute Everything (upload video first)' : !eventReadyForDistribution ? '🚀 Distribute Everything (finish event details first)' : '🚀 Distribute Everything'}
                 </button>
               </div>
               {activeChannels.map(c => (
@@ -873,8 +1531,53 @@ export default function IMCComposer() {
                 <div className="mt-3 p-3 bg-gray-50 rounded-lg text-sm space-y-1">
                   <p className="font-semibold text-gray-700 m-0">📱 Social Distribution</p>
                   {distributionResults.social.facebook && (<>
-                    <p className="m-0 ml-2">{distributionResults.social.facebook.feedPost?.success ? '✅' : '⚠️'} Facebook: {distributionResults.social.facebook.feedPost?.success ? `Feed post published · ${distributionResults.social.facebook.feedPost.postId ? `Post ID: ${distributionResults.social.facebook.feedPost.postId}` : ''}` : distributionResults.social.facebook.feedPost?.error || distributionResults.social.facebook.error || 'Not connected'}</p>
-                    <p className="m-0 ml-4 text-[10px] text-gray-400">⚠️ FB Events API deprecated. <a href="https://www.facebook.com/goodcreativemedia/events" target="_blank" className="text-[#c8a45e]">Create event manually →</a></p>
+                    <p className="m-0 ml-2">
+                      {distributionResults.social.facebook.event?.success ? '✅' : '⚠️'} Facebook Event: {
+                        distributionResults.social.facebook.event?.success
+                          ? `Created${distributionResults.social.facebook.event?.eventUrl ? ` · ${distributionResults.social.facebook.event.eventUrl}` : distributionResults.social.facebook.event?.eventId ? ` · ${distributionResults.social.facebook.event.eventId}` : ''}`
+                          : distributionResults.social.facebook.event?.error
+                            || distributionResults.social.facebook.fallback?.reason
+                            || distributionResults.social.facebook.error
+                            || 'Not created'
+                      }
+                    </p>
+                    <p className="m-0 ml-2">
+                      {distributionResults.social.facebook.feedPost?.success ? '✅' : '⚠️'} Facebook Feed: {
+                        distributionResults.social.facebook.feedPost?.success
+                          ? `Posted${distributionResults.social.facebook.feedPost.postUrl ? ` · ${distributionResults.social.facebook.feedPost.postUrl}` : distributionResults.social.facebook.feedPost.postId ? ` · ${distributionResults.social.facebook.feedPost.postId}` : ''}`
+                          : distributionResults.social.facebook.feedPost?.error || 'Not posted'
+                      }
+                    </p>
+                    {facebookEventQrImageUrl && (
+                      <div className="ml-2 mt-2 p-2 border border-gray-200 bg-white rounded-lg">
+                        <p className="m-0 text-xs font-semibold text-gray-700">🔳 Facebook Event QR Code</p>
+                        <div className="mt-2 flex items-start gap-3 flex-wrap">
+                          <img src={facebookEventQrImageUrl} alt="Facebook Event QR" className="w-28 h-28 rounded border border-gray-200 bg-white" />
+                          <div className="text-xs text-gray-600 space-y-1">
+                            {facebookEventIdForQr && <p className="m-0">Event ID: {facebookEventIdForQr}</p>}
+                            <p className="m-0 break-all">{facebookEventUrlForQr}</p>
+                            <div className="flex gap-2 flex-wrap pt-1">
+                              <a href={facebookEventQrImageUrl} target="_blank" rel="noreferrer" className="text-[#c8a45e] font-semibold no-underline hover:underline">Open QR</a>
+                              <a href={facebookEventQrImageUrl} download={`facebook-event-${facebookEventIdForQr || selectedEventId || 'qr'}.png`} className="text-[#c8a45e] font-semibold no-underline hover:underline">Download PNG</a>
+                              <button
+                                type="button"
+                                className="text-[#c8a45e] font-semibold underline-offset-2 hover:underline bg-transparent border-0 p-0 cursor-pointer"
+                              onClick={async () => {
+                                try {
+                                  await navigator.clipboard.writeText(facebookEventUrlForQr);
+                                  alert('Facebook Event URL copied.');
+                                } catch (err) {
+                                    alert('I could not copy automatically this time. Copy the URL manually and you are set.');
+                                }
+                              }}
+                              >
+                                Copy Event URL
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </>)}
                   {distributionResults.social.instagram && (
                     <p className="m-0 ml-2">{distributionResults.social.instagram.success ? '✅' : '⚠️'} Instagram: {distributionResults.social.instagram.success ? 'Posted' : distributionResults.social.instagram.error || 'Not connected'}</p>
@@ -890,6 +1593,47 @@ export default function IMCComposer() {
                   )}
                 </div>
               )}
+              {distributionResults.video && (
+                <div className="mt-3 p-3 bg-gray-50 rounded-lg text-sm space-y-1">
+                  <p className="font-semibold text-gray-700 m-0">🎬 Video Distribution</p>
+                  {distributionResults.video.facebook && (
+                    <p className="m-0 ml-2">
+                      {distributionResults.video.facebook.success ? '✅' : '⚠️'} Facebook: {
+                        distributionResults.video.facebook.success
+                          ? `${distributionResults.video.facebook.mode === 'reel' ? 'Reel posted' : 'Video posted'}${distributionResults.video.facebook.reelUrl ? ` · ${distributionResults.video.facebook.reelUrl}` : distributionResults.video.facebook.videoUrl ? ` · ${distributionResults.video.facebook.videoUrl}` : ''}`
+                          : distributionResults.video.facebook.error || 'Not connected'
+                      }
+                    </p>
+                  )}
+                  {distributionResults.video.instagram && (
+                    <p className="m-0 ml-2">
+                      {(distributionResults.video.instagram.reel?.success || distributionResults.video.instagram.story?.success) ? '✅' : '⚠️'} Instagram: {
+                        distributionResults.video.instagram.reel?.success || distributionResults.video.instagram.story?.success
+                          ? `${distributionResults.video.instagram.reel?.success ? 'Reel' : ''}${distributionResults.video.instagram.reel?.success && distributionResults.video.instagram.story?.success ? ' + ' : ''}${distributionResults.video.instagram.story?.success ? 'Story' : ''} posted`
+                          : distributionResults.video.instagram.error || distributionResults.video.instagram.reel?.error || distributionResults.video.instagram.story?.error || 'Not connected'
+                      }
+                    </p>
+                  )}
+                  {distributionResults.video.linkedin && (
+                    <p className="m-0 ml-2">
+                      {distributionResults.video.linkedin.success ? '✅' : '⚠️'} LinkedIn: {
+                        distributionResults.video.linkedin.success
+                          ? `Video posted${distributionResults.video.linkedin.postUrl ? ` · ${distributionResults.video.linkedin.postUrl}` : ''}`
+                          : distributionResults.video.linkedin.error || 'Not connected'
+                      }
+                    </p>
+                  )}
+                  {distributionResults.video.youtube && (
+                    <p className="m-0 ml-2">
+                      {distributionResults.video.youtube.success ? '✅' : '⚠️'} YouTube: {
+                        distributionResults.video.youtube.success
+                          ? `${distributionResults.video.youtube.isShort ? 'Short uploaded' : 'Video uploaded'}${distributionResults.video.youtube.videoUrl ? ` · ${distributionResults.video.youtube.videoUrl}` : ''}`
+                          : distributionResults.video.youtube.error || 'Not connected'
+                      }
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -901,6 +1645,7 @@ export default function IMCComposer() {
                 venue={getEventVenue(selectedEvent)}
                 generatedContent={generated}
                 images={images}
+                onSaveEventUrl={handleSaveFacebookEventUrl}
               />
               <SACurrentWizard
                 event={selectedEvent}
@@ -914,9 +1659,7 @@ export default function IMCComposer() {
           <div className="card mt-6 bg-gray-50">
             <h4 className="text-sm font-semibold text-gray-700 mb-2">📋 Media Distribution</h4>
             <p className="text-xs text-gray-600">
-              Press releases are automatically sent to 17 SA media contacts including KSAT 12, KENS 5, TPR, 
-              Express-News, SA Current, SA Report, and more. Calendar listings go to Do210, TPR Community Calendar, 
-              Evvnt (→ Express-News/MySA/100+ sites), SA Current (via wizard), and Eventbrite.
+              I send press releases to 17 San Antonio media contacts, including KSAT 12, KENS 5, TPR, Express-News, SA Current, and SA Report. I also route calendars to Do210, TPR Community Calendar, Evvnt, SA Current (wizard), and Eventbrite. Video distribution covers Facebook Reels, Instagram Reels/Stories, YouTube, and LinkedIn.
             </p>
           </div>
         </>

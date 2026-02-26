@@ -23,11 +23,11 @@ export default async function handler(req, res) {
   
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET' && req.method !== 'POST') {
-    return res.status(405).json({ error: 'GET/POST only' });
+    return res.status(405).json({ error: 'Use GET or POST here and I will take it from there.' });
   }
 
   const { action } = req.method === 'GET' ? req.query : req.body;
-  if (!action) return res.status(400).json({ error: 'Missing action parameter' });
+  if (!action) return res.status(400).json({ error: 'Tell me what action to run and I will take it from there.' });
 
   try {
     let result;
@@ -43,7 +43,7 @@ export default async function handler(req, res) {
         result = await testConnections();
         break;
       default:
-        return res.status(400).json({ error: `Unknown action: ${action}` });
+        return res.status(400).json({ error: `I do not recognize "${action}" yet. Pick one of the setup actions and I will run it.` });
     }
     
     return res.status(200).json({ success: true, ...result });
@@ -60,7 +60,7 @@ export default async function handler(req, res) {
 
 async function saveSecret({ platform, key, value }) {
   if (!platform || !key || !value) {
-    throw new Error('Missing required parameters: platform, key, value');
+    throw new Error('I need three things here: platform, key, and value.');
   }
 
   // Store in Supabase app_settings table (value must be jsonb)
@@ -74,7 +74,7 @@ async function saveSecret({ platform, key, value }) {
 
   if (error) {
     console.error('Supabase error:', error);
-    throw new Error(`Failed to store ${key} in Supabase: ${error.message}`);
+    throw new Error(`I could not save ${key} in Supabase yet: ${error.message}`);
   }
 
   // Try to update Vercel env var if VERCEL_TOKEN is available
@@ -83,13 +83,13 @@ async function saveSecret({ platform, key, value }) {
     try {
       vercelResult = await updateVercelEnvVar(key, value);
     } catch (vercelErr) {
-      console.warn('Failed to update Vercel env var:', vercelErr.message);
+      console.warn('Could not update Vercel env var:', vercelErr.message);
       // Don't fail the whole operation if Vercel update fails
     }
   }
 
   return {
-    message: `${key} saved successfully`,
+    message: `${key} is saved. Nice and clean.`,
     stored_in_supabase: true,
     stored_in_vercel: !!vercelResult
   };
@@ -100,7 +100,7 @@ async function updateVercelEnvVar(key, value) {
   const projectId = process.env.VERCEL_PROJECT_ID;
 
   if (!vercelToken || !projectId) {
-    throw new Error('VERCEL_TOKEN or VERCEL_PROJECT_ID not configured');
+    throw new Error('I need VERCEL_TOKEN and VERCEL_PROJECT_ID before I can update Vercel env vars.');
   }
 
   // Check if env var already exists
@@ -130,7 +130,7 @@ async function updateVercelEnvVar(key, value) {
 
     if (!updateResponse.ok) {
       const error = await updateResponse.text();
-      throw new Error(`Failed to update Vercel env var: ${error}`);
+      throw new Error(`I could not update that Vercel env var yet: ${error}`);
     }
 
     return await updateResponse.json();
@@ -155,7 +155,7 @@ async function updateVercelEnvVar(key, value) {
 
     if (!createResponse.ok) {
       const error = await createResponse.text();
-      throw new Error(`Failed to create Vercel env var: ${error}`);
+      throw new Error(`I could not create that Vercel env var yet: ${error}`);
     }
 
     return await createResponse.json();
@@ -188,18 +188,18 @@ async function checkConnections() {
     const connections = {
       meta: { 
         connected: false, 
-        status: 'Not configured',
+        status: 'Ready to connect',
         page_name: null,
         instagram_username: null
       },
       youtube: { 
         connected: false, 
-        status: 'Not configured',
+        status: 'Ready to connect',
         channel_name: null
       },
       linkedin: { 
         connected: false, 
-        status: 'Not configured',
+        status: 'Ready to connect',
         user_name: null
       }
     };
@@ -221,7 +221,7 @@ async function checkConnections() {
       if (platform === 'facebook' && hasMetaSecret) {
         connections.meta = {
           connected: true,
-          status: 'Connected',
+          status: 'Connected and ready',
           page_name: conn.page_name,
           instagram_username: conn.instagram_account?.username,
           connected_at: conn.connected_at
@@ -231,7 +231,7 @@ async function checkConnections() {
         const hasRefresh = !!conn.refresh_token;
         connections.youtube = {
           connected: hasRefresh,
-          status: hasRefresh ? 'Connected' : 'Token expired',
+          status: hasRefresh ? 'Connected and ready' : 'Reconnect needed',
           channel_name: conn.channel_name,
           expires_at: conn.expires_at,
           connected_at: conn.connected_at
@@ -240,7 +240,7 @@ async function checkConnections() {
         const isExpired = conn.expires_at && new Date() > new Date(conn.expires_at);
         connections.linkedin = {
           connected: !isExpired,
-          status: isExpired ? 'Token expired' : 'Connected',
+          status: isExpired ? 'Reconnect needed' : 'Connected and ready',
           user_name: conn.user_name,
           expires_at: conn.expires_at,
           connected_at: conn.connected_at
@@ -250,13 +250,13 @@ async function checkConnections() {
 
     // Update status for platforms with missing secrets
     if (!hasMetaSecret && !connections.meta.connected) {
-      connections.meta.status = 'Missing App Secret';
+      connections.meta.status = 'Needs app secret';
     }
     if (!hasYoutubeSecret && !connections.youtube.connected) {
-      connections.youtube.status = 'Missing Client Secret';
+      connections.youtube.status = 'Needs client secret';
     }
     if (!hasLinkedinCredentials && !connections.linkedin.connected) {
-      connections.linkedin.status = 'Missing Client ID/Secret';
+      connections.linkedin.status = 'Needs client ID + secret';
     }
 
     return { connections };
@@ -273,9 +273,9 @@ async function checkConnections() {
 
 async function testConnections() {
   const results = {
-    meta: { success: false, message: 'Not tested' },
-    youtube: { success: false, message: 'Not tested' },
-    linkedin: { success: false, message: 'Not tested' }
+    meta: { success: false, message: 'I have not run this test yet, but I can as soon as you are ready.' },
+    youtube: { success: false, message: 'I have not run this test yet, but I can as soon as you are ready.' },
+    linkedin: { success: false, message: 'I have not run this test yet, but I can as soon as you are ready.' }
   };
 
   // Get stored tokens
@@ -285,7 +285,7 @@ async function testConnections() {
     .like('key', 'oauth_%');
 
   if (!oauthData) {
-    throw new Error('No OAuth connections found');
+    throw new Error('I do not see any OAuth connections yet. Connect a platform first, then I can test it.');
   }
 
   // Test each platform
@@ -304,7 +304,7 @@ async function testConnections() {
         if (data.error) {
           results.meta = { success: false, message: data.error.message };
         } else {
-          results.meta = { success: true, message: `Connected as ${data.name}` };
+          results.meta = { success: true, message: `Connected as ${data.name}. Looks good.` };
         }
 
       } else if (platform === 'youtube') {
@@ -322,10 +322,10 @@ async function testConnections() {
         } else if (data.items && data.items.length > 0) {
           results.youtube = { 
             success: true, 
-            message: `Connected to ${data.items[0].snippet.title}` 
+            message: `Connected to ${data.items[0].snippet.title}. Ready to publish.` 
           };
         } else {
-          results.youtube = { success: false, message: 'No YouTube channel found' };
+          results.youtube = { success: false, message: 'I could not find a YouTube channel on this account yet.' };
         }
 
       } else if (platform === 'linkedin') {
@@ -346,7 +346,7 @@ async function testConnections() {
         } else {
           results.linkedin = { 
             success: true, 
-            message: `Connected as ${data.name}` 
+            message: `Connected as ${data.name}. Ready to post.` 
           };
         }
       }
@@ -365,11 +365,11 @@ async function testConnections() {
       .filter(([, result]) => !result.success)
       .map(([platform]) => platform);
     
-    throw new Error(`Connection test failed for: ${failedPlatforms.join(', ')}`);
+    throw new Error(`I tested everything. These still need attention: ${failedPlatforms.join(', ')}.`);
   }
 
   return { 
-    message: 'All connections tested successfully',
+    message: 'Everything tested clean. You are ready to go.',
     results 
   };
 }

@@ -12,13 +12,13 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const { action } = req.method === 'GET' ? req.query : req.body;
-  if (!action) return res.status(400).json({ error: 'Missing action' });
+  if (!action) return res.status(400).json({ error: 'Tell me which invite action you want and I will run it.' });
 
   try {
     switch (action) {
       case 'generate-invite': {
         const { name, email, role } = req.body;
-        if (!name) return res.status(400).json({ error: 'Name is required' });
+        if (!name) return res.status(400).json({ error: 'I need the name before I can generate the invite code.' });
         
         const now = new Date();
         const mmdd = String(now.getMonth() + 1).padStart(2, '0') + String(now.getDate()).padStart(2, '0');
@@ -58,14 +58,14 @@ export default async function handler(req, res) {
 
       case 'revoke-invite': {
         const { id } = req.body;
-        if (!id) return res.status(400).json({ error: 'Missing invite id' });
+        if (!id) return res.status(400).json({ error: 'I need the invite ID so I can revoke the right one.' });
         const { error } = await supabase.from('invites').delete().eq('id', id);
         if (error) throw error;
         return res.status(200).json({ success: true });
       }
 
       default:
-        return res.status(400).json({ error: `Unknown action: ${action}` });
+        return res.status(400).json({ error: `I do not recognize "${action}" yet. Choose generate-invite, list-invites, or revoke-invite.` });
     }
   } catch (err) {
     console.error(`[invites] ${action} error:`, err);

@@ -7,9 +7,9 @@ export default function SetupWizard() {
   const [showToast, setShowToast] = useState(null);
   const [loading, setLoading] = useState(false);
   const [connections, setConnections] = useState({
-    meta: { connected: false, status: 'Not configured', page_name: null },
-    youtube: { connected: false, status: 'Not configured', channel_name: null },
-    linkedin: { connected: false, status: 'Not configured', user_name: null }
+    meta: { connected: false, status: 'Ready to connect', page_name: null },
+    youtube: { connected: false, status: 'Ready to connect', channel_name: null },
+    linkedin: { connected: false, status: 'Ready to connect', user_name: null }
   });
 
   // Form states
@@ -53,16 +53,16 @@ export default function SetupWizard() {
   const copyToClipboard = async (text, label) => {
     try {
       await navigator.clipboard.writeText(text);
-      showToastMessage('success', `${label} copied to clipboard!`);
+      showToastMessage('success', `${label} copied. You are set.`);
     } catch (err) {
       console.error('Failed to copy:', err);
-      showToastMessage('error', 'Failed to copy to clipboard');
+      showToastMessage('error', 'I could not copy that yet. Try once more.');
     }
   };
 
   const saveSecret = async (platform, key, value) => {
     if (!value.trim()) {
-      showToastMessage('error', 'Please enter a value');
+      showToastMessage('error', 'Drop in a value and I will save it.');
       return;
     }
 
@@ -81,10 +81,10 @@ export default function SetupWizard() {
 
       const data = await response.json();
       if (data.success) {
-        showToastMessage('success', `${platform} configuration saved!`);
+        showToastMessage('success', `${platform} is saved and ready.`);
         await checkAllConnections();
       } else {
-        throw new Error(data.error || 'Failed to save configuration');
+        throw new Error(data.error || 'I could not save that configuration yet.');
       }
     } catch (err) {
       console.error('Failed to save secret:', err);
@@ -109,7 +109,7 @@ export default function SetupWizard() {
           authAction = 'li-auth-url';
           break;
         default:
-          throw new Error(`Unknown platform: ${platform}`);
+          throw new Error(`I do not recognize platform "${platform}" yet.`);
       }
 
       const response = await fetch(`/api/oauth?action=${authAction}`);
@@ -118,7 +118,7 @@ export default function SetupWizard() {
       if (data.success && data.authUrl) {
         window.location.href = data.authUrl;
       } else {
-        throw new Error(data.error || 'Failed to get authorization URL');
+        throw new Error(data.error || 'I could not get that authorization link yet.');
       }
     } catch (err) {
       console.error(`Failed to connect ${platform}:`, err);
@@ -135,14 +135,14 @@ export default function SetupWizard() {
       const data = await response.json();
       
       if (data.success) {
-        showToastMessage('success', 'All connections tested successfully!');
+        showToastMessage('success', 'Beautiful. All connections tested clean.');
         await checkAllConnections();
       } else {
         showToastMessage('error', data.error || 'Some connections failed');
       }
     } catch (err) {
       console.error('Failed to test connections:', err);
-      showToastMessage('error', 'Failed to test connections');
+      showToastMessage('error', 'I hit a snag running connection tests.');
     } finally {
       setLoading(false);
     }
@@ -239,7 +239,7 @@ export default function SetupWizard() {
               <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
                 <div className="flex items-center gap-2 text-green-800 font-medium mb-1">
                   <span>✅</span>
-                  <span>Meta Connected Successfully!</span>
+                  <span>Meta connected and ready.</span>
                 </div>
                 <p className="text-sm text-green-700">
                   Facebook Page: <strong>{connections.meta.page_name}</strong>
@@ -353,7 +353,7 @@ export default function SetupWizard() {
               <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
                 <div className="flex items-center gap-2 text-green-800 font-medium mb-1">
                   <span>✅</span>
-                  <span>YouTube Connected Successfully!</span>
+                  <span>YouTube connected and ready.</span>
                 </div>
                 <p className="text-sm text-green-700">
                   Channel: <strong>{connections.youtube.channel_name}</strong>
@@ -502,7 +502,7 @@ export default function SetupWizard() {
               <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
                 <div className="flex items-center gap-2 text-green-800 font-medium mb-1">
                   <span>✅</span>
-                  <span>LinkedIn Connected Successfully!</span>
+                  <span>LinkedIn connected and ready.</span>
                 </div>
                 <p className="text-sm text-green-700">
                   User: <strong>{connections.linkedin.user_name}</strong>

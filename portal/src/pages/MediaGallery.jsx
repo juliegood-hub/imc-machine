@@ -135,7 +135,7 @@ export default function MediaGallery() {
       window.URL.revokeObjectURL(url);
     } catch (err) {
       console.error('Download failed:', err);
-      alert('Download failed: ' + err.message);
+      alert('I hit a snag downloading that image: ' + err.message);
     }
   };
 
@@ -172,7 +172,7 @@ export default function MediaGallery() {
       window.URL.revokeObjectURL(url);
     } catch (err) {
       console.error('Bulk download failed:', err);
-      alert('Bulk download failed: ' + err.message);
+      alert('I hit a snag downloading the ZIP: ' + err.message);
     }
   };
 
@@ -181,7 +181,7 @@ export default function MediaGallery() {
       return;
     }
 
-    alert(`Image regeneration requested for ${PLATFORM_FORMATS[image.format_key] || image.format_key}. This feature connects to the IMC Composer - coming soon!`);
+    alert(`I queued regeneration for ${PLATFORM_FORMATS[image.format_key] || image.format_key}. This flow is being wired to IMC Composer next.`);
   };
 
   return (

@@ -10,7 +10,9 @@
 
 html {
   height: 100%;
-  overflow: hidden;
+  min-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior-y: auto;
 }
 
 body {
@@ -18,10 +20,11 @@ body {
   background-color: var(--light-gray);
   color: var(--navy);
   margin: 0;
-  height: 100%;
+  min-height: 100%;
   overflow-y: auto;
+  overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  overscroll-behavior: none;
+  overscroll-behavior-y: auto;
 }
 
 #root {

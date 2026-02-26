@@ -28,7 +28,7 @@ const supabase = createClient(
 // Initialize Google Drive client
 function getDriveClient() {
   const keyJson = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
-  if (!keyJson) throw new Error('GOOGLE_SERVICE_ACCOUNT_KEY not configured. See SETUP-DRIVE.md for instructions.');
+  if (!keyJson) throw new Error('I need GOOGLE_SERVICE_ACCOUNT_KEY before I can work with Drive. Add it and I will handle the rest.');
 
   const credentials = JSON.parse(keyJson);
   const auth = new google.auth.GoogleAuth({
@@ -48,10 +48,10 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Send this endpoint a POST request and I can run it.' });
 
   const { action } = req.body;
-  if (!action) return res.status(400).json({ error: 'Missing action' });
+  if (!action) return res.status(400).json({ error: 'Tell me which Drive action you want and I will run it.' });
 
   try {
     let result;
@@ -72,7 +72,7 @@ export default async function handler(req, res) {
         result = await getShareLink(req.body);
         break;
       default:
-        return res.status(400).json({ error: `Unknown action: ${action}` });
+        return res.status(400).json({ error: `I do not recognize "${action}" yet. Choose one of the supported Drive actions.` });
     }
     return res.status(200).json({ success: true, ...result });
   } catch (err) {
@@ -155,8 +155,8 @@ async function getOrCreateImcRootFolder(drive) {
 // ═══════════════════════════════════════════════════════════════
 
 async function createClientFolder({ clientName, userEmail, userId }) {
-  if (!clientName) throw new Error('Missing clientName');
-  if (!userId) throw new Error('Missing userId');
+  if (!clientName) throw new Error('I need the client name before I can build folders.');
+  if (!userId) throw new Error('I need the user ID before I can attach this folder tree.');
 
   const drive = getDriveClient();
   const rootId = await getOrCreateImcRootFolder(drive);
@@ -195,9 +195,9 @@ async function createClientFolder({ clientName, userEmail, userId }) {
 }
 
 async function createEventFolder({ eventId, eventTitle, eventDate, clientFolderId, userEmail }) {
-  if (!eventId) throw new Error('Missing eventId');
-  if (!eventTitle) throw new Error('Missing eventTitle');
-  if (!clientFolderId) throw new Error('Missing clientFolderId');
+  if (!eventId) throw new Error('I need the event ID before I can create the event folder.');
+  if (!eventTitle) throw new Error('I need the event title before I can name the event folder.');
+  if (!clientFolderId) throw new Error('I need the client folder ID before I can place this event folder.');
 
   const drive = getDriveClient();
 
@@ -235,9 +235,9 @@ async function createEventFolder({ eventId, eventTitle, eventDate, clientFolderI
 }
 
 async function uploadFile({ folderId, fileName, content, mimeType }) {
-  if (!folderId) throw new Error('Missing folderId');
-  if (!fileName) throw new Error('Missing fileName');
-  if (!content) throw new Error('Missing content');
+  if (!folderId) throw new Error('I need a folder ID before I can upload this file.');
+  if (!fileName) throw new Error('I need a file name before I can upload this.');
+  if (!content) throw new Error('I need file content before I can upload this.');
 
   const drive = getDriveClient();
 
@@ -280,7 +280,7 @@ async function uploadFile({ folderId, fileName, content, mimeType }) {
 }
 
 async function listFiles({ folderId }) {
-  if (!folderId) throw new Error('Missing folderId');
+  if (!folderId) throw new Error('I need the folder ID to list files.');
 
   const drive = getDriveClient();
   const { data } = await drive.files.list({
@@ -294,7 +294,7 @@ async function listFiles({ folderId }) {
 }
 
 async function getShareLink({ folderId }) {
-  if (!folderId) throw new Error('Missing folderId');
+  if (!folderId) throw new Error('I need the folder ID to fetch the share link.');
 
   const drive = getDriveClient();
   const { data } = await drive.files.get({

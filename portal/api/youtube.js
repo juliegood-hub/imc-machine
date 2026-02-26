@@ -8,7 +8,7 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Send this endpoint a POST request and I can run it.' });
 
   const { action } = req.body;
 
@@ -19,7 +19,7 @@ export default async function handler(req, res) {
     if (action === 'upload') {
       return res.status(200).json(await uploadVideo(req.body));
     }
-    return res.status(400).json({ error: `Unknown action: ${action}` });
+    return res.status(400).json({ error: `I do not recognize "${action}" yet. Use get-access-token or upload.` });
   } catch (err) {
     console.error('[youtube]', err);
     return res.status(500).json({ success: false, error: err.message });
@@ -31,7 +31,7 @@ async function refreshAccessToken() {
   const clientSecret = process.env.YOUTUBE_CLIENT_SECRET;
   const refreshToken = process.env.YOUTUBE_REFRESH_TOKEN;
   if (!clientId || !clientSecret || !refreshToken) {
-    throw new Error('YouTube OAuth credentials not configured');
+    throw new Error('I need YouTube OAuth credentials before I can upload.');
   }
 
   const r = await fetch('https://oauth2.googleapis.com/token', {
@@ -83,7 +83,7 @@ async function uploadVideo({ title, description, tags, categoryId, audioBase64 }
 
   if (!initRes.ok) {
     const err = await initRes.json().catch(() => ({}));
-    throw new Error(`YouTube init failed: ${err.error?.message || initRes.statusText}`);
+    throw new Error(`YouTube upload setup failed: ${err.error?.message || initRes.statusText}`);
   }
 
   const uploadUrl = initRes.headers.get('location');

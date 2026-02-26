@@ -40,10 +40,10 @@ export default function PodcastStudio() {
         setSourceDocument(data.sourceDocument);
         setActiveStep(2);
       } else {
-        alert('Failed to generate source document: ' + data.error);
+        alert('I hit a snag building the source document: ' + data.error);
       }
     } catch (error) {
-      alert('Error generating document: ' + error.message);
+      alert('I hit a snag generating that document: ' + error.message);
     } finally {
       setGeneratingDocument(false);
     }
@@ -51,7 +51,7 @@ export default function PodcastStudio() {
 
   const copyToClipboard = () => {
     navigator.clipboard.writeText(sourceDocument);
-    alert('Source document copied to clipboard!');
+    alert('Source document copied. You are ready for the next step.');
   };
 
   const openNotebookLM = () => {
@@ -66,7 +66,7 @@ export default function PodcastStudio() {
       setUploadedAudio(audioUrl);
       setActiveStep(3);
     } else {
-      alert('Please upload a valid audio file (MP3 or WAV)');
+      alert('Drop in an MP3 or WAV file and I can keep going.');
     }
   };
 
@@ -79,7 +79,7 @@ export default function PodcastStudio() {
       setUploadedAudio(audioUrl);
       setActiveStep(3);
     } else {
-      alert('Please upload a valid audio file (MP3 or WAV)');
+      alert('Drop in an MP3 or WAV file and I can keep going.');
     }
   };
 
@@ -149,12 +149,12 @@ export default function PodcastStudio() {
     switch (platform) {
       case 'copy':
         navigator.clipboard.writeText(url);
-        alert('Episode link copied to clipboard!');
+        alert('Episode link copied.');
         break;
       case 'embed':
         const embedCode = `<iframe width="560" height="315" src="https://www.youtube.com/embed/${youtubeResult.videoId}" frameborder="0" allowfullscreen></iframe>`;
         navigator.clipboard.writeText(embedCode);
-        alert('Embed code copied to clipboard!');
+        alert('Embed code copied.');
         break;
       default:
         window.open(`${platform}?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`, '_blank');
@@ -168,7 +168,7 @@ export default function PodcastStudio() {
           🎙️ Podcast Studio
         </h1>
         <p className="text-gray-600 text-lg">
-          Create NotebookLM Audio Overview podcasts with a semi-automated workflow
+          Build your Zoom-first podcast workflow, then publish video and audio without losing momentum.
         </p>
       </div>
 
@@ -182,10 +182,10 @@ export default function PodcastStudio() {
               {step}
             </div>
             <span className={`ml-2 text-sm ${activeStep >= step ? 'text-[#0d1b2a] font-semibold' : 'text-gray-500'}`}>
-              {step === 1 && 'Source Document'}
+              {step === 1 && 'Build Source'}
               {step === 2 && 'Upload Audio'}
-              {step === 3 && 'Publish YouTube'}
-              {step === 4 && 'Distribution'}
+              {step === 3 && 'Publish to YouTube'}
+              {step === 4 && 'Share Out'}
             </span>
             {step < 4 && <div className="mx-4 w-8 h-0.5 bg-gray-300" />}
           </div>
@@ -200,7 +200,7 @@ export default function PodcastStudio() {
         
         <div className="mb-4">
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Select Event
+            Choose Event
           </label>
           <select 
             className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#c8a45e] focus:border-transparent"
@@ -223,7 +223,7 @@ export default function PodcastStudio() {
 
         {selectedEvent && (
           <div className="mb-4 p-4 bg-gray-50 rounded-lg">
-            <h3 className="font-semibold text-[#0d1b2a] mb-2">Selected Event</h3>
+            <h3 className="font-semibold text-[#0d1b2a] mb-2">Event Snapshot</h3>
             <p><strong>Title:</strong> {selectedEvent.title}</p>
             <p><strong>Date:</strong> {parseLocalDate(selectedEvent.date).toLocaleDateString()} at {selectedEvent.time}</p>
             <p><strong>Venue:</strong> {selectedEvent.venue}</p>
@@ -236,13 +236,13 @@ export default function PodcastStudio() {
           disabled={!selectedEvent || generatingDocument}
           className="w-full bg-[#c8a45e] text-[#0d1b2a] font-semibold py-3 px-6 rounded-lg hover:bg-opacity-90 transition-colors disabled:bg-gray-300 disabled:text-gray-500 mb-4"
         >
-          {generatingDocument ? 'Generating Document...' : 'Generate Source Document'}
+          {generatingDocument ? 'Building source document...' : 'Build Source Document'}
         </button>
 
         {sourceDocument && (
           <div className="space-y-4">
             <div className="bg-white border border-gray-300 rounded-lg p-4 max-h-96 overflow-y-auto">
-              <h3 className="font-semibold text-[#0d1b2a] mb-2">Generated Source Document</h3>
+              <h3 className="font-semibold text-[#0d1b2a] mb-2">Source Document</h3>
               <pre className="whitespace-pre-wrap text-sm text-gray-700 font-mono">
                 {sourceDocument}
               </pre>
@@ -252,7 +252,7 @@ export default function PodcastStudio() {
                 onClick={copyToClipboard}
                 className="flex-1 bg-gray-100 text-gray-700 font-medium py-2 px-4 rounded-lg hover:bg-gray-200 transition-colors"
               >
-                Copy to Clipboard
+                Copy Text
               </button>
               <button
                 onClick={openNotebookLM}
@@ -262,8 +262,7 @@ export default function PodcastStudio() {
               </button>
             </div>
             <div className="text-sm text-gray-600 bg-blue-50 p-3 rounded-lg">
-              <strong>Next steps:</strong> Copy this document, open NotebookLM, create a new notebook, paste the content, 
-              and generate an Audio Overview. Then download the MP3 and upload it below.
+              <strong>Next:</strong> Copy this, open NotebookLM, create a notebook, paste the content, generate an Audio Overview, then upload the MP3 below.
             </div>
           </div>
         )}
@@ -343,7 +342,7 @@ export default function PodcastStudio() {
           <div className={`p-4 rounded-lg ${youtubeResult.success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
             {youtubeResult.success ? (
               <div>
-                <h3 className="font-semibold text-green-800 mb-2">✅ Published Successfully!</h3>
+                <h3 className="font-semibold text-green-800 mb-2">✅ Published and live</h3>
                 <p className="text-green-700">
                   <a href={youtubeResult.videoUrl} target="_blank" rel="noopener noreferrer" className="underline">
                     View on YouTube
@@ -352,7 +351,7 @@ export default function PodcastStudio() {
               </div>
             ) : (
               <div>
-                <h3 className="font-semibold text-red-800 mb-2">❌ Publishing Failed</h3>
+                <h3 className="font-semibold text-red-800 mb-2">❌ Publishing hit a snag</h3>
                 <p className="text-red-700">{youtubeResult.error}</p>
                 {youtubeResult.setup && (
                   <div className="mt-2">

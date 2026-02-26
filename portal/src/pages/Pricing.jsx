@@ -23,7 +23,7 @@ export default function Pricing() {
   const handleGetStarted = () => {
     if (!agreed) {
       setShowAgreement(true);
-      alert('Please read and accept the AI Content Agreement before continuing.');
+      alert('Read and accept the AI Content Agreement, then I can continue.');
       return;
     }
     if (promoApplied) {
@@ -185,7 +185,7 @@ export default function Pricing() {
         >
           {promoApplied ? '🎉 Start Free for February' : '🚀 Get Started — $25/Event'}
         </button>
-        {!agreed && <p className="text-xs text-gray-400 mt-2">Please accept the AI Content Agreement above to continue.</p>}
+        {!agreed && <p className="text-xs text-gray-400 mt-2">Accept the AI Content Agreement above, then we are ready.</p>}
       </div>
 
       {/* FAQ */}
