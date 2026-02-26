@@ -26,6 +26,14 @@ Backend response copy now follows the Julie Good conversational style for user-v
 - Guide: `portal/docs/backend-julie-good-voice.md`
 - Rule: keep API payload shape stable and rewrite only message tone unless behavior changes are intentional.
 
+## Strict Release Workflow
+
+Staging + production release controls are documented in:
+
+- `portal/docs/release-workflow.md`
+
+This includes required checks, branch protection settings, Vercel secrets, and production tagging rules.
+
 ### New data model
 
 Run migrations from:

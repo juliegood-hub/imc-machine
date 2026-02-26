@@ -1,0 +1,20 @@
+name: Release Branch Policy
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  enforce-main-from-staging:
+    name: enforce-main-from-staging
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require PR source branch staging
+        run: |
+          if [ "${{ github.head_ref }}" != "staging" ]; then
+            echo "PRs into main must come from the staging branch."
+            echo "Current PR source branch: ${{ github.head_ref }}"
+            exit 1
+          fi
+          echo "Branch policy check passed."
