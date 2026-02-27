@@ -1,12 +1,13 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useVenue } from '../context/VenueContext';
 import { useAuth } from '../context/AuthContext';
 import CompletionBar from '../components/CompletionBar';
 import SponsorEditor from '../components/SponsorEditor';
 import FormAIAssist from '../components/FormAIAssist';
+import DeepResearchPromptBox from '../components/DeepResearchPromptBox';
 import { extractFromImages, extractionToEventForm, openCamera, openFileUpload } from '../services/photo-to-form';
-import { conductResearch } from '../services/research';
+import { deepResearchDraft } from '../services/research';
 import {
   THEATER_GENRE_KEY,
   THEATER_DEPARTMENTS,
@@ -18,6 +19,15 @@ import {
 import { SHOW_TYPE_OPTIONS, SHOW_TEMPLATE_OPTIONS, buildShowConfigurationDefaults } from '../constants/productionLibrary';
 import { findZoneBookingConflicts, formatZoneConflictSummary } from '../services/zone-conflicts';
 import { isArtistRole, isVenueRole } from '../constants/clientTypes';
+import {
+  LEGAL_WORKFLOW_MODES,
+  LEGAL_RECONCILIATION_STATUSES,
+  LEGAL_DISCLAIMER_TEMPLATES,
+  normalizeLegalWorkflowMode,
+  normalizeLegalDisclaimerTemplate,
+  getLegalWorkflowDefaults,
+  getLegalDisclaimerTemplate,
+} from '../constants/legalProgram';
 
 const LEGAL_CLE_GENRE_KEY = 'Legal CLE | Law Panels | Bar Association Events';
 const ARTISAN_GENRE_KEY = 'Visual Art | Artisan | Gallery | Craft Shows';
@@ -188,6 +198,68 @@ const DESCRIPTION_STYLE_HELP = {
   punchy: 'Punchy keeps the same facts but drives a sharper, faster, high-energy lead.',
 };
 
+const KNOWN_TICKETING_PROVIDERS = ['manual', 'eventbrite', 'ticketmaster', 'universe', 'square', 'etix', 'other'];
+
+function normalizeTicketProviderValue(value = '') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function mapTicketProviderDraft(rawValue = '') {
+  const normalized = normalizeTicketProviderValue(rawValue);
+  if (!normalized || normalized === 'manual' || normalized === 'unknown') {
+    return { ticketProvider: 'manual', ticketProviderOther: '' };
+  }
+  if (KNOWN_TICKETING_PROVIDERS.includes(normalized)) {
+    return { ticketProvider: normalized, ticketProviderOther: '' };
+  }
+  return { ticketProvider: 'other', ticketProviderOther: String(rawValue || '').trim() };
+}
+
+function resolveTicketProviderForStorage(form = {}) {
+  const selected = normalizeTicketProviderValue(form.ticketProvider);
+  if (selected === 'other') {
+    return normalizeTicketProviderValue(form.ticketProviderOther) || '';
+  }
+  return selected || 'manual';
+}
+
+function ticketProviderLabel(form = {}) {
+  const selected = normalizeTicketProviderValue(form.ticketProvider);
+  if (selected === 'other') {
+    return String(form.ticketProviderOther || '').trim() || 'Other';
+  }
+  return selected || 'manual';
+}
+
+function parseRecipientEmails(input = '') {
+  return String(input || '')
+    .split(/[,\n;]/g)
+    .map((value) => value.trim().toLowerCase())
+    .filter((value) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value));
+}
+
+function triggerDataUrlDownload(url = '', fileName = 'report.pdf') {
+  if (!url) return;
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+}
+
+function parseBooleanish(value = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return null;
+  if (['yes', 'y', 'true', '1', 'on', 'approved', 'required', 'complete', 'completed'].includes(normalized)) return true;
+  if (['no', 'n', 'false', '0', 'off', 'not approved', 'optional', 'pending'].includes(normalized)) return false;
+  return null;
+}
+
 function addHoursToIso(iso, hours) {
   if (!iso) return '';
   const dt = new Date(iso);
@@ -212,6 +284,13 @@ function dayOfMonthFromDate(dateOnly = '') {
   const parsed = new Date(`${dateOnly}T12:00:00`);
   if (Number.isNaN(parsed.getTime())) return '1';
   return String(parsed.getDate());
+}
+
+function resolveAiIntakeTab(inputMode = '') {
+  const mode = String(inputMode || '').trim().toLowerCase();
+  if (mode === 'voice' || mode === 'speak') return 'speak';
+  if (mode === 'upload' || mode === 'file') return 'upload';
+  return 'paste';
 }
 
 function recurrenceSummaryText(form = {}) {
@@ -362,8 +441,53 @@ function parseTheaterIntakeText(rawText = '') {
       patch.mcleStatus = pickValue(line);
       continue;
     }
+    if (lower.startsWith('legal workflow mode:') || lower.startsWith('workflow mode:')) {
+      const mode = normalizeLegalWorkflowMode(pickValue(line));
+      patch.legalWorkflowMode = mode;
+      patch.distributionApprovalRequired = mode === 'cle_full';
+      continue;
+    }
+    if (lower.startsWith('distribution approval required:')) {
+      const parsed = parseBooleanish(pickValue(line));
+      if (parsed !== null) patch.distributionApprovalRequired = parsed;
+      continue;
+    }
+    if (lower.startsWith('distribution approved:')) {
+      const parsed = parseBooleanish(pickValue(line));
+      if (parsed !== null) patch.distributionApproved = parsed;
+      continue;
+    }
+    if (lower.startsWith('distribution approved by:') || lower.startsWith('approved by:')) {
+      patch.distributionApprovedBy = pickValue(line);
+      continue;
+    }
+    if (lower.startsWith('distribution approved at:') || lower.startsWith('approved at:')) {
+      patch.distributionApprovedAt = pickValue(line);
+      continue;
+    }
+    if (lower.startsWith('distribution approval notes:')) {
+      patch.distributionApprovalNotes = pickValue(line);
+      continue;
+    }
+    if (lower.startsWith('include legal disclaimer:')) {
+      const parsed = parseBooleanish(pickValue(line));
+      if (parsed !== null) patch.includeLegalDisclaimer = parsed;
+      continue;
+    }
+    if (lower.startsWith('legal disclaimer template:') || lower.startsWith('disclaimer template:')) {
+      patch.legalDisclaimerTemplate = normalizeLegalDisclaimerTemplate(pickValue(line));
+      continue;
+    }
+    if (lower.startsWith('legal disclaimer custom:') || lower.startsWith('custom disclaimer:')) {
+      patch.legalDisclaimerCustom = pickValue(line);
+      continue;
+    }
     if (lower.startsWith('cle program notes:')) {
       patch.cleProgramNotes = pickValue(line);
+      continue;
+    }
+    if (lower.startsWith('bar numbers collected:')) {
+      patch.cleBarNumbersCollected = String(pickValue(line) || '').replace(/[^\d]/g, '');
       continue;
     }
     if (lower.startsWith('registrants:') || lower.startsWith('registered attendees:')) {
@@ -383,7 +507,9 @@ function parseTheaterIntakeText(rawText = '') {
       continue;
     }
     if (lower.startsWith('ticket provider:') || lower.startsWith('ticket platform:')) {
-      patch.ticketProvider = String(pickValue(line) || '').trim().toLowerCase();
+      const parsedProvider = mapTicketProviderDraft(pickValue(line));
+      patch.ticketProvider = parsedProvider.ticketProvider;
+      patch.ticketProviderOther = parsedProvider.ticketProviderOther;
       continue;
     }
     if (lower.startsWith('ticket provider event id:') || lower.startsWith('provider event id:') || lower.startsWith('eventbrite id:')) {
@@ -412,6 +538,59 @@ function parseTheaterIntakeText(rawText = '') {
     }
     if (lower.startsWith('stakeholder report exported:') || lower.startsWith('report exported:')) {
       patch.stakeholderReportExportedAt = pickValue(line);
+      continue;
+    }
+    if (lower.startsWith('cle certificates delivered:')) {
+      patch.cleCertificatesDeliveredAt = pickValue(line);
+      continue;
+    }
+    if (lower.startsWith('cle attendance exported:') || lower.startsWith('attendance exported:')) {
+      patch.cleAttendanceExportedAt = pickValue(line);
+      continue;
+    }
+    if (lower.startsWith('cle compliance owner:') || lower.startsWith('compliance owner:')) {
+      patch.cleComplianceOwner = pickValue(line);
+      continue;
+    }
+    if (lower.startsWith('cle compliance notes:') || lower.startsWith('compliance notes:')) {
+      patch.cleComplianceNotes = pickValue(line);
+      continue;
+    }
+    if (lower.startsWith('sponsorship revenue:')) {
+      patch.sponsorshipRevenue = numericOnly(pickValue(line));
+      continue;
+    }
+    if (lower.startsWith('speaker fees total:')) {
+      patch.speakerFeesTotal = numericOnly(pickValue(line));
+      continue;
+    }
+    if (lower.startsWith('venue costs total:')) {
+      patch.venueCostsTotal = numericOnly(pickValue(line));
+      continue;
+    }
+    if (lower.startsWith('compliance costs total:')) {
+      patch.complianceCostsTotal = numericOnly(pickValue(line));
+      continue;
+    }
+    if (lower.startsWith('reconciliation status:')) {
+      patch.reconciliationStatus = pickValue(line).toLowerCase().replace(/\s+/g, '_');
+      continue;
+    }
+    if (lower.startsWith('reconciliation owner:')) {
+      patch.reconciliationOwner = pickValue(line);
+      continue;
+    }
+    if (lower.startsWith('reconciliation closed at:')) {
+      patch.reconciliationClosedAt = pickValue(line);
+      continue;
+    }
+    if (lower.startsWith('reconciliation notes:')) {
+      patch.reconciliationNotes = pickValue(line);
+      continue;
+    }
+    if (lower.startsWith('attendee:')) {
+      const detail = pickValue(line);
+      patch.cleAttendanceRows = [String(patch.cleAttendanceRows || '').trim(), detail].filter(Boolean).join('\n');
       continue;
     }
 
@@ -491,22 +670,45 @@ function mergeTheaterSpecialInstructions(form) {
   } else if (form.genre === LEGAL_CLE_GENRE_KEY) {
     tag = 'LEGAL_CLE';
     lines = [
+      ['Legal Workflow Mode', form.legalWorkflowMode],
       ['CLE Credit Hours', form.cleCreditHours],
       ['MCLE Accreditation Provider', form.mcleAccreditationProvider],
       ['Bar Association Sponsor', form.barAssociationSponsor],
       ['Legal Jurisdiction', form.legalJurisdiction],
       ['MCLE Approval Code', form.mcleApprovalCode],
       ['MCLE Status', form.mcleStatus],
+      ['Distribution Approval Required', form.distributionApprovalRequired ? 'yes' : 'no'],
+      ['Distribution Approved', form.distributionApproved ? 'yes' : 'no'],
+      ['Distribution Approved By', form.distributionApprovedBy],
+      ['Distribution Approved At', form.distributionApprovedAt],
+      ['Distribution Approval Notes', form.distributionApprovalNotes],
+      ['Include Legal Disclaimer', form.includeLegalDisclaimer ? 'yes' : 'no'],
+      ['Legal Disclaimer Template', getLegalDisclaimerTemplate(form.legalDisclaimerTemplate).label],
+      ['Legal Disclaimer Custom', form.legalDisclaimerCustom],
       ['CLE Program Notes', form.cleProgramNotes],
+      ['Bar Numbers Collected', form.cleBarNumbersCollected],
       ['Registrants', form.cleRegistrants],
       ['Check-Ins', form.cleCheckIns],
       ['Certificates Issued', form.cleCertificatesIssued],
+      ['Certificates Delivered At', form.cleCertificatesDeliveredAt],
+      ['Attendance Exported At', form.cleAttendanceExportedAt],
+      ['Compliance Owner', form.cleComplianceOwner],
+      ['Compliance Notes', form.cleComplianceNotes],
+      ['Attendance Rows', form.cleAttendanceRows],
       ['Seats Available', form.seatsAvailable],
       ['Tickets Sold', form.ticketSalesCount],
-      ['Ticket Provider', form.ticketProvider],
+      ['Ticket Provider', ticketProviderLabel(form)],
       ['Ticket Provider Event ID', form.ticketProviderEventId],
       ['Gross Ticket Revenue', form.grossTicketRevenue],
       ['Net Payout Revenue', form.netPayoutRevenue],
+      ['Sponsorship Revenue', form.sponsorshipRevenue],
+      ['Speaker Fees Total', form.speakerFeesTotal],
+      ['Venue Costs Total', form.venueCostsTotal],
+      ['Compliance Costs Total', form.complianceCostsTotal],
+      ['Reconciliation Status', form.reconciliationStatus],
+      ['Reconciliation Owner', form.reconciliationOwner],
+      ['Reconciliation Closed At', form.reconciliationClosedAt],
+      ['Reconciliation Notes', form.reconciliationNotes],
       ['Analytics Source', form.analyticsSource],
       ['Analytics Last Synced', form.analyticsLastSyncedAt],
       ['Stakeholder Report Exported', form.stakeholderReportExportedAt],
@@ -798,11 +1000,23 @@ export default function EventCreate() {
     saveShowConfiguration,
     searchVenueSuggestions,
     getVenuePlaceDetails,
+    exportSectionStakeholderReport,
   } = useVenue();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const queryParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const aiIntakeMode = queryParams.get('ai') === 'intake';
+  const aiIntakeInputMode = String(queryParams.get('input') || '').trim().toLowerCase();
+  const [eventAssistDefaultTab, setEventAssistDefaultTab] = useState(() => resolveAiIntakeTab(aiIntakeInputMode));
+  const [eventAssistOpenSignal, setEventAssistOpenSignal] = useState(0);
+  const [showAiIntakeStarter, setShowAiIntakeStarter] = useState(() => {
+    if (typeof window === 'undefined' || !aiIntakeMode) return false;
+    return window.localStorage.getItem('imc-ai-intake-starter-seen-v1') !== '1';
+  });
   const [step, setStep] = useState(0);
   const [stepError, setStepError] = useState('');
+  const [stepExportStatus, setStepExportStatus] = useState('');
   const normalizedClientType = user?.clientType || '';
   const canAssignProduction = !!(
     user?.isAdmin
@@ -815,6 +1029,7 @@ export default function EventCreate() {
     title: '', description: '', genre: '',
     date: '', time: '19:00', ticketLink: '', ticketPrice: '', venue: venue?.name || '',
     ticketProvider: 'manual',
+    ticketProviderOther: '',
     ticketProviderEventId: '',
     venueStreetNumber: '', venueStreetName: '', venueSuite: '',
     venueCity: 'San Antonio', venueState: 'TX', venueZip: '',
@@ -822,6 +1037,7 @@ export default function EventCreate() {
     venueGooglePlaceId: '',
     venueGoogleMapsUrl: '',
     venueSocialLinks: {},
+    officialAssetsOnly: !!venue?.defaultOfficialAssetsOnly,
     brandColors: venue?.brandColors || '#0d1b2a, #c8a45e',
     writingTone: venue?.writingTone || 'Professional yet approachable',
     specialInstructions: '',
@@ -835,6 +1051,15 @@ export default function EventCreate() {
     runtimeMinutes: '',
     intermissions: '',
     productionNotes: '',
+    legalWorkflowMode: 'cle_full',
+    distributionApprovalRequired: true,
+    distributionApproved: false,
+    distributionApprovedBy: '',
+    distributionApprovedAt: '',
+    distributionApprovalNotes: '',
+    includeLegalDisclaimer: true,
+    legalDisclaimerTemplate: 'cle_education',
+    legalDisclaimerCustom: '',
     cleCreditHours: '',
     mcleAccreditationProvider: '',
     barAssociationSponsor: '',
@@ -842,12 +1067,26 @@ export default function EventCreate() {
     mcleApprovalCode: '',
     mcleStatus: '',
     cleProgramNotes: '',
+    cleBarNumbersCollected: '',
     cleRegistrants: '',
     cleCheckIns: '',
     cleCertificatesIssued: '',
+    cleCertificatesDeliveredAt: '',
+    cleAttendanceExportedAt: '',
+    cleComplianceOwner: '',
+    cleComplianceNotes: '',
+    cleAttendanceRows: '',
     ticketSalesCount: '',
     grossTicketRevenue: '',
     netPayoutRevenue: '',
+    sponsorshipRevenue: '',
+    speakerFeesTotal: '',
+    venueCostsTotal: '',
+    complianceCostsTotal: '',
+    reconciliationStatus: 'draft',
+    reconciliationOwner: '',
+    reconciliationClosedAt: '',
+    reconciliationNotes: '',
     analyticsSource: '',
     analyticsLastSyncedAt: '',
     stakeholderReportExportedAt: '',
@@ -902,7 +1141,42 @@ export default function EventCreate() {
   const [descriptionResearchMeta, setDescriptionResearchMeta] = useState(null);
   const [descriptionStyleIntensity, setDescriptionStyleIntensity] = useState('feature');
   const [descriptionStyleManual, setDescriptionStyleManual] = useState(false);
+  const [descriptionResearchCorrections, setDescriptionResearchCorrections] = useState('');
+  const [descriptionResearchIncludeTerms, setDescriptionResearchIncludeTerms] = useState('');
+  const [descriptionResearchAvoidTerms, setDescriptionResearchAvoidTerms] = useState('');
+  const [officialAssetsTouched, setOfficialAssetsTouched] = useState(false);
+  const [stepExportForm, setStepExportForm] = useState({
+    markComplete: false,
+    completedBy: '',
+    recipients: '',
+    notes: '',
+    nextStep: '',
+  });
   const autoDescriptionTriggeredRef = useRef(false);
+
+  useEffect(() => {
+    setEventAssistDefaultTab(resolveAiIntakeTab(aiIntakeInputMode));
+  }, [aiIntakeInputMode]);
+
+  useEffect(() => {
+    if (!aiIntakeMode || typeof window === 'undefined') {
+      setShowAiIntakeStarter(false);
+      return;
+    }
+    const seen = window.localStorage.getItem('imc-ai-intake-starter-seen-v1') === '1';
+    setShowAiIntakeStarter(!seen);
+  }, [aiIntakeMode]);
+
+  const acknowledgeAiIntakeStarter = (tab = '') => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('imc-ai-intake-starter-seen-v1', '1');
+    }
+    if (tab) {
+      setEventAssistDefaultTab(resolveAiIntakeTab(tab));
+      setEventAssistOpenSignal(prev => prev + 1);
+    }
+    setShowAiIntakeStarter(false);
+  };
 
   const update = (field) => (e) => setForm({ ...form, [field]: e.target.value });
   const applyEventPatch = (fields) => {
@@ -972,6 +1246,26 @@ export default function EventCreate() {
     setDescriptionStyleIntensity(genreDefaultDescriptionStyle);
   }, [genreDefaultDescriptionStyle, descriptionStyleManual]);
 
+  const applyLegalWorkflowPreset = (mode) => {
+    const defaults = getLegalWorkflowDefaults(mode);
+    setForm((prev) => ({
+      ...prev,
+      legalWorkflowMode: defaults.legalWorkflowMode,
+      distributionApprovalRequired: defaults.distributionApprovalRequired,
+      distributionApproved: defaults.distributionApproved,
+      includeLegalDisclaimer: defaults.includeLegalDisclaimer,
+      legalDisclaimerTemplate: defaults.legalDisclaimerTemplate,
+      mcleStatus: defaults.legalWorkflowMode === 'branding_only'
+        ? defaults.mcleStatus
+        : (prev.mcleStatus === 'Exempt / Informational' ? '' : prev.mcleStatus),
+    }));
+    setCrewIntakeStatus(
+      defaults.legalWorkflowMode === 'branding_only'
+        ? 'Branding promotion mode selected. Compliance fields stay optional.'
+        : 'CLE compliance mode selected. Distribution approval and legal disclaimer controls are now active.'
+    );
+  };
+
   const addCrewMembers = (members = []) => {
     if (!members.length) return;
     const normalized = members
@@ -993,6 +1287,9 @@ export default function EventCreate() {
     const selectedIds = new Set(form.participantProfileIds || []);
     return (participantProfiles || []).filter(profile => selectedIds.has(profile.id));
   }, [participantProfiles, form.participantProfileIds]);
+  const selectedParticipantOfficialAssetsDefault = useMemo(() => (
+    selectedParticipantProfiles.some(profile => !!profile?.metadata?.defaultOfficialAssetsOnly)
+  ), [selectedParticipantProfiles]);
 
   const artistResearchCandidates = useMemo(() => {
     const fromProfiles = (selectedParticipantProfiles || [])
@@ -1170,6 +1467,16 @@ export default function EventCreate() {
     });
   }, [form.date]);
 
+  useEffect(() => {
+    if (officialAssetsTouched) return;
+    const shouldEnableByDefault = !!venue?.defaultOfficialAssetsOnly || selectedParticipantOfficialAssetsDefault;
+    if (!shouldEnableByDefault) return;
+    setForm(prev => {
+      if (prev.officialAssetsOnly) return prev;
+      return { ...prev, officialAssetsOnly: true };
+    });
+  }, [officialAssetsTouched, selectedParticipantOfficialAssetsDefault, venue?.defaultOfficialAssetsOnly]);
+
   const toggleParticipantSelection = (participantId) => {
     setForm(prev => {
       const selected = new Set(prev.participantProfileIds || []);
@@ -1195,7 +1502,13 @@ export default function EventCreate() {
     setParticipantStatus(`Added ${selectedParticipantProfiles.length} reusable act${selectedParticipantProfiles.length === 1 ? '' : 's'} to cast/crew.`);
   };
 
-  const generateResearchBackedDescription = useCallback(async ({ allowOverwrite = true, source = 'manual' } = {}) => {
+  const generateResearchBackedDescription = useCallback(async ({
+    allowOverwrite = true,
+    source = 'manual',
+    correctionPrompt = '',
+    includeTerms = '',
+    avoidTerms = '',
+  } = {}) => {
     const title = String(form.title || '').trim();
     if (!title) {
       setDescriptionResearchStatus('Add a title first, then I can research and draft the description.');
@@ -1207,7 +1520,7 @@ export default function EventCreate() {
     }
 
     setDescriptionResearching(true);
-    setDescriptionResearchStatus('Researching artist and event context...');
+    setDescriptionResearchStatus('Running deep research for artist, venue, and local context...');
     try {
       const eventPayload = {
         title,
@@ -1225,9 +1538,21 @@ export default function EventCreate() {
           .filter(Boolean)
           .join(' '),
       };
-
-      const research = await conductResearch(eventPayload, venuePayload, artistResearchCandidates);
-      const draftDescription = buildResearchDescriptionDraft({
+      const corrections = String(correctionPrompt || descriptionResearchCorrections || '').trim();
+      const includeWords = String(includeTerms || descriptionResearchIncludeTerms || '').trim();
+      const avoidWords = String(avoidTerms || descriptionResearchAvoidTerms || '').trim();
+      const result = await deepResearchDraft({
+        target: 'event_description',
+        event: eventPayload,
+        venue: venuePayload,
+        artistCandidates: artistResearchCandidates,
+        styleIntensity: descriptionStyleIntensity,
+        correctionPrompt: corrections,
+        includeTerms: includeWords,
+        avoidTerms: avoidWords,
+      });
+      const research = result?.research || null;
+      const draftDescription = String(result?.draft || '').trim() || buildResearchDescriptionDraft({
         event: eventPayload,
         venue: venuePayload,
         research,
@@ -1240,24 +1565,44 @@ export default function EventCreate() {
         return;
       }
 
+      const artistsResearched = Number.isFinite(result?.meta?.artistsResearched)
+        ? result.meta.artistsResearched
+        : (Array.isArray(research?.artists) ? research.artists.filter(Boolean).length : 0);
+      const artistsRequested = Number.isFinite(result?.meta?.artistsRequested)
+        ? result.meta.artistsRequested
+        : artistResearchCandidates.length;
+      const venueFound = typeof result?.meta?.venueFound === 'boolean'
+        ? result.meta.venueFound
+        : !!research?.venue;
+      const contextFound = typeof result?.meta?.contextFound === 'boolean'
+        ? result.meta.contextFound
+        : !!research?.context;
+
       setDescriptionResearchMeta({
-        artistsResearched: Array.isArray(research?.artists) ? research.artists.filter(Boolean).length : 0,
-        artistsRequested: artistResearchCandidates.length,
-        venueFound: !!research?.venue,
-        contextFound: !!research?.context,
+        artistsResearched,
+        artistsRequested,
+        venueFound,
+        contextFound,
         styleIntensity: descriptionStyleIntensity,
+        includeTermsCount: Number(result?.meta?.includeTermsCount || 0),
+        avoidTermsCount: Number(result?.meta?.avoidTermsCount || 0),
       });
 
+      const hadExistingDescription = !!String(form.description || '').trim();
       setForm(prev => {
         if (!allowOverwrite && String(prev.description || '').trim()) return prev;
         return { ...prev, description: draftDescription };
       });
 
-      if (!allowOverwrite && String(form.description || '').trim()) {
+      if (!allowOverwrite && hadExistingDescription) {
         setDescriptionResearchStatus('Research complete. Description already had text, so I left it untouched. Use refresh if you want to replace it.');
       } else {
         const styleLabel = getDescriptionStyleLabel(descriptionStyleIntensity);
-        setDescriptionResearchStatus(`Research complete. ${styleLabel} draft description is ready from ${source === 'auto' ? 'auto-research' : 'deep research'}.`);
+        if (corrections || includeWords || avoidWords) {
+          setDescriptionResearchStatus(`Research complete. Updated ${styleLabel} draft with your guidance terms.`);
+        } else {
+          setDescriptionResearchStatus(`Research complete. ${styleLabel} draft description is ready from ${source === 'auto' ? 'auto-research' : 'deep research'}.`);
+        }
       }
     } catch (err) {
       setDescriptionResearchStatus(`I hit a snag researching this event: ${err.message}`);
@@ -1280,6 +1625,9 @@ export default function EventCreate() {
     form.venueZip,
     artistResearchCandidates,
     descriptionStyleIntensity,
+    descriptionResearchCorrections,
+    descriptionResearchIncludeTerms,
+    descriptionResearchAvoidTerms,
   ]);
 
   useEffect(() => {
@@ -1330,6 +1678,7 @@ export default function EventCreate() {
         metadata: {
           department: member.department || '',
           source: 'event_create',
+          defaultOfficialAssetsOnly: !!form.officialAssetsOnly,
         },
       });
       setForm(prev => ({
@@ -1644,20 +1993,22 @@ export default function EventCreate() {
     }
     setSubmitting(true);
     try {
+      const normalizedTicketProvider = resolveTicketProviderForStorage(form) || 'manual';
       const specialInstructions = mergeTheaterSpecialInstructions(form);
       const baseProductionDetails = {
         seatsAvailable: form.seatsAvailable || '',
         ticketSalesCount: form.ticketSalesCount || '',
-        ticketProvider: form.ticketProvider || '',
+        ticketProvider: normalizedTicketProvider,
         ticketProviderEventId: form.ticketProviderEventId || '',
         venueGooglePlaceId: form.venueGooglePlaceId || '',
         venueGoogleMapsUrl: form.venueGoogleMapsUrl || '',
         venueSocialLinks: form.venueSocialLinks || {},
+        officialAssetsOnly: !!form.officialAssetsOnly,
       };
       const event = await addEvent({
         ...form,
         specialInstructions,
-        ticketProvider: form.ticketProvider || '',
+        ticketProvider: normalizedTicketProvider,
         ticketProviderEventId: form.ticketProviderEventId || '',
         venueProfileId: form.venueProfileId || '',
         participantProfileIds: form.participantProfileIds || [],
@@ -1685,6 +2036,15 @@ export default function EventCreate() {
           productionNotes: form.productionNotes || '',
         } : isLegalCleGenre ? {
           ...baseProductionDetails,
+          legalWorkflowMode: normalizeLegalWorkflowMode(form.legalWorkflowMode || 'cle_full'),
+          distributionApprovalRequired: !!form.distributionApprovalRequired,
+          distributionApproved: !!form.distributionApproved,
+          distributionApprovedBy: form.distributionApprovedBy || '',
+          distributionApprovedAt: form.distributionApprovedAt || '',
+          distributionApprovalNotes: form.distributionApprovalNotes || '',
+          includeLegalDisclaimer: !!form.includeLegalDisclaimer,
+          legalDisclaimerTemplate: normalizeLegalDisclaimerTemplate(form.legalDisclaimerTemplate || 'cle_education'),
+          legalDisclaimerCustom: form.legalDisclaimerCustom || '',
           cleCreditHours: form.cleCreditHours || '',
           mcleAccreditationProvider: form.mcleAccreditationProvider || '',
           barAssociationSponsor: form.barAssociationSponsor || '',
@@ -1692,11 +2052,25 @@ export default function EventCreate() {
           mcleApprovalCode: form.mcleApprovalCode || '',
           mcleStatus: form.mcleStatus || '',
           cleProgramNotes: form.cleProgramNotes || '',
+          cleBarNumbersCollected: form.cleBarNumbersCollected || '',
           cleRegistrants: form.cleRegistrants || '',
           cleCheckIns: form.cleCheckIns || '',
           cleCertificatesIssued: form.cleCertificatesIssued || '',
+          cleCertificatesDeliveredAt: form.cleCertificatesDeliveredAt || '',
+          cleAttendanceExportedAt: form.cleAttendanceExportedAt || '',
+          cleComplianceOwner: form.cleComplianceOwner || '',
+          cleComplianceNotes: form.cleComplianceNotes || '',
+          cleAttendanceRows: form.cleAttendanceRows || '',
           grossTicketRevenue: form.grossTicketRevenue || '',
           netPayoutRevenue: form.netPayoutRevenue || '',
+          sponsorshipRevenue: form.sponsorshipRevenue || '',
+          speakerFeesTotal: form.speakerFeesTotal || '',
+          venueCostsTotal: form.venueCostsTotal || '',
+          complianceCostsTotal: form.complianceCostsTotal || '',
+          reconciliationStatus: form.reconciliationStatus || 'draft',
+          reconciliationOwner: form.reconciliationOwner || '',
+          reconciliationClosedAt: form.reconciliationClosedAt || '',
+          reconciliationNotes: form.reconciliationNotes || '',
           analyticsSource: form.analyticsSource || '',
           analyticsLastSyncedAt: form.analyticsLastSyncedAt || '',
           stakeholderReportExportedAt: form.stakeholderReportExportedAt || '',
@@ -1751,6 +2125,206 @@ export default function EventCreate() {
     setStep(s => Math.min(s + 1, STEP_LABELS.length - 1));
   };
 
+  const currentStepLabel = STEP_LABELS[step] || `Step ${step + 1}`;
+  const nextStepLabel = STEP_LABELS[step + 1] || '';
+  const legalCloseoutNet = useMemo(() => {
+    const gross = Number(form.grossTicketRevenue) || 0;
+    const sponsorship = Number(form.sponsorshipRevenue) || 0;
+    const speakerFees = Number(form.speakerFeesTotal) || 0;
+    const venueCosts = Number(form.venueCostsTotal) || 0;
+    const complianceCosts = Number(form.complianceCostsTotal) || 0;
+    return gross + sponsorship - speakerFees - venueCosts - complianceCosts;
+  }, [
+    form.grossTicketRevenue,
+    form.sponsorshipRevenue,
+    form.speakerFeesTotal,
+    form.venueCostsTotal,
+    form.complianceCostsTotal,
+  ]);
+
+  const stepCompletionChecklist = useMemo(() => {
+    switch (step) {
+      case 0:
+        return [
+          { label: 'Event type selected', done: !!form.genre },
+        ];
+      case 1:
+        return [
+          { label: 'Event title added', done: !!form.title },
+          { label: 'Event date added', done: !!form.date },
+          { label: 'Description drafted', done: !!String(form.description || '').trim() },
+        ];
+      case 2:
+        return [
+          { label: 'At least one cast/crew entry', done: crew.length > 0 || (form.participantProfileIds || []).length > 0 },
+          ...(isLegalCleGenre ? [
+            { label: 'Legal workflow mode selected', done: !!form.legalWorkflowMode },
+            { label: 'Distribution approval configured', done: !form.distributionApprovalRequired || !!form.distributionApproved || !!form.distributionApprovedBy },
+          ] : []),
+        ];
+      case 3:
+        return [
+          { label: 'Venue name set', done: !!form.venue },
+          { label: 'Event start time set', done: !!form.time },
+        ];
+      case 4:
+        return [
+          { label: 'Sponsor section reviewed', done: true },
+        ];
+      case 5:
+        return [
+          { label: 'Media uploaded or official-assets-only selected', done: uploadedImages.length > 0 || !!form.officialAssetsOnly },
+        ];
+      case 6:
+        return [
+          { label: 'Brand colors set', done: !!String(form.brandColors || '').trim() },
+          { label: 'Writing tone set', done: !!String(form.writingTone || '').trim() },
+        ];
+      case 7:
+        return [
+          { label: 'At least one channel selected', done: Object.values(channels || {}).some(Boolean) },
+        ];
+      case 8:
+        return [
+          { label: 'Core event fields valid', done: !!form.title && !!form.date && !!form.genre },
+        ];
+      default:
+        return [];
+    }
+  }, [channels, crew.length, form, step, uploadedImages.length]);
+
+  const stepCompletion = useMemo(() => {
+    const total = stepCompletionChecklist.length;
+    const done = stepCompletionChecklist.filter((item) => item.done).length;
+    return {
+      total,
+      done,
+      isComplete: total > 0 ? done === total : false,
+    };
+  }, [stepCompletionChecklist]);
+
+  const currentStepExportData = useMemo(() => {
+    switch (step) {
+      case 0:
+        return { genre: form.genre, availableGenres: GENRES.map((item) => item.key) };
+      case 1:
+        return {
+          title: form.title,
+          description: form.description,
+          date: form.date,
+          time: form.time,
+          ticketLink: form.ticketLink,
+          ticketPrice: form.ticketPrice,
+          ticketProvider: ticketProviderLabel(form),
+          ticketProviderEventId: form.ticketProviderEventId,
+        };
+      case 2:
+        return {
+          crew,
+          selectedParticipantProfiles,
+          legalProgram: isLegalCleGenre ? {
+            legalWorkflowMode: form.legalWorkflowMode,
+            distributionApprovalRequired: !!form.distributionApprovalRequired,
+            distributionApproved: !!form.distributionApproved,
+            distributionApprovedBy: form.distributionApprovedBy,
+            includeLegalDisclaimer: !!form.includeLegalDisclaimer,
+            legalDisclaimerTemplate: form.legalDisclaimerTemplate,
+            cleCreditHours: form.cleCreditHours,
+            mcleStatus: form.mcleStatus,
+            cleRegistrants: form.cleRegistrants,
+            cleCheckIns: form.cleCheckIns,
+          } : null,
+        };
+      case 3:
+        return {
+          venue: form.venue,
+          venueAddress: form.venueAddress,
+          venueCity: form.venueCity,
+          venueState: form.venueState,
+          venueZip: form.venueZip,
+          venuePhone: form.venuePhone,
+          venueWebsite: form.venueWebsite,
+          seatsAvailable: form.seatsAvailable,
+          ticketSalesCount: form.ticketSalesCount,
+          performanceZoneId: form.performanceZoneId,
+          performanceZoneName: form.performanceZoneName || selectedZone?.name || '',
+          bookingStartAt: form.bookingStartAt,
+          bookingEndAt: form.bookingEndAt,
+        };
+      case 4:
+        return { sponsors: form.sponsors || [] };
+      case 5:
+        return {
+          officialAssetsOnly: !!form.officialAssetsOnly,
+          uploadedImages: uploadedImages.map((item) => ({ url: item.url, source: item.source || 'upload' })),
+        };
+      case 6:
+        return {
+          brandColors: form.brandColors,
+          writingTone: form.writingTone,
+          specialInstructions: form.specialInstructions,
+          detectedFonts: form.detectedFonts,
+        };
+      case 7:
+        return {
+          selectedChannels: CHANNELS.filter((ch) => channels[ch.key]).map((ch) => ch.label),
+        };
+      case 8:
+        return {
+          form,
+          crew,
+          selectedParticipantProfiles,
+          uploadedImages: uploadedImages.map((item) => ({ url: item.url, source: item.source || 'upload' })),
+          selectedChannels: CHANNELS.filter((ch) => channels[ch.key]).map((ch) => ch.label),
+        };
+      default:
+        return {};
+    }
+  }, [channels, crew, form, selectedParticipantProfiles, selectedZone?.name, step, uploadedImages]);
+
+  const handleExportCurrentStepForStakeholders = async ({ sendEmail = false } = {}) => {
+    const recipients = parseRecipientEmails(stepExportForm.recipients);
+    if (sendEmail && !recipients.length) {
+      setStepExportStatus('Add at least one stakeholder email before sending this step.');
+      return;
+    }
+    try {
+      setStepExportStatus(sendEmail ? 'Exporting this step and emailing stakeholders...' : 'Exporting this step report...');
+      const result = await exportSectionStakeholderReport({
+        event: {
+          title: form.title || 'Draft Event',
+          date: form.date || '',
+          venue: form.venue || '',
+        },
+        sectionKey: `event_create_step_${step + 1}`,
+        sectionTitle: `Event Setup - ${currentStepLabel}`,
+        sectionDescription: `Progress export from Event Setup step ${step + 1}.`,
+        completion: {
+          isComplete: stepExportForm.markComplete || stepCompletion.isComplete,
+          completedBy: stepExportForm.completedBy || '',
+          completedAt: new Date().toISOString(),
+          checklist: stepCompletionChecklist,
+          notes: stepExportForm.notes || '',
+        },
+        nextStep: stepExportForm.nextStep || (nextStepLabel ? `Move to ${nextStepLabel}.` : ''),
+        content: currentStepExportData,
+        recipients: sendEmail ? recipients : [],
+      });
+      triggerDataUrlDownload(result?.downloadUrl, result?.fileName || `event-step-${step + 1}-stakeholder-report.pdf`);
+      setStepExportStatus(
+        sendEmail && result?.email?.emailId
+          ? `Step exported and emailed to ${recipients.length} stakeholder${recipients.length === 1 ? '' : 's'}.`
+          : 'Step exported. Share the report with stakeholders.'
+      );
+    } catch (err) {
+      setStepExportStatus(`Step export failed: ${err.message}`);
+    }
+  };
+
+  useEffect(() => {
+    setStepExportStatus('');
+  }, [step]);
+
   const renderStep = () => {
     switch (step) {
       case 0: return (
@@ -1801,80 +2375,56 @@ export default function EventCreate() {
             <div>
               <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
                 <label className="block text-sm font-medium text-gray-700 m-0">Description</label>
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-gray-500">
-                    Style
-                    {form.genre ? ` · default ${getDescriptionStyleLabel(genreDefaultDescriptionStyle)}` : ''}
-                  </span>
-                  <div className="inline-flex rounded-md border border-gray-200 bg-white p-0.5">
-                    {DESCRIPTION_STYLE_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.value}
-                        type="button"
-                        onClick={() => {
-                          setDescriptionStyleManual(true);
-                          setDescriptionStyleIntensity(opt.value);
-                        }}
-                        className={`text-[11px] px-2.5 py-1 rounded ${descriptionStyleIntensity === opt.value
-                          ? 'bg-[#0d1b2a] text-white'
-                          : 'text-gray-600 hover:bg-gray-100'
-                        }`}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                  {descriptionStyleManual && form.genre && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDescriptionStyleManual(false);
-                        setDescriptionStyleIntensity(genreDefaultDescriptionStyle);
-                      }}
-                      className="text-[11px] px-2 py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-100"
-                    >
-                      Use Genre Default
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => generateResearchBackedDescription({ allowOverwrite: true, source: 'manual' })}
-                    disabled={descriptionResearching || !form.title || !form.genre}
-                    className={`text-xs px-3 py-1.5 rounded border ${descriptionResearching || !form.title || !form.genre
-                      ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
-                      : 'bg-white text-[#0d1b2a] border-[#c8a45e] hover:bg-[#faf8f3]'
-                    }`}
-                  >
-                    {descriptionResearching ? 'Researching…' : 'Research Artist + Draft Description'}
-                  </button>
-                </div>
               </div>
-              <div className="mt-2 p-2.5 rounded-lg bg-gray-50 border border-gray-100">
-                <p className="text-[11px] text-gray-600 m-0">
-                  {`Default for this event type: ${getDescriptionStyleLabel(genreDefaultDescriptionStyle)}.`}
-                  {' '}Choose a style before you run research.
-                </p>
-                <p className="text-[11px] text-gray-500 mt-1 mb-0">
-                  <strong>Clean:</strong> {DESCRIPTION_STYLE_HELP.clean}
-                </p>
-                <p className="text-[11px] text-gray-500 mt-1 mb-0">
-                  <strong>Feature:</strong> {DESCRIPTION_STYLE_HELP.feature}
-                </p>
-                <p className="text-[11px] text-gray-500 mt-1 mb-0">
-                  <strong>Punchy:</strong> {DESCRIPTION_STYLE_HELP.punchy}
-                </p>
-              </div>
+              <DeepResearchPromptBox
+                title="OpenAI Deep Research Draft"
+                subtitle="I will research band and venue context, draft a fact-checked first pass, then you can edit before anything is saved."
+                styleValue={descriptionStyleIntensity}
+                onStyleChange={(value) => {
+                  setDescriptionStyleManual(true);
+                  setDescriptionStyleIntensity(value);
+                }}
+                defaultStyleLabel={form.genre ? getDescriptionStyleLabel(genreDefaultDescriptionStyle) : ''}
+                showUseDefaultButton={descriptionStyleManual && !!form.genre}
+                onUseDefaultStyle={() => {
+                  setDescriptionStyleManual(false);
+                  setDescriptionStyleIntensity(genreDefaultDescriptionStyle);
+                }}
+                styleOptions={DESCRIPTION_STYLE_OPTIONS}
+                styleHelp={DESCRIPTION_STYLE_HELP}
+                correctionValue={descriptionResearchCorrections}
+                onCorrectionChange={setDescriptionResearchCorrections}
+                correctionLabel="Corrections or specific terms for regenerate"
+                correctionPlaceholder="Example: Spell 'Nico Laven' correctly, mention Midtown MeetUp residency, and keep this parent-friendly."
+                includeTermsValue={descriptionResearchIncludeTerms}
+                onIncludeTermsChange={setDescriptionResearchIncludeTerms}
+                includeTermsLabel="Use these words or phrases"
+                includeTermsPlaceholder="Example: soulful, residency, family-friendly, SATX"
+                avoidTermsValue={descriptionResearchAvoidTerms}
+                onAvoidTermsChange={setDescriptionResearchAvoidTerms}
+                avoidTermsLabel="Avoid these words or phrases"
+                avoidTermsPlaceholder="Example: underground, explicit, rave"
+                onGenerate={(payload = {}) => generateResearchBackedDescription({
+                  allowOverwrite: true,
+                  source: 'manual',
+                  ...payload,
+                })}
+                onRegenerate={(payload = {}) => generateResearchBackedDescription({
+                  allowOverwrite: true,
+                  source: 'manual',
+                  ...payload,
+                })}
+                generating={descriptionResearching}
+                canGenerate={!!form.title && !!form.genre}
+                statusText={descriptionResearchStatus}
+                metaText={descriptionResearchMeta
+                  ? `Research coverage: artists requested ${descriptionResearchMeta.artistsRequested}, artists found ${descriptionResearchMeta.artistsResearched}, venue ${descriptionResearchMeta.venueFound ? 'found' : 'not found'}, context ${descriptionResearchMeta.contextFound ? 'found' : 'not found'}, style ${getDescriptionStyleLabel(descriptionResearchMeta.styleIntensity)}, include terms ${descriptionResearchMeta.includeTermsCount || 0}, avoid terms ${descriptionResearchMeta.avoidTermsCount || 0}.`
+                  : ''
+                }
+              />
               <textarea value={form.description} onChange={update('description')} rows={4}
                 className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-[#c8a45e] resize-y"
                 placeholder="Tell people what this event feels like and why they should show up." />
-              {descriptionResearchStatus && (
-                <p className="text-xs text-gray-500 mt-2 mb-0">{descriptionResearchStatus}</p>
-              )}
-              {descriptionResearchMeta && (
-                <p className="text-[11px] text-gray-400 mt-1 mb-0">
-                  Research coverage: artists requested {descriptionResearchMeta.artistsRequested}, artists found {descriptionResearchMeta.artistsResearched}, venue {descriptionResearchMeta.venueFound ? 'found' : 'not found'}, context {descriptionResearchMeta.contextFound ? 'found' : 'not found'}, style {getDescriptionStyleLabel(descriptionResearchMeta.styleIntensity)}.
-                </p>
-              )}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -2110,8 +2660,41 @@ export default function EventCreate() {
           {isLegalCleGenre && (
             <div className="card mb-4">
               <h3 className="text-base mb-3">⚖️ CLE / Legal Program Details</h3>
-              <p className="text-xs text-gray-500 mb-3">Capture MCLE data now so promotion, ticketing, and stakeholder reporting stay consistent.</p>
+              <p className="text-xs text-gray-500 mb-3">Capture MCLE, approval, compliance, and closeout details so legal distribution and reporting stay clean.</p>
+              <div className="border border-blue-200 bg-blue-50 rounded-lg p-3 mb-4">
+                <p className="text-xs font-semibold text-blue-900 m-0">Quick Start Mode</p>
+                <p className="text-xs text-blue-800 mt-1 mb-2">Pick the workflow you want right now. You can switch any time.</p>
+                <div className="flex flex-wrap gap-2">
+                  {LEGAL_WORKFLOW_MODES.map((mode) => {
+                    const active = normalizeLegalWorkflowMode(form.legalWorkflowMode) === mode.value;
+                    return (
+                      <button
+                        key={mode.value}
+                        type="button"
+                        onClick={() => applyLegalWorkflowPreset(mode.value)}
+                        className={`px-3 py-1.5 rounded border text-xs ${active ? 'bg-[#0d1b2a] text-white border-[#0d1b2a]' : 'bg-white text-gray-700 border-gray-300'}`}
+                      >
+                        {mode.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-blue-800 mt-2 mb-0">
+                  {LEGAL_WORKFLOW_MODES.find((mode) => mode.value === normalizeLegalWorkflowMode(form.legalWorkflowMode))?.description
+                    || LEGAL_WORKFLOW_MODES[0].description}
+                </p>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Legal Workflow Mode</label>
+                  <select
+                    value={normalizeLegalWorkflowMode(form.legalWorkflowMode)}
+                    onChange={(e) => applyLegalWorkflowPreset(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-[#c8a45e] bg-white"
+                  >
+                    {LEGAL_WORKFLOW_MODES.map(mode => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
+                  </select>
+                </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">CLE Credit Hours</label>
                   <input
@@ -2188,9 +2771,109 @@ export default function EventCreate() {
                 />
               </div>
               <div className="mt-4 border-t border-gray-200 pt-3">
+                <h4 className="text-sm font-semibold mb-2">Distribution Gate + Legal Disclaimer</h4>
+                <p className="text-xs text-gray-500 mb-3">Lock distribution until approval when needed, and append legal disclaimer text automatically.</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <label className="text-xs flex items-center gap-2 px-3 py-2 border border-gray-200 rounded bg-white">
+                    <input
+                      type="checkbox"
+                      checked={!!form.distributionApprovalRequired}
+                      onChange={(e) => setForm(prev => ({ ...prev, distributionApprovalRequired: e.target.checked }))}
+                    />
+                    Require approval before distribution
+                  </label>
+                  <label className="text-xs flex items-center gap-2 px-3 py-2 border border-gray-200 rounded bg-white">
+                    <input
+                      type="checkbox"
+                      checked={!!form.distributionApproved}
+                      onChange={(e) => setForm(prev => ({
+                        ...prev,
+                        distributionApproved: e.target.checked,
+                        distributionApprovedAt: e.target.checked ? (prev.distributionApprovedAt || new Date().toISOString().slice(0, 16)) : '',
+                      }))}
+                    />
+                    Mark distribution approved
+                  </label>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Approved By</label>
+                    <input
+                      type="text"
+                      value={form.distributionApprovedBy}
+                      onChange={update('distributionApprovedBy')}
+                      className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-[#c8a45e]"
+                      placeholder="Approver name"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Approved At</label>
+                    <input
+                      type="datetime-local"
+                      value={form.distributionApprovedAt}
+                      onChange={update('distributionApprovedAt')}
+                      className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-[#c8a45e]"
+                    />
+                  </div>
+                  <label className="text-xs flex items-center gap-2 px-3 py-2 border border-gray-200 rounded bg-white md:col-span-2">
+                    <input
+                      type="checkbox"
+                      checked={!!form.includeLegalDisclaimer}
+                      onChange={(e) => setForm(prev => ({ ...prev, includeLegalDisclaimer: e.target.checked }))}
+                    />
+                    Include legal disclaimer text in outbound content
+                  </label>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Disclaimer Template</label>
+                    <select
+                      value={normalizeLegalDisclaimerTemplate(form.legalDisclaimerTemplate)}
+                      onChange={(e) => setForm(prev => ({ ...prev, legalDisclaimerTemplate: normalizeLegalDisclaimerTemplate(e.target.value) }))}
+                      className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-[#c8a45e] bg-white"
+                    >
+                      {LEGAL_DISCLAIMER_TEMPLATES.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Template Preview</label>
+                    <p className="text-xs text-gray-600 m-0 px-3 py-2 border border-gray-200 rounded bg-gray-50">
+                      {getLegalDisclaimerTemplate(form.legalDisclaimerTemplate).shortText || 'No template text selected.'}
+                    </p>
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Custom Disclaimer Add-On</label>
+                    <textarea
+                      value={form.legalDisclaimerCustom}
+                      onChange={update('legalDisclaimerCustom')}
+                      rows={2}
+                      className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-[#c8a45e] resize-y"
+                      placeholder="Optional language to append after the selected template."
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Approval Notes</label>
+                    <textarea
+                      value={form.distributionApprovalNotes}
+                      onChange={update('distributionApprovalNotes')}
+                      rows={2}
+                      className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-[#c8a45e] resize-y"
+                      placeholder="What was approved, by whom, and any distribution constraints."
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4 border-t border-gray-200 pt-3">
                 <h4 className="text-sm font-semibold mb-2">Stakeholder Analytics Snapshot</h4>
                 <p className="text-xs text-gray-500 mb-3">Track attendance and money endpoints for stakeholder reporting.</p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Bar Numbers Collected</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={form.cleBarNumbersCollected}
+                      onChange={update('cleBarNumbersCollected')}
+                      className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-[#c8a45e]"
+                      placeholder="0"
+                    />
+                  </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">Registrants</label>
                     <input
@@ -2280,6 +2963,34 @@ export default function EventCreate() {
                     />
                   </div>
                   <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Certificates Delivered</label>
+                    <input
+                      type="datetime-local"
+                      value={form.cleCertificatesDeliveredAt}
+                      onChange={update('cleCertificatesDeliveredAt')}
+                      className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-[#c8a45e]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Attendance Exported</label>
+                    <input
+                      type="datetime-local"
+                      value={form.cleAttendanceExportedAt}
+                      onChange={update('cleAttendanceExportedAt')}
+                      className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-[#c8a45e]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Compliance Owner</label>
+                    <input
+                      type="text"
+                      value={form.cleComplianceOwner}
+                      onChange={update('cleComplianceOwner')}
+                      className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-[#c8a45e]"
+                      placeholder="Who owns CLE reporting"
+                    />
+                  </div>
+                  <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">Stakeholder Report Exported</label>
                     <input
                       type="datetime-local"
@@ -2288,6 +2999,126 @@ export default function EventCreate() {
                       className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-[#c8a45e]"
                     />
                   </div>
+                </div>
+                <div className="mt-3 grid grid-cols-1 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Attendance Roster Lines (Name, Bar #, Check-In, Certificate)</label>
+                    <textarea
+                      value={form.cleAttendanceRows}
+                      onChange={update('cleAttendanceRows')}
+                      rows={4}
+                      className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-[#c8a45e] resize-y"
+                      placeholder="Jane Attorney, 24001234, checked_in, issued&#10;Alex Counsel, 24008765, checked_in, pending"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Compliance Notes</label>
+                    <textarea
+                      value={form.cleComplianceNotes}
+                      onChange={update('cleComplianceNotes')}
+                      rows={2}
+                      className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-[#c8a45e] resize-y"
+                      placeholder="Certification deadlines, export handoff notes, bar reporting references."
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4 border-t border-gray-200 pt-3">
+                <h4 className="text-sm font-semibold mb-2">CLE Finance Closeout</h4>
+                <p className="text-xs text-gray-500 mb-3">Reconcile event revenue and legal program costs for final reporting.</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Sponsorship Revenue ($)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={form.sponsorshipRevenue}
+                      onChange={update('sponsorshipRevenue')}
+                      className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-[#c8a45e]"
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Speaker Fees Total ($)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={form.speakerFeesTotal}
+                      onChange={update('speakerFeesTotal')}
+                      className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-[#c8a45e]"
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Venue Costs Total ($)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={form.venueCostsTotal}
+                      onChange={update('venueCostsTotal')}
+                      className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-[#c8a45e]"
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Compliance Costs Total ($)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={form.complianceCostsTotal}
+                      onChange={update('complianceCostsTotal')}
+                      className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-[#c8a45e]"
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Reconciliation Status</label>
+                    <select
+                      value={form.reconciliationStatus}
+                      onChange={update('reconciliationStatus')}
+                      className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-[#c8a45e] bg-white"
+                    >
+                      {LEGAL_RECONCILIATION_STATUSES.map(opt => (
+                        <option key={opt} value={opt}>{opt.replace(/_/g, ' ')}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Reconciliation Owner</label>
+                    <input
+                      type="text"
+                      value={form.reconciliationOwner}
+                      onChange={update('reconciliationOwner')}
+                      className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-[#c8a45e]"
+                      placeholder="Owner name"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Reconciliation Closed At</label>
+                    <input
+                      type="datetime-local"
+                      value={form.reconciliationClosedAt}
+                      onChange={update('reconciliationClosedAt')}
+                      className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-[#c8a45e]"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-gray-700 mt-3 mb-2">
+                  Projected closeout net: <strong>${Number.isFinite(legalCloseoutNet) ? legalCloseoutNet.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}</strong>
+                </p>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Reconciliation Notes</label>
+                  <textarea
+                    value={form.reconciliationNotes}
+                    onChange={update('reconciliationNotes')}
+                    rows={2}
+                    className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-[#c8a45e] resize-y"
+                    placeholder="Final payout assumptions, variances, and sign-off notes."
+                  />
                 </div>
               </div>
             </div>
@@ -2318,7 +3149,7 @@ export default function EventCreate() {
                 rows={5}
                 className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-[#c8a45e] resize-y"
                 placeholder={isLegalCleGenre
-                  ? 'CLE Credit Hours: 1.0&#10;MCLE Accreditation Provider: State Bar of Texas MCLE&#10;Registrants: 128&#10;Check-Ins: 112&#10;Gross Revenue: $3840.00'
+                  ? 'Legal Workflow Mode: branding_only&#10;Distribution Approval Required: no&#10;MCLE Status: Exempt / Informational&#10;Registrants: 128&#10;Bar Numbers Collected: 104&#10;Attendee: Jane Attorney, 24001234, checked_in, issued&#10;Gross Revenue: $3840.00'
                   : 'Production Type: Musical&#10;Opening Night: 2026-04-11&#10;Production Stage Manager: Jane Doe jane@example.com 210-555-0101&#10;John Smith - Fly Operator'}
               />
               <div className="flex items-center gap-2 mt-2">
@@ -2363,6 +3194,11 @@ export default function EventCreate() {
                           <span className="block text-xs text-gray-500 truncate">
                             {profile.role || 'Performer'}{profile.genre ? ` · ${profile.genre}` : ''}
                           </span>
+                          {profile?.metadata?.defaultOfficialAssetsOnly && (
+                            <span className="inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded bg-[#f8f2e4] text-[#7f5f2b] border border-[#d8bf84]">
+                              Official assets default
+                            </span>
+                          )}
                         </span>
                       </span>
                     </label>
@@ -2606,7 +3442,14 @@ export default function EventCreate() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Ticketing Provider</label>
                 <select
                   value={form.ticketProvider}
-                  onChange={update('ticketProvider')}
+                  onChange={(e) => {
+                    const nextValue = e.target.value;
+                    setForm(prev => ({
+                      ...prev,
+                      ticketProvider: nextValue,
+                      ticketProviderOther: nextValue === 'other' ? prev.ticketProviderOther : '',
+                    }));
+                  }}
                   className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-[#c8a45e] bg-white"
                 >
                   <option value="manual">Manual / Unknown</option>
@@ -2617,6 +3460,15 @@ export default function EventCreate() {
                   <option value="etix">Etix</option>
                   <option value="other">Other</option>
                 </select>
+                {form.ticketProvider === 'other' && (
+                  <input
+                    type="text"
+                    value={form.ticketProviderOther}
+                    onChange={update('ticketProviderOther')}
+                    className="w-full mt-2 px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-[#c8a45e]"
+                    placeholder="Type ticketing provider"
+                  />
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Provider Event ID (Optional)</label>
@@ -2625,7 +3477,7 @@ export default function EventCreate() {
                   value={form.ticketProviderEventId}
                   onChange={update('ticketProviderEventId')}
                   className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-[#c8a45e]"
-                  placeholder={form.ticketProvider === 'eventbrite' ? 'Eventbrite event ID' : 'Provider event identifier'}
+                  placeholder={resolveTicketProviderForStorage(form) === 'eventbrite' ? 'Eventbrite event ID' : 'Provider event identifier'}
                 />
               </div>
             </div>
@@ -2865,6 +3717,22 @@ export default function EventCreate() {
           <h2 className="text-2xl mb-2" style={{ fontFamily: "'Playfair Display', serif" }}>Media Upload</h2>
           <p className="text-gray-500 mb-4">Upload photos, flyers, artist headshots</p>
 
+          <label className="text-sm flex items-start gap-2 p-3 border border-gray-200 rounded-lg bg-white mb-4">
+            <input
+              type="checkbox"
+              checked={!!form.officialAssetsOnly}
+              onChange={(e) => {
+                setOfficialAssetsTouched(true);
+                setForm(prev => ({ ...prev, officialAssetsOnly: e.target.checked }));
+              }}
+              className="mt-0.5 accent-[#c8a45e]"
+            />
+            <span>
+              <strong>Use Official Uploaded Artwork Only</strong><br />
+              Keep flyer/poster/banner files exactly as provided. IMC Composer will skip AI graphics for this event and distribute with approved assets.
+            </span>
+          </label>
+
           <div className="card border-2 border-dashed border-[#c8a45e] bg-[#faf8f3] text-center py-12">
             {extracting.media && <p className="text-sm text-[#c8a45e] animate-pulse mb-3">🔍 Processing...</p>}
             <p className="text-4xl mb-3">📁</p>
@@ -2996,9 +3864,9 @@ export default function EventCreate() {
               {form.venueAddress && <p className="text-xs text-gray-400">{form.venueAddress}</p>}
               {form.description && <p className="text-sm mt-2">{form.description}</p>}
               {form.ticketPrice && <p className="text-sm text-[#c8a45e] mt-1">🎟️ {form.ticketPrice}</p>}
-              {form.ticketProvider && form.ticketProvider !== 'manual' && (
+              {resolveTicketProviderForStorage(form) && resolveTicketProviderForStorage(form) !== 'manual' && (
                 <p className="text-xs text-gray-500 mt-1">
-                  Provider: {form.ticketProvider}
+                  Provider: {ticketProviderLabel(form)}
                   {form.ticketProviderEventId ? ` · ID: ${form.ticketProviderEventId}` : ''}
                 </p>
               )}
@@ -3083,23 +3951,36 @@ export default function EventCreate() {
               <div className="card">
                 <h3 className="text-sm font-semibold text-gray-500 uppercase mb-2">CLE Program</h3>
                 <div className="grid grid-cols-2 gap-2 text-sm">
+                  <p className="m-0"><span className="text-gray-500">Mode:</span> {LEGAL_WORKFLOW_MODES.find((mode) => mode.value === normalizeLegalWorkflowMode(form.legalWorkflowMode))?.label || 'CLE Compliance + Promotion'}</p>
+                  <p className="m-0"><span className="text-gray-500">Approval Gate:</span> {form.distributionApprovalRequired ? 'Required' : 'Optional'}</p>
+                  {form.distributionApproved && <p className="m-0"><span className="text-gray-500">Approved:</span> Yes</p>}
+                  {form.distributionApprovedBy && <p className="m-0"><span className="text-gray-500">Approved By:</span> {form.distributionApprovedBy}</p>}
                   {form.cleCreditHours && <p className="m-0"><span className="text-gray-500">Credit Hours:</span> {form.cleCreditHours}</p>}
                   {form.legalJurisdiction && <p className="m-0"><span className="text-gray-500">Jurisdiction:</span> {form.legalJurisdiction}</p>}
                   {form.mcleAccreditationProvider && <p className="m-0"><span className="text-gray-500">Provider:</span> {form.mcleAccreditationProvider}</p>}
                   {form.barAssociationSponsor && <p className="m-0"><span className="text-gray-500">Sponsor:</span> {form.barAssociationSponsor}</p>}
                   {form.mcleApprovalCode && <p className="m-0"><span className="text-gray-500">Approval Code:</span> {form.mcleApprovalCode}</p>}
                   {form.mcleStatus && <p className="m-0"><span className="text-gray-500">Status:</span> {form.mcleStatus}</p>}
+                  {form.includeLegalDisclaimer && <p className="m-0"><span className="text-gray-500">Disclaimer:</span> {getLegalDisclaimerTemplate(form.legalDisclaimerTemplate).label}</p>}
+                  {form.cleBarNumbersCollected && <p className="m-0"><span className="text-gray-500">Bar Numbers:</span> {form.cleBarNumbersCollected}</p>}
                   {form.cleRegistrants && <p className="m-0"><span className="text-gray-500">Registrants:</span> {form.cleRegistrants}</p>}
                   {form.cleCheckIns && <p className="m-0"><span className="text-gray-500">Check-Ins:</span> {form.cleCheckIns}</p>}
                   {form.cleCertificatesIssued && <p className="m-0"><span className="text-gray-500">Certificates:</span> {form.cleCertificatesIssued}</p>}
+                  {form.cleCertificatesDeliveredAt && <p className="m-0"><span className="text-gray-500">Delivered:</span> {form.cleCertificatesDeliveredAt}</p>}
+                  {form.cleAttendanceExportedAt && <p className="m-0"><span className="text-gray-500">Attendance Export:</span> {form.cleAttendanceExportedAt}</p>}
+                  {form.cleComplianceOwner && <p className="m-0"><span className="text-gray-500">Compliance Owner:</span> {form.cleComplianceOwner}</p>}
                   {form.ticketSalesCount && <p className="m-0"><span className="text-gray-500">Tickets Sold:</span> {form.ticketSalesCount}</p>}
                   {form.grossTicketRevenue && <p className="m-0"><span className="text-gray-500">Gross Revenue:</span> ${form.grossTicketRevenue}</p>}
                   {form.netPayoutRevenue && <p className="m-0"><span className="text-gray-500">Net Payout:</span> ${form.netPayoutRevenue}</p>}
+                  {form.sponsorshipRevenue && <p className="m-0"><span className="text-gray-500">Sponsorship:</span> ${form.sponsorshipRevenue}</p>}
+                  {form.reconciliationStatus && <p className="m-0"><span className="text-gray-500">Reconciliation:</span> {String(form.reconciliationStatus).replace(/_/g, ' ')}</p>}
                   {form.analyticsSource && <p className="m-0"><span className="text-gray-500">Source:</span> {form.analyticsSource}</p>}
                   {form.analyticsLastSyncedAt && <p className="m-0"><span className="text-gray-500">Last Synced:</span> {form.analyticsLastSyncedAt}</p>}
                   {form.stakeholderReportExportedAt && <p className="m-0"><span className="text-gray-500">Report Exported:</span> {form.stakeholderReportExportedAt}</p>}
                 </div>
                 {form.cleProgramNotes && <p className="text-xs text-gray-600 mt-2 mb-0">{form.cleProgramNotes}</p>}
+                {form.distributionApprovalNotes && <p className="text-xs text-gray-600 mt-2 mb-0">Approval Notes: {form.distributionApprovalNotes}</p>}
+                {form.cleComplianceNotes && <p className="text-xs text-gray-600 mt-2 mb-0">Compliance Notes: {form.cleComplianceNotes}</p>}
               </div>
             )}
             {crew.length > 0 && (
@@ -3134,6 +4015,14 @@ export default function EventCreate() {
                 ))}
               </div>
             </div>
+            <div className="card">
+              <h3 className="text-sm font-semibold text-gray-500 uppercase mb-2">Artwork Mode</h3>
+              <p className="text-sm m-0">
+                {form.officialAssetsOnly
+                  ? 'Official uploaded artwork only (AI graphics skipped).'
+                  : 'AI graphics allowed if you choose to generate them in IMC Composer.'}
+              </p>
+            </div>
             {uploadedImages.length > 0 && (
               <div className="card">
                 <h3 className="text-sm font-semibold text-gray-500 uppercase mb-2">Media ({uploadedImages.length})</h3>
@@ -3155,6 +4044,50 @@ export default function EventCreate() {
 
   return (
     <div className="p-4 md:p-8 max-w-3xl">
+      {showAiIntakeStarter && (
+        <div className="fixed inset-0 z-[90] bg-black/40 flex items-center justify-center px-4">
+          <div className="w-full max-w-md rounded-xl bg-white border border-gray-200 shadow-lg p-4 space-y-3">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-gray-500 m-0">AI Intake Starter</p>
+              <h2 className="text-xl m-0" style={{ fontFamily: "'Playfair Display', serif" }}>Let&apos;s build this from source material</h2>
+              <p className="text-sm text-gray-600 m-0">
+                Pick your intake style. I will extract the details, draft the fields, and you approve before anything saves.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              <button
+                type="button"
+                className="w-full rounded-lg border border-[#0d1b2a] bg-[#0d1b2a] text-white px-4 py-3 text-left"
+                onClick={() => acknowledgeAiIntakeStarter('voice')}
+              >
+                <span className="block text-sm font-semibold">🎙 Speak</span>
+                <span className="block text-xs text-white/80">Talk it through and I will transcribe into form fields.</span>
+              </button>
+              <button
+                type="button"
+                className="w-full rounded-lg border border-[#c8a45e] bg-[#faf8f3] text-[#0d1b2a] px-4 py-3 text-left"
+                onClick={() => acknowledgeAiIntakeStarter('paste')}
+              >
+                <span className="block text-sm font-semibold">📧 Paste Email</span>
+                <span className="block text-xs text-gray-600">Drop the thread and signature block. I will pull contact, venue, and event clues.</span>
+              </button>
+              <button
+                type="button"
+                className="w-full rounded-lg border border-gray-300 bg-white text-[#0d1b2a] px-4 py-3 text-left"
+                onClick={() => acknowledgeAiIntakeStarter('upload')}
+              >
+                <span className="block text-sm font-semibold">📎 Upload File</span>
+                <span className="block text-xs text-gray-600">Use a photo, scan, PDF, or Word doc and I will extract what matters.</span>
+              </button>
+            </div>
+            <div className="flex justify-end">
+              <button type="button" className="btn-secondary text-xs" onClick={() => acknowledgeAiIntakeStarter()}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <h1 className="text-3xl mb-2" style={{ fontFamily: "'Playfair Display', serif" }}>Start New Event</h1>
 
       <FormAIAssist
@@ -3162,10 +4095,15 @@ export default function EventCreate() {
         currentForm={form}
         onApply={applyEventPatch}
         title="Event AI Assistant"
-        description="Say event details once by voice or text, and I will map them into basics, venue, ticketing, brand, production, and legal fields."
+        description={aiIntakeMode
+          ? "Paste the email (signature and all), or speak it out loud. I will extract the people, place, date, and event details so you can approve and move fast."
+          : "Say event details once by voice or text, and I will map them into basics, venue, ticketing, brand, production, and legal fields."}
         sourceContext="event_create_form"
         entityType="event"
         entityId={form?.id || ''}
+        defaultOpen={aiIntakeMode && !showAiIntakeStarter}
+        defaultTab={eventAssistDefaultTab}
+        openSignal={eventAssistOpenSignal}
       />
 
       <CompletionBar completed={step + 1} total={STEP_LABELS.length} label={`Step ${step + 1}: ${STEP_LABELS[step]}`} />
@@ -3183,6 +4121,75 @@ export default function EventCreate() {
       </div>
 
       {renderStep()}
+
+      <div className="mt-6 border border-gray-200 rounded-lg p-4 bg-gray-50 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold m-0">Stakeholder Export · {currentStepLabel}</h3>
+          <p className="text-[11px] text-gray-600 m-0">
+            Completion: {stepCompletion.done}/{stepCompletion.total || 1}
+          </p>
+        </div>
+        <p className="text-[11px] text-gray-500 m-0">
+          Export this step as proof for stakeholders. Add emails and I will send the same report directly from here.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <label className="text-xs flex items-center gap-2 px-2 py-1.5 border border-gray-200 rounded bg-white">
+            <input
+              type="checkbox"
+              checked={stepExportForm.markComplete}
+              onChange={(e) => setStepExportForm((prev) => ({ ...prev, markComplete: e.target.checked }))}
+            />
+            Mark this step complete (auto-detected: {stepCompletion.isComplete ? 'yes' : 'no'})
+          </label>
+          <input
+            type="text"
+            value={stepExportForm.completedBy}
+            onChange={(e) => setStepExportForm((prev) => ({ ...prev, completedBy: e.target.value }))}
+            className="px-2 py-1.5 border border-gray-200 rounded text-xs bg-white"
+            placeholder="Completed by (name)"
+          />
+          <input
+            type="text"
+            value={stepExportForm.nextStep}
+            onChange={(e) => setStepExportForm((prev) => ({ ...prev, nextStep: e.target.value }))}
+            className="px-2 py-1.5 border border-gray-200 rounded text-xs bg-white md:col-span-2"
+            placeholder={nextStepLabel ? `Next step (default: Move to ${nextStepLabel})` : 'Next step for stakeholders'}
+          />
+          <input
+            type="text"
+            value={stepExportForm.recipients}
+            onChange={(e) => setStepExportForm((prev) => ({ ...prev, recipients: e.target.value }))}
+            className="px-2 py-1.5 border border-gray-200 rounded text-xs bg-white md:col-span-2"
+            placeholder="Stakeholder emails (comma-separated)"
+          />
+          <textarea
+            value={stepExportForm.notes}
+            onChange={(e) => setStepExportForm((prev) => ({ ...prev, notes: e.target.value }))}
+            rows={2}
+            className="px-2 py-1.5 border border-gray-200 rounded text-xs bg-white md:col-span-2"
+            placeholder="Completion notes for this step"
+          />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="btn-secondary text-xs"
+            onClick={() => handleExportCurrentStepForStakeholders({ sendEmail: false })}
+          >
+            Export Step PDF
+          </button>
+          <button
+            type="button"
+            className="btn-primary text-xs"
+            onClick={() => handleExportCurrentStepForStakeholders({ sendEmail: true })}
+          >
+            Export + Email Stakeholders
+          </button>
+        </div>
+        {stepExportStatus && (
+          <p className="text-xs text-gray-600 m-0">{stepExportStatus}</p>
+        )}
+      </div>
 
       {/* Navigation */}
       <div className="flex justify-between mt-8">

@@ -16,21 +16,38 @@
 //   form-assist       → AI-assisted structured form filling
 // ═══════════════════════════════════════════════════════════════
 
+import {
+  ApiAuthError,
+  assertEventOwnership,
+  getServerSupabaseClient,
+  requireApiAuth,
+  resolvePayloadEventId,
+  scopePayloadToUser,
+} from './_auth.js';
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Send this endpoint a POST request and I can generate it.' });
 
-  const { action, driveEventFolderId } = req.body;
+  const { action } = req.body || {};
   if (!action) return res.status(400).json({ error: 'Tell me what you want me to generate and I will run it.' });
 
   try {
+    const authContext = await requireApiAuth(req);
+    const scopedBody = scopePayloadToUser(req.body || {}, authContext);
+    const eventId = resolvePayloadEventId(scopedBody);
+    if (eventId) {
+      await assertEventOwnership(getServerSupabaseClient(), authContext, eventId);
+    }
+
+    const driveEventFolderId = scopedBody.driveEventFolderId;
     let result;
     switch (action) {
       case 'generate-content':
-        result = await generateContent(req.body);
+        result = await generateContent(scopedBody);
         // Fire-and-forget: save generated content to Google Drive
         if (driveEventFolderId && result.content) {
           saveContentToGDrive(driveEventFolderId, result.content).catch(err =>
@@ -39,43 +56,46 @@ export default async function handler(req, res) {
         }
         break;
       case 'generate-image':
-        result = await generateImage(req.body);
+        result = await generateImage(scopedBody);
         // Fire-and-forget: save generated image to Google Drive
         if (driveEventFolderId && result.url) {
-          saveImageToGDrive(driveEventFolderId, result.url, req.body.prompt).catch(err =>
+          saveImageToGDrive(driveEventFolderId, result.url, scopedBody.prompt).catch(err =>
             console.warn('[generate] Drive image save failed:', err.message)
           );
         }
         break;
       case 'translate':
-        result = await translateContent(req.body);
+        result = await translateContent(scopedBody);
         break;
       case 'podcast-script':
-        result = await generatePodcastScript(req.body);
+        result = await generatePodcastScript(scopedBody);
         break;
       case 'extract-photo':
-        result = await extractFromPhoto(req.body);
+        result = await extractFromPhoto(scopedBody);
         break;
       case 'extract-upload':
-        result = await extractFromUpload(req.body);
+        result = await extractFromUpload(scopedBody);
         break;
       case 'research':
-        result = await conductResearch(req.body);
+        result = await conductResearch(scopedBody);
         break;
       case 'research-venue':
-        result = await researchVenue(req.body);
+        result = await researchVenue(scopedBody);
         break;
       case 'research-artist':
-        result = await researchArtist(req.body);
+        result = await researchArtist(scopedBody);
         break;
       case 'research-context':
-        result = await researchContext(req.body);
+        result = await researchContext(scopedBody);
+        break;
+      case 'deep-research-draft':
+        result = await deepResearchDraft(scopedBody);
         break;
       case 'podcast-source':
-        result = await generatePodcastSource(req.body);
+        result = await generatePodcastSource(scopedBody);
         break;
       case 'form-assist':
-        result = await formAssist(req.body);
+        result = await formAssist(scopedBody);
         break;
       default:
         return res.status(400).json({ error: `I do not recognize "${action}" yet. Choose one of the supported generation actions.` });
@@ -83,6 +103,9 @@ export default async function handler(req, res) {
     return res.status(200).json({ success: true, ...result });
   } catch (err) {
     console.error(`[generate] ${action} error:`, err);
+    if (err instanceof ApiAuthError) {
+      return res.status(err.status || 401).json({ success: false, error: err.message });
+    }
     return res.status(500).json({ success: false, error: err.message });
   }
 }
@@ -777,7 +800,7 @@ Output shape:
     "suppliers": []
   },
   "suggestedNextActions": [
-    { "actionType": "create_contact|create_event|create_supplier|create_booking|create_task", "label": "short label", "payload": {} }
+    { "actionType": "create_contact|create_act|create_venue|create_event|create_supplier|create_booking|create_task", "label": "short label", "payload": {} }
   ],
   "notes": "short clarification note"
 }
@@ -788,6 +811,10 @@ Rules:
 - Use 24-hour time HH:MM when applicable.
 - For arrays, return array of strings.
 - If unknown, omit the field.
+- If input includes email headers/signature, infer sender contact details (name/email/phone/title/company) and place that in inferredEntities.contacts.
+- If the signature or message references a venue/business, infer it in inferredEntities.venues and suggest create_venue.
+- If the message contains event logistics (title/date/time/venue), infer it in inferredEntities.bookings and suggest create_event or create_booking.
+- Prefer deterministic extraction over creative guessing.
 - No markdown and no extra top-level keys.`;
 
   const userPrompt = `FORM TYPE: ${formType}
@@ -1089,29 +1116,183 @@ async function extractFromPhoto({ imageData, mimeType, extractionPrompt }) {
 // RESEARCH
 // ═══════════════════════════════════════════════════════════════
 
+const OPENAI_RESEARCH_MODEL = process.env.OPENAI_RESEARCH_MODEL || process.env.OPENAI_MODEL || 'gpt-4o';
+
+function parseJSONLoose(text) {
+  if (!text || typeof text !== 'string') return null;
+  try {
+    return parseJSON(text);
+  } catch {
+    // Continue to loose parsing fallbacks.
+  }
+
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) {
+    try {
+      return JSON.parse(fenced[1].trim());
+    } catch {
+      // Continue.
+    }
+  }
+
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    const candidate = text.slice(firstBrace, lastBrace + 1);
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      // Give up and return null.
+    }
+  }
+
+  return null;
+}
+
 async function researchVenue({ venueName, city }) {
-  const prompt = `Research this venue and return structured JSON only (no markdown, no explanation):
-Venue: "${venueName}" in ${city || 'San Antonio, TX'}
+  const trimmedVenueName = String(venueName || '').trim();
+  const cityLabel = String(city || 'San Antonio, TX').trim();
+  if (!trimmedVenueName) {
+    return { venue: null, engine: 'none' };
+  }
+
+  const systemPrompt = 'You are a factual venue researcher. Return valid JSON only. Never use markdown.';
+  const userPrompt = `Research this venue and return JSON only.
+Venue: "${trimmedVenueName}"
+City/region: "${cityLabel}"
+
+Return this exact structure:
+{
+  "name": "",
+  "address": "",
+  "neighborhood": "",
+  "googleMapsUrl": "",
+  "phone": "",
+  "website": "",
+  "description": "",
+  "capacity": "",
+  "type": "",
+  "knownFor": [],
+  "socialMedia": { "instagram": "", "facebook": "" },
+  "recentPress": "",
+  "parkingInfo": "",
+  "transitInfo": ""
+}
+
+Rules:
+- Use null for unknown values.
+- Keep description to 2-3 factual sentences.
+- Prefer certainty over guessing.`;
+
+  try {
+    const raw = await openaiChat(systemPrompt, userPrompt, OPENAI_RESEARCH_MODEL, 0.2);
+    const parsed = parseJSONLoose(raw);
+    if (!parsed || typeof parsed !== 'object') throw new Error('OpenAI venue parse failed');
+    return { venue: parsed, engine: 'openai' };
+  } catch (openAiErr) {
+    if (!process.env.GEMINI_API_KEY) throw openAiErr;
+    const fallbackPrompt = `Research this venue and return structured JSON only (no markdown, no explanation):
+Venue: "${trimmedVenueName}" in ${cityLabel}
 Return this exact JSON structure:
 {"name":"official venue name","address":"full street address","neighborhood":"neighborhood name","googleMapsUrl":"url","phone":"phone","website":"url","description":"2-3 sentences","capacity":"approx","type":"bar/theater/etc","knownFor":["list"],"socialMedia":{"instagram":"@handle","facebook":"url"},"recentPress":"any","parkingInfo":"details","transitInfo":"details"}
 If you don't know a field, use null. Be factual.`;
-  const text = await geminiGenerate(prompt);
-  return { venue: parseJSON(text) };
+    const text = await geminiGenerate(fallbackPrompt);
+    const parsed = parseJSONLoose(text);
+    if (!parsed) throw new Error('I could not parse venue research this round.');
+    return { venue: parsed, engine: 'gemini' };
+  }
 }
 
 async function researchArtist({ artistName, genre }) {
-  const prompt = `Research this artist/performer and return structured JSON only:
-Artist: "${artistName}"
+  const trimmedArtistName = String(artistName || '').trim();
+  if (!trimmedArtistName) {
+    return { artist: null, engine: 'none' };
+  }
+
+  const systemPrompt = 'You are a factual entertainment researcher. Return valid JSON only. Never use markdown.';
+  const userPrompt = `Research this artist/performer and return JSON only.
+Artist: "${trimmedArtistName}"
+Genre context: "${genre || 'unknown'}"
+Location context: "San Antonio, TX"
+
+Return this structure:
+{
+  "name": "",
+  "bio": "",
+  "genre": "",
+  "origin": "",
+  "activeYears": "",
+  "notableWorks": [],
+  "spotifyUrl": "",
+  "instagramHandle": "",
+  "websiteUrl": "",
+  "pressQuotes": [],
+  "awardsAchievements": [],
+  "comparisons": "",
+  "localConnection": "",
+  "photoDescription": ""
+}
+
+Rules:
+- Use null for unknown values.
+- Keep bio factual in 3-4 sentences.
+- Prefer certainty over guessing.`;
+
+  try {
+    const raw = await openaiChat(systemPrompt, userPrompt, OPENAI_RESEARCH_MODEL, 0.2);
+    const parsed = parseJSONLoose(raw);
+    if (!parsed || typeof parsed !== 'object') throw new Error('OpenAI artist parse failed');
+    return { artist: parsed, engine: 'openai' };
+  } catch (openAiErr) {
+    if (!process.env.GEMINI_API_KEY) throw openAiErr;
+    const fallbackPrompt = `Research this artist/performer and return structured JSON only:
+Artist: "${trimmedArtistName}"
 Genre context: ${genre || 'unknown'}
 Location context: San Antonio, TX
 Return JSON: {"name":"","bio":"3-4 sentences","genre":"","origin":"","activeYears":"","notableWorks":[],"spotifyUrl":"","instagramHandle":"","websiteUrl":"","pressQuotes":[],"awardsAchievements":[],"comparisons":"for fans of...","localConnection":"","photoDescription":""}
 If unknown, use null. Be factual.`;
-  const text = await geminiGenerate(prompt);
-  return { artist: parseJSON(text) };
+    const text = await geminiGenerate(fallbackPrompt);
+    const parsed = parseJSONLoose(text);
+    if (!parsed) throw new Error('I could not parse artist research this round.');
+    return { artist: parsed, engine: 'gemini' };
+  }
 }
 
 async function researchContext({ event, venue }) {
-  const prompt = `You are a research assistant for an entertainment journalist. Research cultural context for this event and return structured JSON only:
+  const systemPrompt = 'You are a factual cultural context researcher. Return valid JSON only. Never use markdown.';
+  const userPrompt = `Research cultural context for this event and return JSON only.
+Event title: "${event?.title || ''}"
+Genre: "${event?.genre || 'Live Entertainment'}"
+Venue: "${venue?.name || 'San Antonio venue'}"
+Date: "${event?.date || ''}"
+Description: "${event?.description || ''}"
+
+Return this structure:
+{
+  "culturalContext": "",
+  "sanAntonioArtsScene": "",
+  "audienceInsight": "",
+  "seasonalRelevance": "",
+  "relatedEvents": [],
+  "mediaAngle": "",
+  "pullQuote": "",
+  "hashtagSuggestions": [],
+  "googleMapsUrl": ""
+}
+
+Rules:
+- Use null for unknown values.
+- Keep the context concise and factual.
+- Prefer certainty over guessing.`;
+
+  try {
+    const raw = await openaiChat(systemPrompt, userPrompt, OPENAI_RESEARCH_MODEL, 0.2);
+    const parsed = parseJSONLoose(raw);
+    if (!parsed || typeof parsed !== 'object') throw new Error('OpenAI context parse failed');
+    return { context: parsed, engine: 'openai' };
+  } catch (openAiErr) {
+    if (!process.env.GEMINI_API_KEY) throw openAiErr;
+    const fallbackPrompt = `You are a research assistant for an entertainment journalist. Research cultural context for this event and return structured JSON only:
 Event: "${event?.title}"
 Genre: ${event?.genre || 'Live Entertainment'}
 Venue: ${venue?.name || 'San Antonio venue'}
@@ -1119,8 +1300,536 @@ Date: ${event?.date}
 Description: ${event?.description || 'N/A'}
 Return JSON: {"culturalContext":"2-3 sentences","sanAntonioArtsScene":"1-2 sentences","audienceInsight":"1 sentence","seasonalRelevance":"","relatedEvents":[],"mediaAngle":"","pullQuote":"","hashtagSuggestions":[],"googleMapsUrl":""}
 Be factual.`;
-  const text = await geminiGenerate(prompt, 0.3);
-  return { context: parseJSON(text) };
+    const text = await geminiGenerate(fallbackPrompt, 0.3);
+    const parsed = parseJSONLoose(text);
+    if (!parsed) throw new Error('I could not parse event context research this round.');
+    return { context: parsed, engine: 'gemini' };
+  }
+}
+
+function normalizeStyleIntensity(style = '') {
+  const normalized = String(style || '').trim().toLowerCase();
+  if (['clean', 'feature', 'punchy'].includes(normalized)) return normalized;
+  return 'feature';
+}
+
+function normalizeGuidanceTerms(value) {
+  if (Array.isArray(value)) {
+    return Array.from(new Set(
+      value
+        .map((entry) => String(entry || '').trim())
+        .filter(Boolean)
+    ));
+  }
+  const text = String(value || '').trim();
+  if (!text) return [];
+  return Array.from(new Set(
+    text
+      .split(/[\n,;|]+/)
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean)
+  ));
+}
+
+function resolveResearchGuidance({
+  correctionPrompt = '',
+  includeTerms = '',
+  avoidTerms = '',
+} = {}) {
+  const correctionText = String(correctionPrompt || '').trim();
+  const includeList = normalizeGuidanceTerms(includeTerms);
+  const avoidList = normalizeGuidanceTerms(avoidTerms);
+  const guidanceApplied = !!correctionText || includeList.length > 0 || avoidList.length > 0;
+  return {
+    correctionText,
+    includeList,
+    avoidList,
+    guidanceApplied,
+  };
+}
+
+function formatEventDateForDraft(event = {}) {
+  if (!event?.date) return 'TBD';
+  try {
+    return formatEventDate(event.date);
+  } catch {
+    return event.date;
+  }
+}
+
+function buildFallbackEventDraft({ event = {}, venue = {}, research = null, artistCandidates = [] }) {
+  const title = String(event.title || 'Untitled Event').trim();
+  const venueName = String(venue.name || venue.businessName || event.venue || 'the venue').trim();
+  const dateLabel = formatEventDateForDraft(event);
+  const artists = Array.isArray(research?.artists) ? research.artists.filter(Boolean) : [];
+  const artistNames = artists
+    .map(a => String(a?.name || '').trim())
+    .filter(Boolean);
+  const lineup = artistNames.length ? artistNames : artistCandidates.filter(Boolean);
+  const venueLine = String(research?.venue?.description || '').trim();
+  const contextLine = String(research?.context?.culturalContext || '').trim();
+
+  const paragraphs = [
+    `${title} hits ${venueName} on ${dateLabel}${event?.time ? ` at ${event.time}` : ''}, built for a crowd that wants live work with real context and strong execution.`,
+    lineup.length ? `Featured lineup: ${lineup.slice(0, 4).join(', ')}.` : '',
+    venueLine || contextLine ? [venueLine, contextLine].filter(Boolean).join(' ') : '',
+    event?.ticketLink ? `Tickets and details: ${event.ticketLink}` : '',
+  ].filter(Boolean);
+
+  return paragraphs.join('\n\n').trim();
+}
+
+async function deepResearchDraft(payload = {}) {
+  const target = String(payload.target || payload.entityType || 'event_description').trim().toLowerCase();
+  if (target === 'event_description') return deepResearchEventDescription(payload);
+  if (target === 'artist_bio') return deepResearchArtistBio(payload);
+  if (target === 'venue_profile') return deepResearchVenueProfile(payload);
+  if (target === 'staffing_notes') return deepResearchStaffingNotes(payload);
+  if (target === 'contract_copy') return deepResearchContractCopy(payload);
+  throw new Error(`I do not recognize deep research target "${target}" yet.`);
+}
+
+async function deepResearchEventDescription({
+  event = {},
+  venue = {},
+  artistCandidates = [],
+  styleIntensity = 'feature',
+  correctionPrompt = '',
+  includeTerms = '',
+  avoidTerms = '',
+}) {
+  const style = normalizeStyleIntensity(styleIntensity);
+  const guidance = resolveResearchGuidance({ correctionPrompt, includeTerms, avoidTerms });
+  const requestedArtists = Array.isArray(artistCandidates)
+    ? artistCandidates.map(name => String(name || '').trim()).filter(Boolean)
+    : [];
+  const research = await conductResearch({ event, venue, artists: requestedArtists });
+
+  const systemPrompt = `You are a New York Times style entertainment journalist writing an event description.
+Rules:
+- Stay factual and grounded in supplied research.
+- Do not invent facts, quotes, or credentials.
+- If uncertain, flag uncertainty in "missingFacts" instead of fabricating.
+- Match the requested style intensity:
+  clean = concise and direct,
+  feature = scene-setting and rich,
+  punchy = sharp, high-energy, still factual.
+Return JSON only.`;
+
+  const userPrompt = `Create a first-draft event description using this data.
+
+STYLE INTENSITY: ${style}
+USER CORRECTIONS / SPECIFIC TERMS: ${guidance.correctionText || 'none'}
+WORDS TO INCLUDE IF FACTUALLY FIT: ${guidance.includeList.join(', ') || 'none'}
+WORDS OR PHRASES TO AVOID: ${guidance.avoidList.join(', ') || 'none'}
+
+EVENT INPUT:
+${JSON.stringify(event, null, 2)}
+
+VENUE INPUT:
+${JSON.stringify(venue, null, 2)}
+
+RESEARCH SUMMARY:
+${JSON.stringify(research, null, 2)}
+
+Return JSON with this exact shape:
+{
+  "draft": "2-4 short paragraphs",
+  "factCheckNotes": ["array of factual notes used"],
+  "missingFacts": ["array of missing or uncertain details to verify"]
+}`;
+
+  let aiPayload = null;
+  let modelUsed = OPENAI_RESEARCH_MODEL;
+  try {
+    const raw = await openaiChat(systemPrompt, userPrompt, OPENAI_RESEARCH_MODEL, 0.35);
+    aiPayload = parseJSONLoose(raw);
+    if (!aiPayload || typeof aiPayload !== 'object') {
+      throw new Error('I could not parse deep research draft JSON.');
+    }
+  } catch (err) {
+    modelUsed = process.env.GEMINI_API_KEY ? 'gemini-fallback' : modelUsed;
+    aiPayload = null;
+  }
+
+  const draft = String(aiPayload?.draft || '').trim() || buildFallbackEventDraft({
+    event,
+    venue,
+    research,
+    artistCandidates: requestedArtists,
+  });
+
+  const artistsFound = Array.isArray(research?.artists) ? research.artists.filter(Boolean).length : 0;
+  return {
+    draft,
+    research,
+    factCheckNotes: Array.isArray(aiPayload?.factCheckNotes) ? aiPayload.factCheckNotes : [],
+    missingFacts: Array.isArray(aiPayload?.missingFacts) ? aiPayload.missingFacts : [],
+    meta: {
+      artistsRequested: requestedArtists.length,
+      artistsResearched: artistsFound,
+      venueFound: !!research?.venue,
+      contextFound: !!research?.context,
+      styleIntensity: style,
+      correctionApplied: guidance.guidanceApplied,
+      includeTermsCount: guidance.includeList.length,
+      avoidTermsCount: guidance.avoidList.length,
+    },
+    modelUsed,
+  };
+}
+
+async function deepResearchArtistBio({
+  artist = {},
+  styleIntensity = 'feature',
+  correctionPrompt = '',
+  includeTerms = '',
+  avoidTerms = '',
+}) {
+  const style = normalizeStyleIntensity(styleIntensity);
+  const guidance = resolveResearchGuidance({ correctionPrompt, includeTerms, avoidTerms });
+  const artistName = String(artist.stageName || artist.name || '').trim();
+  const genre = String(artist.genre || '').trim();
+  const researchResult = artistName ? await researchArtist({ artistName, genre }) : { artist: null };
+  const research = researchResult?.artist || null;
+
+  const systemPrompt = `You write factual, compelling artist bios for live-event promotion.
+Rules:
+- No fabricated credits or awards.
+- Keep it in first-person assistant style with clear facts.
+- clean = concise and direct, feature = richer storytelling, punchy = fast and vivid.
+Return JSON only.`;
+
+  const userPrompt = `Generate an artist bio draft.
+STYLE INTENSITY: ${style}
+USER CORRECTIONS / SPECIFIC TERMS: ${guidance.correctionText || 'none'}
+WORDS TO INCLUDE IF FACTUALLY FIT: ${guidance.includeList.join(', ') || 'none'}
+WORDS OR PHRASES TO AVOID: ${guidance.avoidList.join(', ') || 'none'}
+
+ARTIST INPUT:
+${JSON.stringify(artist, null, 2)}
+
+RESEARCH:
+${JSON.stringify(research, null, 2)}
+
+Return JSON:
+{
+  "draft": "2-3 short paragraphs",
+  "factCheckNotes": ["array"],
+  "missingFacts": ["array"]
+}`;
+
+  let aiPayload = null;
+  let modelUsed = OPENAI_RESEARCH_MODEL;
+  try {
+    const raw = await openaiChat(systemPrompt, userPrompt, OPENAI_RESEARCH_MODEL, 0.35);
+    aiPayload = parseJSONLoose(raw);
+  } catch {
+    aiPayload = null;
+  }
+
+  const fallbackDraft = [
+    artistName ? `${artistName}${genre ? ` is rooted in ${genre}` : ''} and brings a clear point of view to live audiences.` : 'This artist brings a clear point of view to live audiences.',
+    research?.bio ? String(research.bio).trim() : '',
+    artist?.website ? `More information: ${artist.website}` : '',
+  ].filter(Boolean).join('\n\n').trim();
+
+  const draft = String(aiPayload?.draft || '').trim() || fallbackDraft;
+  return {
+    draft,
+    research: { artist: research },
+    factCheckNotes: Array.isArray(aiPayload?.factCheckNotes) ? aiPayload.factCheckNotes : [],
+    missingFacts: Array.isArray(aiPayload?.missingFacts) ? aiPayload.missingFacts : [],
+    meta: {
+      artistFound: !!research,
+      styleIntensity: style,
+      correctionApplied: guidance.guidanceApplied,
+      includeTermsCount: guidance.includeList.length,
+      avoidTermsCount: guidance.avoidList.length,
+    },
+    modelUsed,
+  };
+}
+
+async function deepResearchVenueProfile({
+  venue = {},
+  styleIntensity = 'feature',
+  correctionPrompt = '',
+  includeTerms = '',
+  avoidTerms = '',
+}) {
+  const style = normalizeStyleIntensity(styleIntensity);
+  const guidance = resolveResearchGuidance({ correctionPrompt, includeTerms, avoidTerms });
+  const venueName = String(venue.businessName || venue.name || '').trim();
+  const city = [venue.city, venue.state].filter(Boolean).join(', ') || 'San Antonio, TX';
+  const researchResult = venueName ? await researchVenue({ venueName, city }) : { venue: null };
+  const research = researchResult?.venue || null;
+
+  const systemPrompt = `You write factual venue profile descriptions used in event marketing systems.
+Rules:
+- No fabricated facts.
+- Keep the tone confident and human.
+- clean = concise and direct, feature = richer storytelling, punchy = fast and vivid.
+Return JSON only.`;
+
+  const userPrompt = `Generate a venue profile description draft.
+STYLE INTENSITY: ${style}
+USER CORRECTIONS / SPECIFIC TERMS: ${guidance.correctionText || 'none'}
+WORDS TO INCLUDE IF FACTUALLY FIT: ${guidance.includeList.join(', ') || 'none'}
+WORDS OR PHRASES TO AVOID: ${guidance.avoidList.join(', ') || 'none'}
+
+VENUE INPUT:
+${JSON.stringify(venue, null, 2)}
+
+RESEARCH:
+${JSON.stringify(research, null, 2)}
+
+Return JSON:
+{
+  "draft": "2-3 short paragraphs",
+  "factCheckNotes": ["array"],
+  "missingFacts": ["array"]
+}`;
+
+  let aiPayload = null;
+  let modelUsed = OPENAI_RESEARCH_MODEL;
+  try {
+    const raw = await openaiChat(systemPrompt, userPrompt, OPENAI_RESEARCH_MODEL, 0.35);
+    aiPayload = parseJSONLoose(raw);
+  } catch {
+    aiPayload = null;
+  }
+
+  const fallbackDraft = [
+    venueName ? `${venueName} is a live-event destination in ${city}.` : '',
+    research?.description ? String(research.description).trim() : '',
+    research?.knownFor?.length ? `Known for: ${research.knownFor.slice(0, 4).join(', ')}.` : '',
+  ].filter(Boolean).join('\n\n').trim();
+
+  const draft = String(aiPayload?.draft || '').trim() || fallbackDraft;
+  return {
+    draft,
+    research: { venue: research },
+    factCheckNotes: Array.isArray(aiPayload?.factCheckNotes) ? aiPayload.factCheckNotes : [],
+    missingFacts: Array.isArray(aiPayload?.missingFacts) ? aiPayload.missingFacts : [],
+    meta: {
+      venueFound: !!research,
+      styleIntensity: style,
+      correctionApplied: guidance.guidanceApplied,
+      includeTermsCount: guidance.includeList.length,
+      avoidTermsCount: guidance.avoidList.length,
+    },
+    modelUsed,
+  };
+}
+
+async function deepResearchStaffingNotes({
+  event = {},
+  staffingContext = {},
+  styleIntensity = 'feature',
+  correctionPrompt = '',
+  includeTerms = '',
+  avoidTerms = '',
+}) {
+  const style = normalizeStyleIntensity(styleIntensity);
+  const guidance = resolveResearchGuidance({ correctionPrompt, includeTerms, avoidTerms });
+  const target = String(staffingContext?.target || 'assignment_notes').trim();
+
+  const systemPrompt = `You write practical staffing notes for live-event operations teams.
+Rules:
+- Keep language actionable and clear.
+- Reflect event facts only from provided input.
+- Avoid invented details.
+- clean = concise and direct, feature = fuller context, punchy = brisk and high-energy.
+Return JSON only.`;
+
+  const userPrompt = `Generate staffing notes for this target: "${target}".
+STYLE INTENSITY: ${style}
+USER CORRECTIONS / SPECIFIC TERMS: ${guidance.correctionText || 'none'}
+WORDS TO INCLUDE IF FACTUALLY FIT: ${guidance.includeList.join(', ') || 'none'}
+WORDS OR PHRASES TO AVOID: ${guidance.avoidList.join(', ') || 'none'}
+
+EVENT:
+${JSON.stringify(event, null, 2)}
+
+STAFFING CONTEXT:
+${JSON.stringify(staffingContext, null, 2)}
+
+Return JSON:
+{
+  "draft": "1-3 short paragraphs",
+  "factCheckNotes": ["array"],
+  "missingFacts": ["array"]
+}`;
+
+  let aiPayload = null;
+  let modelUsed = OPENAI_RESEARCH_MODEL;
+  try {
+    const raw = await openaiChat(systemPrompt, userPrompt, OPENAI_RESEARCH_MODEL, 0.3);
+    aiPayload = parseJSONLoose(raw);
+  } catch {
+    aiPayload = null;
+  }
+
+  const eventTitle = String(event?.title || 'this event').trim();
+  const venueName = String(event?.venue || event?.venueName || 'the venue').trim();
+  const eventDate = formatEventDateForDraft(event);
+  const fallbackDraft = (() => {
+    if (target === 'call_in_policy') {
+      return `If you cannot make your shift for ${eventTitle}, notify the supervisor as early as possible, ideally at least 4 hours before call time. Include your role, shift window, and who is covering if known. Day-of-show communication runs through the staffing lead first.`;
+    }
+    if (target === 'profile_notes') {
+      return `Crew profile notes for ${eventTitle}: prioritize clear role coverage, reliable contact details, and shift readiness for ${eventDate} at ${venueName}.`;
+    }
+    if (target === 'bulk_shift_notes') {
+      return `Bulk shift notes for ${eventTitle}: confirm call times, role assignment, and check-in expectations before arrival. Keep escalation path and handoff notes visible for the full shift window.`;
+    }
+    return `Assignment notes for ${eventTitle} on ${eventDate} at ${venueName}: confirm role scope, call time, and communication path before load-in. Keep handoff notes concise so day-of-show execution stays clean.`;
+  })();
+
+  return {
+    draft: String(aiPayload?.draft || '').trim() || fallbackDraft,
+    factCheckNotes: Array.isArray(aiPayload?.factCheckNotes) ? aiPayload.factCheckNotes : [],
+    missingFacts: Array.isArray(aiPayload?.missingFacts) ? aiPayload.missingFacts : [],
+    meta: {
+      target,
+      styleIntensity: style,
+      correctionApplied: guidance.guidanceApplied,
+      includeTermsCount: guidance.includeList.length,
+      avoidTermsCount: guidance.avoidList.length,
+    },
+    modelUsed,
+  };
+}
+
+async function deepResearchContractCopy({
+  event = {},
+  venue = {},
+  document = {},
+  styleIntensity = 'feature',
+  correctionPrompt = '',
+  includeTerms = '',
+  avoidTerms = '',
+}) {
+  const style = normalizeStyleIntensity(styleIntensity);
+  const guidance = resolveResearchGuidance({ correctionPrompt, includeTerms, avoidTerms });
+  const requestedArtists = [];
+  const performers = String(event?.performers || '').trim();
+  if (performers) {
+    performers.split(/,|&| and /i).map((name) => name.trim()).filter(Boolean).slice(0, 5).forEach((name) => requestedArtists.push(name));
+  }
+  let research = { venue: null, context: null, artists: [], researchedAt: new Date().toISOString() };
+  try {
+    research = await conductResearch({ event, venue, artists: requestedArtists });
+  } catch (err) {
+    console.warn('[deepResearchContractCopy] Research fallback:', err.message);
+  }
+
+  const systemPrompt = `You draft practical live-event contract language for operations teams.
+Rules:
+- This is not legal advice.
+- Keep placeholders when data is unknown ({{placeholder}}).
+- Output plain contract template text only inside JSON field "draft".
+- clean = concise and direct, feature = fuller context, punchy = tighter and sharp.
+Return JSON only.`;
+
+  const userPrompt = `Create or improve a live-event contract template.
+STYLE INTENSITY: ${style}
+USER CORRECTIONS / SPECIFIC TERMS: ${guidance.correctionText || 'none'}
+WORDS TO INCLUDE IF FACTUALLY FIT: ${guidance.includeList.join(', ') || 'none'}
+WORDS OR PHRASES TO AVOID: ${guidance.avoidList.join(', ') || 'none'}
+
+EVENT:
+${JSON.stringify(event, null, 2)}
+
+VENUE:
+${JSON.stringify(venue, null, 2)}
+
+DOCUMENT INPUT:
+${JSON.stringify(document, null, 2)}
+
+RESEARCH:
+${JSON.stringify(research, null, 2)}
+
+Return JSON:
+{
+  "draft": "contract template text with sections and placeholders",
+  "factCheckNotes": ["array"],
+  "missingFacts": ["array"]
+}`;
+
+  let aiPayload = null;
+  let modelUsed = OPENAI_RESEARCH_MODEL;
+  try {
+    const raw = await openaiChat(systemPrompt, userPrompt, OPENAI_RESEARCH_MODEL, 0.3);
+    aiPayload = parseJSONLoose(raw);
+  } catch {
+    aiPayload = null;
+  }
+
+  const defaultDraft = [
+    'LIVE EVENT PERFORMANCE AGREEMENT',
+    '',
+    'Event: {{event_title}}',
+    'Date: {{event_date}}',
+    'Time: {{event_time}}',
+    'Venue: {{event_venue}}',
+    'Venue Address: {{event_address}}',
+    '',
+    '1) Parties',
+    'Venue/Promoter: {{venue_or_promoter_name}}',
+    'Artist/Act: {{artist_name}}',
+    '',
+    '2) Performance Details',
+    '- Set length: {{set_length}}',
+    '- Load-in: {{load_in_time}}',
+    '- Soundcheck: {{soundcheck_time}}',
+    '- Performance window: {{performance_window}}',
+    '',
+    '3) Compensation',
+    '- Performance fee: {{compensation_amount}}',
+    '- Deposit: {{deposit_amount}} due by {{deposit_due_date}}',
+    '- Balance due: {{balance_terms}}',
+    '',
+    '4) Technical & Hospitality',
+    '- Tech rider reference: {{tech_rider_reference}}',
+    '- Hospitality rider reference: {{hospitality_rider_reference}}',
+    '',
+    '5) Marketing & Deliverables',
+    '- Approved assets and logos: {{approved_assets_clause}}',
+    '- Ticketing link: {{ticket_link}}',
+    '',
+    '6) Cancellation / Force Majeure',
+    '- Cancellation notice: {{cancellation_notice_terms}}',
+    '- Force majeure: {{force_majeure_terms}}',
+    '',
+    '7) Liability / Insurance',
+    '- Insurance requirements: {{insurance_terms}}',
+    '- Indemnity: {{indemnity_terms}}',
+    '',
+    '8) Signatures',
+    'Venue/Promoter Representative: ___________________  Date: __________',
+    'Artist/Representative: ____________________________  Date: __________',
+    '',
+    'Operational note: This template supports Texas live-event workflows. Have licensed counsel review before execution.',
+  ].join('\n');
+
+  const draft = String(aiPayload?.draft || '').trim() || defaultDraft;
+  return {
+    draft,
+    research,
+    factCheckNotes: Array.isArray(aiPayload?.factCheckNotes) ? aiPayload.factCheckNotes : [],
+    missingFacts: Array.isArray(aiPayload?.missingFacts) ? aiPayload.missingFacts : [],
+    meta: {
+      styleIntensity: style,
+      correctionApplied: guidance.guidanceApplied,
+      includeTermsCount: guidance.includeList.length,
+      avoidTermsCount: guidance.avoidList.length,
+      artistsRequested: requestedArtists.length,
+      artistsResearched: Array.isArray(research?.artists) ? research.artists.filter(Boolean).length : 0,
+    },
+    modelUsed,
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════
