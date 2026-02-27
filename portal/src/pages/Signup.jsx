@@ -239,7 +239,7 @@ export default function Signup() {
             <input type="text" value={inviteCode} onChange={e => setInviteCode(e.target.value)}
               className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-[#c8a45e]"
               placeholder="IMC-XXXXXX" required />
-            <p className="text-xs text-gray-400 mt-1">Need a code? Reach out to Julie directly. She'll get you in.</p>
+            <p className="text-xs text-gray-400 mt-1">Need a code? Reach out to Julie Good directly. She'll get you in.</p>
           </div>
 
           <button type="submit" disabled={submitting} className="btn-primary w-full text-center disabled:opacity-50">

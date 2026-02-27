@@ -17,7 +17,6 @@ export default function Navbar() {
       <Link to={brandHref} className="flex items-center gap-3 no-underline">
         <div className="w-8 h-8 bg-[#c8a45e] rounded-lg flex items-center justify-center font-bold text-[#0d1b2a] text-sm">IMC</div>
         <div>
-          <div className="text-[10px] font-semibold text-[#c8a45e] uppercase tracking-[0.1em] leading-tight">IMC</div>
           <div className="text-[10px] font-semibold text-[#c8a45e] uppercase tracking-[0.1em] leading-tight">GOOD CREATIVE MEDIA</div>
           <div className="text-sm font-semibold text-white leading-tight mt-1">THE IMC MACHINE</div>
           <div className="text-[9px] sm:text-[10px] text-gray-300 uppercase tracking-[0.06em] leading-tight">YOUR LIVE EVENT INTEGRATED MARKETING COMMUNICATIONS MEDIA MANAGEMENT MONSTER</div>

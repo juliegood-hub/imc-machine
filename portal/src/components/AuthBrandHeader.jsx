@@ -12,7 +12,6 @@ export default function AuthBrandHeader() {
           <span className="text-[#0d1b2a] font-bold text-xl tracking-wide">IMC</span>
         </div>
       </Link>
-      <p className="text-[#c8a45e] text-[11px] font-semibold uppercase tracking-[0.12em] m-0">IMC</p>
       <p className="text-[#c8a45e] text-sm font-semibold uppercase tracking-[0.12em] m-0">GOOD CREATIVE MEDIA</p>
       <h1 className="text-white text-2xl sm:text-3xl font-bold leading-tight m-0 mt-2">THE IMC MACHINE</h1>
       <p className="text-gray-300 text-[11px] sm:text-xs uppercase tracking-[0.08em] m-0 mt-1">
