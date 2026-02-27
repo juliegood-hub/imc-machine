@@ -172,7 +172,7 @@ export function openFileUpload(multiple = true) {
   return new Promise((resolve, reject) => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'image/*,.pdf';
+    input.accept = 'image/*,.pdf,.doc,.docx,.txt,.rtf';
     input.multiple = multiple;
     input.onchange = (e) => {
       const files = Array.from(e.target.files || []);

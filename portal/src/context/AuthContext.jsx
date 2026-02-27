@@ -32,20 +32,45 @@ export function AuthProvider({ children }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  const hydrateUser = async (authUser) => {
+  async function hydrateUser(authUser) {
     try {
-      // Fetch user row from our users table
-      const { data: dbUser, error } = await supabase
+      // Fetch user row from our users table.
+      // Prefer auth_user_id if present in schema, fall back to email.
+      let dbUser = null;
+      let error = null;
+      const { data: byAuthUserId, error: byAuthUserIdError } = await supabase
         .from('users')
         .select('*')
-        .eq('email', authUser.email.toLowerCase())
-        .single();
+        .eq('auth_user_id', authUser.id)
+        .maybeSingle();
+
+      if (byAuthUserIdError && byAuthUserIdError.code !== 'PGRST116' && byAuthUserIdError.code !== '42703') {
+        error = byAuthUserIdError;
+      } else if (byAuthUserId) {
+        dbUser = byAuthUserId;
+      }
+
+      if (!dbUser) {
+        const { data: byEmail, error: byEmailError } = await supabase
+          .from('users')
+          .select('*')
+          .eq('email', authUser.email.toLowerCase())
+          .maybeSingle();
+        if (byEmailError && byEmailError.code !== 'PGRST116') {
+          error = byEmailError;
+        } else {
+          dbUser = byEmail || null;
+        }
+      }
 
       if (error && error.code !== 'PGRST116') {
         console.error('[Auth] Error fetching user row:', error);
       }
 
       if (dbUser) {
+        if (!dbUser.auth_user_id) {
+          await supabase.from('users').update({ auth_user_id: authUser.id }).eq('id', dbUser.id);
+        }
         setUser(mapDbUser(dbUser));
       } else {
         // Auth user exists but no users row yet — create minimal one
@@ -73,19 +98,22 @@ export function AuthProvider({ children }) {
       });
     }
     setLoading(false);
-  };
+  }
 
-  const mapDbUser = (dbUser) => ({
-    id: dbUser.id,
-    email: dbUser.email,
-    name: dbUser.name,
-    isAdmin: dbUser.is_admin || dbUser.email.toLowerCase() === ADMIN_EMAIL.toLowerCase(),
-    clientType: dbUser.client_type || 'venue',
-    venueName: dbUser.venue_name || '',
-    disabled: dbUser.disabled,
-    createdAt: dbUser.created_at,
-    lastLogin: dbUser.last_login,
-  });
+  function mapDbUser(dbUser) {
+    return {
+      id: dbUser.id,
+      authUserId: dbUser.auth_user_id || null,
+      email: dbUser.email,
+      name: dbUser.name,
+      isAdmin: dbUser.is_admin || dbUser.email.toLowerCase() === ADMIN_EMAIL.toLowerCase(),
+      clientType: dbUser.client_type || 'venue',
+      venueName: dbUser.venue_name || '',
+      disabled: dbUser.disabled,
+      createdAt: dbUser.created_at,
+      lastLogin: dbUser.last_login,
+    };
+  }
 
   const login = async (email, password) => {
     const emailLower = email.toLowerCase().trim();
@@ -103,11 +131,22 @@ export function AuthProvider({ children }) {
     }
 
     // Update last login in users table
-    const { data: dbUser } = await supabase
+    let dbUser = null;
+    const { data: byAuthUserId, error: byAuthUserIdError } = await supabase
       .from('users')
       .select('*')
-      .eq('email', emailLower)
-      .single();
+      .eq('auth_user_id', data.user.id)
+      .maybeSingle();
+    if (!byAuthUserIdError && byAuthUserId) {
+      dbUser = byAuthUserId;
+    } else {
+      const { data: byEmail } = await supabase
+        .from('users')
+        .select('*')
+        .eq('email', emailLower)
+        .maybeSingle();
+      dbUser = byEmail || null;
+    }
 
     if (dbUser) {
       if (dbUser.disabled) {
@@ -177,6 +216,7 @@ export function AuthProvider({ children }) {
       name: name || emailLower.split('@')[0],
       clientType: clientType || 'venue',
       venueName: venueName || '',
+      authUserId: authData?.user?.id,
     });
 
     // Step 4: Mark invite as used

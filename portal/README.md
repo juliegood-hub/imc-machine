@@ -31,6 +31,11 @@ Backend response copy now follows the Julie Good conversational style for user-v
 Staging + production release controls are documented in:
 
 - `portal/docs/release-workflow.md`
+- `portal/docs/access-checklist.md` (external platform access + env key checklist)
+
+Environment validation:
+
+- `npm run env:audit` (checks required production keys against env and `.env.production.local`)
 
 This includes required checks, branch protection settings, Vercel secrets, and production tagging rules.
 

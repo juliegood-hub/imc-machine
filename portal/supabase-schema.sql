@@ -11,6 +11,7 @@ create extension if not exists "uuid-ossp";
 -- ═══════════════════════════════════════════════════════════════
 create table users (
   id uuid primary key default uuid_generate_v4(),
+  auth_user_id uuid unique,
   email text unique not null,
   name text,
   password_hash text, -- bcrypt hash (or null for passwordless)
@@ -22,6 +23,28 @@ create table users (
   last_login timestamptz,
   metadata jsonb default '{}'::jsonb -- flexible extra fields
 );
+
+alter table users add column if not exists auth_user_id uuid;
+
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.table_constraints
+    where table_name = 'users' and constraint_name = 'users_auth_user_fk'
+  ) then
+    alter table users
+      add constraint users_auth_user_fk
+      foreign key (auth_user_id) references auth.users(id) on delete set null;
+  end if;
+exception
+  when undefined_table then
+    -- auth.users is unavailable outside Supabase auth context.
+    null;
+end $$;
+
+create unique index if not exists idx_users_auth_user_id_unique
+  on users(auth_user_id)
+  where auth_user_id is not null;
 
 -- Auto-admin for Julie
 create or replace function set_admin_on_insert()
@@ -1059,6 +1082,28 @@ create table if not exists concessions_menu_items (
   updated_at timestamptz default now()
 );
 
+create table if not exists concessions_menu_library_items (
+  id uuid primary key default uuid_generate_v4(),
+  user_id uuid references users(id) on delete set null,
+  source_booking_id uuid references events(id) on delete set null,
+  source_venue_profile_id uuid,
+  name text not null default '',
+  category text default 'other',
+  price numeric(12,2),
+  cost_basis numeric(12,2),
+  supplier_reference text,
+  alcohol_flag boolean default false,
+  inventory_link text,
+  is_signature_item boolean default false,
+  availability_status text default 'available',
+  notes text default '',
+  metadata jsonb default '{}'::jsonb,
+  is_public boolean default true,
+  is_active boolean default true,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
 -- Merchandising + vendor marketplace
 create table if not exists merch_plans (
   id uuid primary key default uuid_generate_v4(),
@@ -1216,6 +1261,9 @@ create index if not exists idx_zoom_assets_booking on zoom_assets(booking_id);
 create index if not exists idx_youtube_distributions_booking on youtube_distributions(booking_id);
 create index if not exists idx_concessions_plans_booking on concessions_plans(booking_id);
 create index if not exists idx_concessions_menu_items_booking on concessions_menu_items(booking_id);
+create index if not exists idx_concessions_menu_library_items_name on concessions_menu_library_items(name);
+create index if not exists idx_concessions_menu_library_items_category on concessions_menu_library_items(category);
+create index if not exists idx_concessions_menu_library_items_public on concessions_menu_library_items(is_public, is_active);
 create index if not exists idx_merch_plans_booking on merch_plans(booking_id);
 create index if not exists idx_merch_participants_booking on merch_participants(booking_id);
 create index if not exists idx_merch_revenue_splits_booking on merch_revenue_splits(booking_id);
@@ -1588,6 +1636,46 @@ create table generated_images (
 create index idx_images_event on generated_images(event_id);
 
 -- ═══════════════════════════════════════════════════════════════
+-- CALENDAR SUBMISSION QUEUE (Do210 / SA Current / Evvnt workers)
+-- ═══════════════════════════════════════════════════════════════
+create table if not exists calendar_submissions (
+  id uuid primary key default uuid_generate_v4(),
+  event_id uuid references events(id) on delete cascade,
+  event_data jsonb not null default '{}'::jsonb,
+  platforms text[] default array['do210', 'sacurrent', 'evvnt']::text[],
+  status text default 'pending' check (status in ('pending', 'processing', 'completed', 'failed')),
+  results jsonb default '{}'::jsonb,
+  created_at timestamptz default now(),
+  processed_at timestamptz,
+  updated_at timestamptz default now(),
+  error text
+);
+
+create index if not exists idx_calendar_submissions_event on calendar_submissions(event_id);
+create index if not exists idx_calendar_submissions_status on calendar_submissions(status, created_at desc);
+
+-- ═══════════════════════════════════════════════════════════════
+-- VIDEO TRANSCODE / VARIANT JOBS (worker queue)
+-- ═══════════════════════════════════════════════════════════════
+create table if not exists video_transcode_jobs (
+  id uuid primary key default uuid_generate_v4(),
+  event_id uuid references events(id) on delete cascade,
+  status text default 'pending' check (status in ('pending', 'processing', 'completed', 'failed')),
+  source_url text not null,
+  source_path text,
+  source_meta jsonb default '{}'::jsonb,
+  targets jsonb default '[]'::jsonb,
+  outputs jsonb default '{}'::jsonb,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  processed_at timestamptz,
+  error text
+);
+
+create index if not exists idx_video_transcode_jobs_event on video_transcode_jobs(event_id);
+create index if not exists idx_video_transcode_jobs_status on video_transcode_jobs(status, created_at desc);
+
+-- ═══════════════════════════════════════════════════════════════
 -- ROW LEVEL SECURITY (RLS)
 -- Users can only see their own data; admins see everything
 -- ═══════════════════════════════════════════════════════════════
@@ -1603,34 +1691,105 @@ alter table invites enable row level security;
 
 -- Public read for auth (login/signup checks)
 create policy "Users can read own record" on users
-  for select using (true);
+  for select using (
+    auth.uid()::text = coalesce(auth_user_id::text, id::text)
+    or lower(email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+  );
 
 create policy "Users can update own record" on users
-  for update using (auth.uid()::text = id::text);
+  for update using (
+    auth.uid()::text = coalesce(auth_user_id::text, id::text)
+  );
 
 -- Profiles: own data
 create policy "Users see own profiles" on profiles
-  for all using (user_id::text = auth.uid()::text);
+  for all using (
+    exists (
+      select 1
+      from users u
+      where u.id = profiles.user_id
+        and (
+          u.auth_user_id = auth.uid()
+          or u.id::text = auth.uid()::text
+          or lower(u.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+        )
+    )
+  );
 
 -- Events: own data
 create policy "Users see own events" on events
-  for all using (user_id::text = auth.uid()::text);
+  for all using (
+    exists (
+      select 1
+      from users u
+      where u.id = events.user_id
+        and (
+          u.auth_user_id = auth.uid()
+          or u.id::text = auth.uid()::text
+          or lower(u.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+        )
+    )
+  );
 
 -- Campaigns: own data
 create policy "Users see own campaigns" on campaigns
-  for all using (user_id::text = auth.uid()::text);
+  for all using (
+    exists (
+      select 1
+      from users u
+      where u.id = campaigns.user_id
+        and (
+          u.auth_user_id = auth.uid()
+          or u.id::text = auth.uid()::text
+          or lower(u.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+        )
+    )
+  );
 
 -- Activity: own data
 create policy "Users see own activity" on activity_log
-  for select using (user_id::text = auth.uid()::text);
+  for select using (
+    exists (
+      select 1
+      from users u
+      where u.id = activity_log.user_id
+        and (
+          u.auth_user_id = auth.uid()
+          or u.id::text = auth.uid()::text
+          or lower(u.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+        )
+    )
+  );
 
 -- Content: own data
 create policy "Users see own content" on generated_content
-  for all using (user_id::text = auth.uid()::text);
+  for all using (
+    exists (
+      select 1
+      from users u
+      where u.id = generated_content.user_id
+        and (
+          u.auth_user_id = auth.uid()
+          or u.id::text = auth.uid()::text
+          or lower(u.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+        )
+    )
+  );
 
 -- Images: own data
 create policy "Users see own images" on generated_images
-  for all using (user_id::text = auth.uid()::text);
+  for all using (
+    exists (
+      select 1
+      from users u
+      where u.id = generated_images.user_id
+        and (
+          u.auth_user_id = auth.uid()
+          or u.id::text = auth.uid()::text
+          or lower(u.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+        )
+    )
+  );
 
 -- Invites: public read for signup validation
 create policy "Anyone can read invites" on invites

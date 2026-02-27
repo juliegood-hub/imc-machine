@@ -19,6 +19,7 @@ import {
 } from '../lib/supabase';
 import { supabase } from '../lib/supabase';
 import { CLIENT_TYPES, getClientTypeColors, isArtistRole } from '../constants/clientTypes';
+import { computeEventWorkflowProgress, computeTaylorZoneProgress } from '../constants/workflowSections';
 
 const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || 'juliegood@goodcreativemedia.com';
 
@@ -189,6 +190,85 @@ export default function AdminDashboard() {
       invitesUsed,
     };
   }, [users, campaigns, activities, invites]);
+
+  const boardRiskHotspots = useMemo(() => {
+    const now = new Date();
+    const horizon = new Date(now.getTime() + (60 * 24 * 60 * 60 * 1000));
+    const zoneMeta = {
+      people: { label: 'People', icon: '👥' },
+      money: { label: 'Money', icon: '💵' },
+      place_stuff: { label: 'Place + Stuff', icon: '🏛️' },
+      purpose_program: { label: 'Purpose + Program', icon: '🎭' },
+    };
+    const zoneTotals = {
+      people: { key: 'people', events: 0, missingChecks: 0 },
+      money: { key: 'money', events: 0, missingChecks: 0 },
+      place_stuff: { key: 'place_stuff', events: 0, missingChecks: 0 },
+      purpose_program: { key: 'purpose_program', events: 0, missingChecks: 0 },
+    };
+
+    const parseEventStart = (event) => {
+      const raw = event?.booking_start_at || event?.bookingStartAt || (event?.date ? `${event.date}T${event.time || '19:00'}` : '');
+      const parsed = new Date(raw);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
+
+    const upcomingEvents = (events || [])
+      .filter((event) => {
+        const start = parseEventStart(event);
+        return !!start && start >= now && start <= horizon;
+      })
+      .map((event) => {
+        const eventCampaigns = (campaigns || []).filter((campaign) => campaign?.event_id === event.id || campaign?.eventId === event.id);
+        const normalizedEvent = {
+          ...event,
+          productionDetails: (event?.productionDetails && typeof event.productionDetails === 'object')
+            ? event.productionDetails
+            : ((event?.production_details && typeof event.production_details === 'object') ? event.production_details : {}),
+          run_of_show: (event?.run_of_show && typeof event.run_of_show === 'object') ? event.run_of_show : {},
+        };
+        const sectionProgress = computeEventWorkflowProgress({ event: normalizedEvent, campaigns: eventCampaigns });
+        const zoneProgress = computeTaylorZoneProgress(sectionProgress);
+        const atRiskZones = zoneProgress
+          .filter((zone) => zone.status !== 'complete')
+          .map((zone) => ({
+            ...zone,
+            missingChecks: Math.max(Number(zone.total || 0) - Number(zone.completed || 0), 0),
+          }));
+        atRiskZones.forEach((zone) => {
+          if (!zoneTotals[zone.key]) return;
+          zoneTotals[zone.key].events += 1;
+          zoneTotals[zone.key].missingChecks += zone.missingChecks;
+        });
+        return {
+          id: event.id,
+          title: event.title || event.event_title || 'Untitled Event',
+          date: parseEventStart(event),
+          atRiskZones,
+          missingChecks: atRiskZones.reduce((sum, zone) => sum + zone.missingChecks, 0),
+        };
+      });
+
+    const riskEvents = upcomingEvents
+      .filter((event) => event.atRiskZones.length > 0)
+      .sort((a, b) => b.missingChecks - a.missingChecks);
+
+    const topZones = Object.values(zoneTotals)
+      .filter((zone) => zone.events > 0)
+      .sort((a, b) => b.missingChecks - a.missingChecks)
+      .map((zone) => ({
+        ...zone,
+        label: zoneMeta[zone.key]?.label || zone.key,
+        icon: zoneMeta[zone.key]?.icon || '📍',
+      }));
+
+    return {
+      totalUpcoming: upcomingEvents.length,
+      totalAtRisk: riskEvents.length,
+      topZones,
+      topEvents: riskEvents.slice(0, 6),
+    };
+  }, [events, campaigns]);
 
   // ─── Filtered Users ───
   const filteredUsers = useMemo(() => {
@@ -401,9 +481,15 @@ export default function AdminDashboard() {
     if (!newInviteName) return;
     setInviteLoading(true);
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) throw new Error('No active admin session token.');
       const resp = await fetch('/api/invites', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({ action: 'generate-invite', name: newInviteName, email: newInviteEmail || null, role: newInviteType }),
       });
       const data = await resp.json();
@@ -427,9 +513,15 @@ export default function AdminDashboard() {
   const handleRevokeInvite = async (inviteId) => {
     if (!confirm('Revoke this invite now?')) return;
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) throw new Error('No active admin session token.');
       const resp = await fetch('/api/invites', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({ action: 'revoke-invite', id: inviteId }),
       });
       const data = await resp.json();
@@ -483,6 +575,106 @@ export default function AdminDashboard() {
     const a = document.createElement('a');
     a.href = url; a.download = `imc-users-${localDateStr()}.csv`;
     a.click(); URL.revokeObjectURL(url);
+  };
+
+  const exportCampaignCSV = (campaignId) => {
+    const campaign = (campaigns || []).find((entry) => entry.id === campaignId);
+    if (!campaign) return 'Campaign not found';
+
+    const channels = (() => {
+      if (campaign.channels && typeof campaign.channels === 'object') return campaign.channels;
+      if (typeof campaign.channels === 'string') {
+        try { return JSON.parse(campaign.channels); } catch { return {}; }
+      }
+      return {};
+    })();
+
+    const rows = [[
+      'Campaign ID',
+      'Event ID',
+      'Event Title',
+      'Event Date',
+      'Venue Name',
+      'Channel Key',
+      'Channel Status',
+      'External URL',
+      'Error',
+      'Updated At',
+    ]];
+
+    const channelEntries = Object.entries(channels);
+    if (!channelEntries.length) {
+      rows.push([
+        campaign.id || '',
+        campaign.event_id || campaign.eventId || '',
+        campaign.event_title || campaign.eventTitle || '',
+        campaign.event_date || campaign.eventDate || '',
+        campaign.venue_name || campaign.venueName || '',
+        '',
+        campaign.status || '',
+        campaign.external_url || campaign.externalUrl || '',
+        campaign.error_message || campaign.errorMessage || '',
+        campaign.updated_at || campaign.updatedAt || '',
+      ]);
+    } else {
+      for (const [channelKey, channelValue] of channelEntries) {
+        const channel = (channelValue && typeof channelValue === 'object') ? channelValue : {};
+        rows.push([
+          campaign.id || '',
+          campaign.event_id || campaign.eventId || '',
+          campaign.event_title || campaign.eventTitle || '',
+          campaign.event_date || campaign.eventDate || '',
+          campaign.venue_name || campaign.venueName || '',
+          channelKey,
+          channel.status || '',
+          channel.url || channel.external_url || '',
+          channel.error || '',
+          channel.updated_at || campaign.updated_at || '',
+        ]);
+      }
+    }
+
+    return rows
+      .map((row) => row.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+  };
+
+  const exportInvitesCSV = () => {
+    const rows = [[
+      'Invite Code',
+      'Signup Link',
+      'Name',
+      'Email',
+      'Client Type',
+      'Status',
+      'Created At',
+      'Used By User ID',
+    ]];
+
+    for (const inv of invites) {
+      const signupLink = `https://imc.goodcreativemedia.com/signup?code=${inv.code || ''}`;
+      rows.push([
+        inv.code || '',
+        signupLink,
+        inv.venue_name || '',
+        inv.email || '',
+        inv.client_type || '',
+        inv.used ? 'Used' : 'Pending',
+        inv.created_at || '',
+        inv.used_by || '',
+      ]);
+    }
+
+    const csv = rows
+      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `imc-invite-codes-${localDateStr()}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
   };
 
   if (!isAdmin) return null;
@@ -550,6 +742,55 @@ export default function AdminDashboard() {
             <StatCard label="New This Week" value={stats.newUsersThisWeek} sub={`${stats.loginsToday} logged in today`} color="#c8a45e" />
             <StatCard label="Total Events" value={stats.totalEvents} sub={`${stats.totalChannelsSent} channels sent`} color="#2d6a4f" />
             <StatCard label="Activity (7d)" value={stats.recentActivities} sub={`${stats.invitesPending} invites pending`} color="#7b2cbf" />
+          </div>
+
+          <div className="card mb-6">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+              <div>
+                <h3 className="text-lg m-0">🧠 Board Risk Hotspots (Taylor 4-Zone)</h3>
+                <p className="text-xs text-gray-500 m-0 mt-1">
+                  Next 60 days: {boardRiskHotspots.totalAtRisk} at-risk event{boardRiskHotspots.totalAtRisk === 1 ? '' : 's'} out of {boardRiskHotspots.totalUpcoming} upcoming.
+                </p>
+              </div>
+            </div>
+
+            {boardRiskHotspots.totalUpcoming === 0 ? (
+              <p className="text-xs text-gray-500 m-0">No upcoming events inside the 60-day window yet.</p>
+            ) : (
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {boardRiskHotspots.topZones.length === 0 ? (
+                    <p className="text-xs text-emerald-700 m-0">All Taylor zones are currently complete across upcoming events.</p>
+                  ) : (
+                    boardRiskHotspots.topZones.map((zone) => (
+                      <div key={zone.key} className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs">
+                        <p className="m-0 font-semibold">{zone.icon} {zone.label}</p>
+                        <p className="m-0 text-gray-600">{zone.events} event{zone.events === 1 ? '' : 's'} with risk · {zone.missingChecks} missing checks</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {boardRiskHotspots.topEvents.length > 0 && (
+                  <div className="space-y-2">
+                    {boardRiskHotspots.topEvents.map((eventRisk) => (
+                      <div key={eventRisk.id} className="rounded border border-gray-200 bg-white px-3 py-2 text-xs">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="m-0 font-semibold">{eventRisk.title}</p>
+                          <a href={`/events/${eventRisk.id}`} className="text-[#c8a45e] hover:underline no-underline">Open Event →</a>
+                        </div>
+                        <p className="m-0 text-gray-500">
+                          {eventRisk.date ? eventRisk.date.toLocaleString() : 'Date TBD'} · {eventRisk.missingChecks} missing checks
+                        </p>
+                        <p className="m-0 text-gray-600">
+                          Risk zones: {eventRisk.atRiskZones.map((zone) => `${zone.icon} ${zone.label}`).join(' · ')}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Client Type Breakdown */}
@@ -835,7 +1076,16 @@ export default function AdminDashboard() {
 
           {/* Invite List */}
           <div className="card">
-            <h3 className="text-lg mb-4">Invites ({invites.length})</h3>
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <h3 className="text-lg m-0">Invites ({invites.length})</h3>
+              <button
+                type="button"
+                onClick={exportInvitesCSV}
+                className="text-xs px-3 py-1.5 border border-gray-200 rounded-lg hover:bg-gray-50"
+              >
+                📥 Export Invite Codes CSV
+              </button>
+            </div>
             {invites.length === 0 ? (
               <p className="text-gray-400 text-center py-8">No invites yet. Generate one above and I will track it here.</p>
             ) : (

@@ -4,6 +4,7 @@
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { createSign } from 'crypto';
+import { ApiAuthError, requireApiAuth } from './_auth.js';
 
 async function getAccessToken() {
   const sa = JSON.parse(readFileSync(resolve(process.cwd(), 'service-account.json'), 'utf8'));
@@ -49,6 +50,10 @@ const FALLBACK_VOICES = {
 };
 
 export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Send this endpoint a POST request and I can generate audio.' });
   }
@@ -57,6 +62,7 @@ export default async function handler(req, res) {
   if (!text) return res.status(400).json({ error: 'Give me text to speak and I will handle the audio.' });
 
   try {
+    await requireApiAuth(req);
     const token = await getAccessToken();
     const voice = VOICES[speaker] || VOICES.ALEX;
 
@@ -101,6 +107,9 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ audioContent: data.audioContent });
   } catch (err) {
+    if (err instanceof ApiAuthError) {
+      return res.status(err.status || 401).json({ success: false, error: err.message });
+    }
     return res.status(500).json({ error: err.message });
   }
 }

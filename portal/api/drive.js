@@ -15,6 +15,13 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { google } from 'googleapis';
+import {
+  ApiAuthError,
+  assertEventOwnership,
+  requireApiAuth,
+  resolvePayloadEventId,
+  scopePayloadToUser,
+} from './_auth.js';
 
 const ADMIN_EMAIL = 'juliegood@goodcreativemedia.com';
 const IMC_ROOT_FOLDER_NAME = 'IMC Machine';
@@ -46,30 +53,37 @@ function getDriveClient() {
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Send this endpoint a POST request and I can run it.' });
 
-  const { action } = req.body;
+  const { action } = req.body || {};
   if (!action) return res.status(400).json({ error: 'Tell me which Drive action you want and I will run it.' });
 
   try {
+    const authContext = await requireApiAuth(req, { supabase });
+    const payload = scopePayloadToUser(req.body || {}, authContext);
+    const eventId = resolvePayloadEventId(payload);
+    if (eventId) {
+      await assertEventOwnership(supabase, authContext, eventId);
+    }
+
     let result;
     switch (action) {
       case 'create-client-folder':
-        result = await createClientFolder(req.body);
+        result = await createClientFolder(payload);
         break;
       case 'create-event-folder':
-        result = await createEventFolder(req.body);
+        result = await createEventFolder(payload);
         break;
       case 'upload-file':
-        result = await uploadFile(req.body);
+        result = await uploadFile(payload);
         break;
       case 'list-files':
-        result = await listFiles(req.body);
+        result = await listFiles(payload);
         break;
       case 'get-share-link':
-        result = await getShareLink(req.body);
+        result = await getShareLink(payload);
         break;
       default:
         return res.status(400).json({ error: `I do not recognize "${action}" yet. Choose one of the supported Drive actions.` });
@@ -77,6 +91,9 @@ export default async function handler(req, res) {
     return res.status(200).json({ success: true, ...result });
   } catch (err) {
     console.error(`[drive] ${action} error:`, err);
+    if (err instanceof ApiAuthError) {
+      return res.status(err.status || 401).json({ success: false, error: err.message });
+    }
     return res.status(500).json({ success: false, error: err.message });
   }
 }

@@ -65,6 +65,31 @@ export async function researchEventContext(event, venue) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// OPENAI DEEP RESEARCH DRAFTS (event description / artist bio / venue profile)
+// ═══════════════════════════════════════════════════════════════
+
+export async function deepResearchDraft(payload = {}) {
+  try {
+    const res = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'deep-research-draft',
+        ...payload,
+      }),
+    });
+    const data = await res.json();
+    if (!data?.success) {
+      throw new Error(data?.error || 'Deep research failed');
+    }
+    return data;
+  } catch (err) {
+    console.error('[Research] Deep research draft error:', err.message);
+    throw err;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // MASTER RESEARCH FUNCTION
 // ═══════════════════════════════════════════════════════════════
 

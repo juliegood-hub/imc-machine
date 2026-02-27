@@ -5,7 +5,11 @@ import { DEFAULT_SUPPLIER_SUGGESTIONS, SUPPLIER_TYPE_OPTIONS } from '../services
 const CONNECTION_STATUS_OPTIONS = ['connected', 'error', 'not_connected'];
 const INVENTORY_STATUS_OPTIONS = ['active', 'maintenance_due', 'out_of_service', 'retired'];
 const MAINTENANCE_STATUS_OPTIONS = ['scheduled', 'in_progress', 'completed', 'cancelled'];
-const SUPPLIER_FILTER_OPTIONS = ['all', ...SUPPLIER_TYPE_OPTIONS.map((option) => option.value)];
+const OTHER_OPTION_VALUE = 'other';
+const SUPPLIER_TYPE_OPTIONS_WITH_OTHER = [
+  ...SUPPLIER_TYPE_OPTIONS,
+  { value: OTHER_OPTION_VALUE, label: 'Other (write-in)' },
+];
 
 function toDateTimeInput(value) {
   if (!value) return '';
@@ -29,6 +33,34 @@ function toJulieVenueOpsStatus(message) {
   if (/is required|require/i.test(raw)) return `One more detail and we are set: ${raw}`;
   if (/select |choose /i.test(raw)) return raw.replace(/^select /i, 'Choose ');
   return raw;
+}
+
+function normalizeSupplierTypeValue(value = '') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function resolveSupplierTypeValue(selectedValue = '', otherValue = '') {
+  const selected = normalizeSupplierTypeValue(selectedValue);
+  if (selected === OTHER_OPTION_VALUE) {
+    return normalizeSupplierTypeValue(otherValue);
+  }
+  return selected;
+}
+
+function getSupplierTypeLabel(value = '') {
+  const normalized = normalizeSupplierTypeValue(value);
+  const known = SUPPLIER_TYPE_OPTIONS.find((option) => option.value === normalized);
+  if (known) return known.label;
+  if (!normalized) return 'Local Store';
+  return normalized
+    .split('_')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
 }
 
 function isMissingSchemaEntityError(error) {
@@ -57,6 +89,7 @@ function blankSupplierDraft() {
   return {
     supplierName: '',
     supplierType: 'local_store',
+    supplierTypeOther: '',
     googlePlaceId: '',
     addressLine1: '',
     addressLine2: '',
@@ -212,8 +245,16 @@ export default function VenueOperationsManager() {
   const filteredSuppliers = useMemo(() => (
     supplierFilter === 'all'
       ? suppliers
-      : suppliers.filter((supplier) => supplier.supplier_type === supplierFilter)
+      : suppliers.filter((supplier) => normalizeSupplierTypeValue(supplier.supplier_type) === supplierFilter)
   ), [supplierFilter, suppliers]);
+
+  const supplierFilterOptions = useMemo(() => {
+    const knownTypes = SUPPLIER_TYPE_OPTIONS.map((option) => option.value);
+    const customTypes = (suppliers || [])
+      .map((supplier) => normalizeSupplierTypeValue(supplier.supplier_type))
+      .filter((value) => value && !knownTypes.includes(value));
+    return ['all', ...knownTypes, ...new Set(customTypes)];
+  }, [suppliers]);
 
   const loadData = async (venueProfileId) => {
     if (!venueProfileId) return;
@@ -392,8 +433,11 @@ export default function VenueOperationsManager() {
         ...(details || {}),
         supplierName: details?.supplierName || suggestion.mainText || suggestion.label || '',
         googlePlaceId: details?.googlePlaceId || suggestion.placeId || '',
-        supplierType: details?.supplierType || suggestion.supplierType || 'local_store',
       };
+      const suggestedType = normalizeSupplierTypeValue(details?.supplierType || suggestion.supplierType || 'local_store') || 'local_store';
+      const knownType = SUPPLIER_TYPE_OPTIONS.some((option) => option.value === suggestedType);
+      merged.supplierType = knownType ? suggestedType : OTHER_OPTION_VALUE;
+      merged.supplierTypeOther = knownType ? '' : suggestedType;
       setSupplierDrafts(prev => prev.map((row, i) => (i === index ? { ...row, ...merged } : row)));
       setSupplierSuggestions([]);
       setSupplierSuggestingIndex(null);
@@ -408,14 +452,22 @@ export default function VenueOperationsManager() {
       setStatus('Supplier name is required.');
       return;
     }
-    if (draft.supplierType === 'online_store' && !(draft.websiteUrl || draft.orderingUrl)) {
+    const resolvedSupplierType = resolveSupplierTypeValue(draft.supplierType, draft.supplierTypeOther);
+    if (!resolvedSupplierType) {
+      setStatus('Choose a supplier type or add your write-in value.');
+      return;
+    }
+    if (resolvedSupplierType === 'online_store' && !(draft.websiteUrl || draft.orderingUrl)) {
       setStatus('Online suppliers require website URL or ordering URL.');
       return;
     }
     try {
       const venueProfileId = await ensureVenueProfile();
       setStatus('Saving supplier...');
-      await saveVenueSupplier(venueProfileId, draft);
+      await saveVenueSupplier(venueProfileId, {
+        ...draft,
+        supplierType: resolvedSupplierType,
+      });
       await loadData(venueProfileId);
       setSupplierDrafts(prev => prev.map((row, i) => (i === index ? blankSupplierDraft() : row)));
       setStatus('Supplier saved.');
@@ -673,9 +725,9 @@ export default function VenueOperationsManager() {
               onChange={(e) => setSupplierFilter(e.target.value)}
               className="px-2 py-1 border border-gray-200 rounded text-xs bg-white"
             >
-              {SUPPLIER_FILTER_OPTIONS.map((value) => (
+              {supplierFilterOptions.map((value) => (
                 <option key={value} value={value}>
-                  {value === 'all' ? 'All Types' : value}
+                  {value === 'all' ? 'All Types' : getSupplierTypeLabel(value)}
                 </option>
               ))}
             </select>
@@ -720,13 +772,26 @@ export default function VenueOperationsManager() {
                 </div>
                 <select
                   value={draft.supplierType}
-                  onChange={(e) => setSupplierDrafts(prev => prev.map((row, i) => (i === index ? { ...row, supplierType: e.target.value } : row)))}
+                  onChange={(e) => setSupplierDrafts(prev => prev.map((row, i) => (i === index ? {
+                    ...row,
+                    supplierType: e.target.value,
+                    supplierTypeOther: e.target.value === OTHER_OPTION_VALUE ? row.supplierTypeOther : '',
+                  } : row)))}
                   className="px-2 py-1.5 border border-gray-200 rounded text-xs bg-white"
                 >
-                  {SUPPLIER_TYPE_OPTIONS.map((option) => (
+                  {SUPPLIER_TYPE_OPTIONS_WITH_OTHER.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
                 </select>
+                {draft.supplierType === OTHER_OPTION_VALUE ? (
+                  <input
+                    type="text"
+                    value={draft.supplierTypeOther || ''}
+                    onChange={(e) => setSupplierDrafts(prev => prev.map((row, i) => (i === index ? { ...row, supplierTypeOther: e.target.value } : row)))}
+                    className="px-2 py-1.5 border border-gray-200 rounded text-xs"
+                    placeholder="Other supplier type"
+                  />
+                ) : null}
                 <input
                   type="text"
                   value={draft.phone}
@@ -813,7 +878,7 @@ export default function VenueOperationsManager() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="m-0 font-semibold">
                     {supplier.supplier_name}
-                    <span className="text-gray-500"> · {supplier.supplier_type || 'local_store'}</span>
+                    <span className="text-gray-500"> · {getSupplierTypeLabel(supplier.supplier_type || 'local_store')}</span>
                   </p>
                   <button type="button" className="text-xs px-2 py-1 border border-red-300 text-red-700 rounded bg-white" onClick={() => handleRemoveSupplier(supplier.id)}>
                     Remove

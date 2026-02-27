@@ -5,16 +5,68 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+function extractBearerToken(req) {
+  const authHeader = req.headers?.authorization || req.headers?.Authorization || '';
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || '';
+}
+
+async function requireAdmin(req) {
+  const token = extractBearerToken(req);
+  if (!token) {
+    return { ok: false, status: 401, error: 'Unauthorized: missing access token.' };
+  }
+
+  const { data: authData, error: authError } = await supabase.auth.getUser(token);
+  if (authError || !authData?.user?.email) {
+    return { ok: false, status: 401, error: 'Unauthorized: invalid session token.' };
+  }
+
+  const email = authData.user.email.toLowerCase();
+  const adminEmail = (
+    process.env.ADMIN_EMAIL ||
+    process.env.VITE_ADMIN_EMAIL ||
+    'juliegood@goodcreativemedia.com'
+  ).toLowerCase();
+
+  if (email === adminEmail) {
+    return { ok: true, email };
+  }
+
+  const { data: dbUser, error: dbError } = await supabase
+    .from('users')
+    .select('is_admin, disabled')
+    .eq('email', email)
+    .maybeSingle();
+
+  if (dbError) {
+    return { ok: false, status: 500, error: `Could not verify admin access: ${dbError.message}` };
+  }
+  if (!dbUser?.is_admin) {
+    return { ok: false, status: 403, error: 'Forbidden: admin access required.' };
+  }
+  if (dbUser?.disabled) {
+    return { ok: false, status: 403, error: 'Forbidden: account is disabled.' };
+  }
+
+  return { ok: true, email };
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const { action } = req.method === 'GET' ? req.query : req.body;
   if (!action) return res.status(400).json({ error: 'Tell me which invite action you want and I will run it.' });
 
   try {
+    const adminCheck = await requireAdmin(req);
+    if (!adminCheck.ok) {
+      return res.status(adminCheck.status).json({ success: false, error: adminCheck.error });
+    }
+
     switch (action) {
       case 'generate-invite': {
         const { name, email, role } = req.body;

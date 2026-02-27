@@ -14,6 +14,13 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { createClient } from '@supabase/supabase-js';
+import {
+  ApiAuthError,
+  assertEventOwnership,
+  requireApiAuth,
+  resolvePayloadEventId,
+  scopePayloadToUser,
+} from './_auth.js';
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://qavrufepvcihklypxbvm.supabase.co';
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -28,7 +35,7 @@ export default async function handler(req, res) {
   // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, GET, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   
   if (req.method === 'OPTIONS') return res.status(200).end();
   
@@ -36,9 +43,16 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'I need Supabase credentials before I can track campaigns.' });
   }
 
-  const { action = 'update', eventId, eventTitle, eventDate, venueName, channels, venue_id } = req.body;
-
   try {
+    const authContext = await requireApiAuth(req, { supabase });
+    const payload = scopePayloadToUser(req.body || {}, authContext);
+    const action = payload.action || 'update';
+    const eventId = resolvePayloadEventId(payload) || payload.eventId;
+    if (eventId) {
+      await assertEventOwnership(supabase, authContext, eventId);
+    }
+    req.body = payload;
+
     switch (action) {
       case 'create':
         return await createCampaign(req, res);
@@ -55,6 +69,9 @@ export default async function handler(req, res) {
     }
   } catch (err) {
     console.error('[sync-tracker] Error:', err);
+    if (err instanceof ApiAuthError) {
+      return res.status(err.status || 401).json({ error: err.message });
+    }
     return res.status(500).json({ error: err.message });
   }
 }

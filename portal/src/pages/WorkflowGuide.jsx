@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useVenue } from '../context/VenueContext';
 import {
+  PRODUCTION_PHASE_META,
+  TAYLOR_FOUR_ZONE_META,
+  TAYLOR_FRAMEWORK_ATTRIBUTION,
   WORKFLOW_ACTOR_META,
   WORKFLOW_SECTIONS,
   WORKFLOW_TRACKS,
@@ -15,6 +18,7 @@ import {
 
 const FOCUS_OPTIONS = [
   { key: 'all', label: 'All Sections', icon: '🧭', desc: 'Full end-to-end flow.' },
+  { key: 'ai_intake', label: 'AI Intake', icon: '📥', desc: 'Voice, email, and upload intake to auto-build form drafts.' },
   { key: 'marketing_distribution', label: 'Marketing + Distribution', icon: '🚀', desc: 'Only campaign creation and channel delivery.' },
   { key: 'production_ops', label: 'Production Ops', icon: '🎬', desc: 'Only production, run-of-show, and staffing readiness.' },
   { key: 'booking_setup', label: 'Booking + Setup', icon: '🏗️', desc: 'Only setup, reusable libraries, and booking basics.' },
@@ -49,6 +53,17 @@ const SECTION_ROUTE_MAP = {
       theater: 'Stage Manager setup: lock theater, room, and reusable production libraries.',
       music: 'Promoter setup: lock frequent venues and recurring act libraries.',
       legal: 'Legal Coordinator setup: lock recurring venues, speaker groups, and panel libraries.',
+    },
+  },
+  ai_intake: {
+    path: '/events/create?ai=intake&input=email',
+    requiresEvent: false,
+    requiresVenue: false,
+    hintByVariant: {
+      default: 'Open AI Intake to paste email threads, speak details, or upload source files.',
+      theater: 'Stage Manager intake: pull rehearsal emails and show docs into structured event fields.',
+      music: 'Promoter intake: pull booking emails and artist notes into one clean event draft.',
+      legal: 'Legal Coordinator intake: pull panel emails and venue details into a ready legal event draft.',
     },
   },
   production_ops: {
@@ -144,6 +159,24 @@ const ROLE_STEP_OVERRIDES = {
       {
         title: 'Create Zone-Aware Performance Bookings',
         desc: 'Book performances by zone and time so rehearsal and performance conflicts are prevented.',
+      },
+    ],
+    ai_intake: [
+      {
+        title: 'Drop in rehearsal comms',
+        desc: 'Paste production emails or notes and I will draft your people, place, and timing fields.',
+      },
+      {
+        title: 'Use voice for fast intake',
+        desc: 'Speak naturally, and I will map details into structured fields you can approve.',
+      },
+      {
+        title: 'Upload source docs',
+        desc: 'Drop in photos, scans, PDFs, or Word docs and I will extract schedule-ready details.',
+      },
+      {
+        title: 'Create linked records',
+        desc: 'Create contacts, venues, and event drafts from one intake pass when details are complete.',
       },
     ],
     production_ops: [
@@ -274,6 +307,24 @@ const ROLE_STEP_OVERRIDES = {
         desc: 'Assign show times by zone so overlapping bookings are flagged before launch.',
       },
     ],
+    ai_intake: [
+      {
+        title: 'Paste booking emails',
+        desc: 'Drop in promoter and venue email threads so I can pull show facts fast.',
+      },
+      {
+        title: 'Use voice for show intake',
+        desc: 'Speak lineup, venue, and date details and I will map them into your event draft.',
+      },
+      {
+        title: 'Upload source files',
+        desc: 'Upload posters, scans, PDFs, or Word docs and I will extract the usable details.',
+      },
+      {
+        title: 'Create linked records',
+        desc: 'Create contact, venue, and event records from selected AI suggestions in one step.',
+      },
+    ],
     production_ops: [
       {
         title: 'Set Stage Plot and Tech Needs',
@@ -402,6 +453,24 @@ const ROLE_STEP_OVERRIDES = {
         desc: 'Assign session windows by room/zone so overlap and staffing conflicts are flagged.',
       },
     ],
+    ai_intake: [
+      {
+        title: 'Paste legal program emails',
+        desc: 'Drop panel and logistics emails so I can pull names, venue details, and scheduling facts.',
+      },
+      {
+        title: 'Use voice for intake',
+        desc: 'Speak session details and I will map them into structured legal event fields.',
+      },
+      {
+        title: 'Upload source docs',
+        desc: 'Use photos, scans, PDFs, or Word docs to extract program data for review.',
+      },
+      {
+        title: 'Create linked records',
+        desc: 'Create contacts, venues, and event drafts from approved AI findings.',
+      },
+    ],
     production_ops: [
       {
         title: 'Set Program AV and Tech Needs',
@@ -498,6 +567,7 @@ const ROLE_STEP_OVERRIDES = {
 const ROLE_SECTION_SUMMARY_OVERRIDES = {
   theater: {
     account_profile: 'Set a production-ready profile so cast, crew, and house communication stay clean.',
+    ai_intake: 'Ingest rehearsal emails and source docs fast, then approve clean structured drafts for production planning.',
     reusable_libraries: 'Store reusable theaters, teams, and stage-zone setups to avoid rework every show.',
     production_ops: 'Coordinate cue-critical departments so stage, deck, and FOH stay synchronized.',
     staffing_workforce: 'Assign and confirm theater crew calls so every role is covered at call time.',
@@ -507,6 +577,7 @@ const ROLE_SECTION_SUMMARY_OVERRIDES = {
   },
   music: {
     account_profile: 'Set a promoter-ready profile so booking, marketing, and audience comms stay consistent.',
+    ai_intake: 'Ingest booking emails, artist notes, and source files, then convert them into ready event records.',
     reusable_libraries: 'Store reusable acts and venues so recurring shows can be launched quickly.',
     production_ops: 'Coordinate day-of-show operations from stage needs through hospitality and logistics.',
     staffing_workforce: 'Assign and confirm venue/stage teams so doors, bar, security, and merch are covered.',
@@ -516,6 +587,7 @@ const ROLE_SECTION_SUMMARY_OVERRIDES = {
   },
   legal: {
     account_profile: 'Set a legal-program profile so speaker, attendee, and compliance communication stays precise.',
+    ai_intake: 'Ingest legal event emails and source docs, then approve structured records for accurate program setup.',
     reusable_libraries: 'Store reusable panel, speaker, and venue records for faster legal event setup.',
     production_ops: 'Coordinate room logistics, AV, and support workflows for dependable legal program execution.',
     staffing_workforce: 'Assign and confirm moderator, AV, and check-in coverage for each legal event window.',
@@ -527,6 +599,7 @@ const ROLE_SECTION_SUMMARY_OVERRIDES = {
 
 function sectionMatchesFocus(section, focus) {
   if (focus === 'all') return true;
+  if (focus === 'ai_intake') return section.id === 'ai_intake';
   return section.track === focus;
 }
 
@@ -548,6 +621,14 @@ function roleLabelForVariant(workflowVariant) {
   if (workflowVariant === 'music') return 'Promoter';
   if (workflowVariant === 'legal') return 'Legal Coordinator';
   return 'Event Lead';
+}
+
+function getTaylorZoneMeta(zoneKey) {
+  return TAYLOR_FOUR_ZONE_META.find(zone => zone.key === zoneKey) || null;
+}
+
+function getProductionPhaseMeta(phaseKey) {
+  return PRODUCTION_PHASE_META.find(phase => phase.key === phaseKey) || PRODUCTION_PHASE_META[0];
 }
 
 function resolveSectionTarget(sectionId, firstEventId, workflowVariant = 'default') {
@@ -625,6 +706,17 @@ export default function WorkflowGuide() {
   const firstEventId = events?.[0]?.id || '';
   const hasEvent = (events || []).length > 0;
   const hasVenueProfile = (venueProfiles || []).length > 0;
+  const sectionZoneReferenceRows = useMemo(
+    () => visibleSections.map((section) => ({
+      section,
+      trackMeta: getWorkflowTrackMeta(section.track),
+      phaseMeta: getProductionPhaseMeta(section.productionPhase),
+      zones: (section.taylorZones || [])
+        .map((zoneKey) => getTaylorZoneMeta(zoneKey))
+        .filter(Boolean),
+    })),
+    [visibleSections]
+  );
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -718,12 +810,65 @@ export default function WorkflowGuide() {
       <div>
         <h1 className="text-3xl mb-2" style={{ fontFamily: "'Playfair Display', serif" }}>📖 How It Works</h1>
         <p className="text-gray-500 mb-3">
-          This is your color-coded map of the full machine. Use Guided Mode if you want me to walk you section by section,
-          or jump straight to the track you need.
+          You bring the art. I will help with the logistics. This is your color-coded map of the full machine:
+          use Guided Mode for a step-by-step walk, or jump straight into the section you need right now.
         </p>
         <p className="text-xs text-[#0d1b2a] m-0">
           Active role context: <span className="font-semibold">{roleLabel}</span>
         </p>
+      </div>
+
+      <div className="card border border-[#0d1b2a1a] bg-[#faf8f3]">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <h2 className="text-lg m-0">🧠 Taylor 4-Zone Alignment</h2>
+          <span className="text-xs px-2 py-1 rounded bg-[#0d1b2a] text-white">People · Money · Place/Stuff · Purpose/Program</span>
+        </div>
+        <p className="text-xs text-gray-600 mb-3">{TAYLOR_FRAMEWORK_ATTRIBUTION}</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+          {TAYLOR_FOUR_ZONE_META.map((zone) => (
+            <div key={zone.key} className="rounded border border-white/70 bg-white px-3 py-2">
+              <p className="m-0 text-sm font-semibold">{zone.icon} {zone.label}</p>
+              <p className="m-0 text-xs text-gray-500">{zone.description}</p>
+            </div>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {PRODUCTION_PHASE_META.map((phase) => (
+            <span key={phase.key} className={`text-xs px-2 py-1 rounded ${phase.badgeClass}`}>
+              {phase.icon} {phase.label}
+            </span>
+          ))}
+        </div>
+        <div className="mt-3 rounded border border-[#0d1b2a1a] bg-white">
+          <div className="px-3 py-2 border-b border-gray-100">
+            <p className="m-0 text-xs font-semibold text-[#0d1b2a]">🗺️ Section-to-Zone Reference</p>
+            <p className="m-0 text-[11px] text-gray-500">Every section below is color-mapped to Andrew Taylor&apos;s four-zone framework so people, money, place/stuff, and purpose stay in view.</p>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {sectionZoneReferenceRows.map(({ section, trackMeta, phaseMeta, zones }) => (
+              <div key={`zone-ref-${section.id}`} className="px-3 py-2 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <div className="min-w-0">
+                  <p className="m-0 text-sm font-semibold truncate">Section {section.number}: {section.title}</p>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    <span className={`text-[11px] px-2 py-0.5 rounded ${trackMeta.badgeClass}`}>
+                      {trackMeta.icon} {trackMeta.label}
+                    </span>
+                    <span className={`text-[11px] px-2 py-0.5 rounded ${phaseMeta.badgeClass}`}>
+                      {phaseMeta.icon} {phaseMeta.label}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {zones.map((zone) => (
+                    <span key={`zone-ref-${section.id}-${zone.key}`} className={`text-[11px] px-2 py-0.5 rounded ${zone.badgeClass}`}>
+                      {zone.icon} {zone.label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -794,6 +939,20 @@ export default function WorkflowGuide() {
                 {currentSection.icon} {currentSection.title}
               </h2>
               <p className="text-sm text-gray-600 mt-1 mb-0">{currentSectionSummary}</p>
+              <div className="flex flex-wrap gap-1 mt-2">
+                <span className={`text-[11px] px-2 py-0.5 rounded ${getProductionPhaseMeta(currentSection.productionPhase).badgeClass}`}>
+                  {getProductionPhaseMeta(currentSection.productionPhase).icon} {getProductionPhaseMeta(currentSection.productionPhase).label}
+                </span>
+                {(currentSection.taylorZones || []).map((zoneKey) => {
+                  const zone = getTaylorZoneMeta(zoneKey);
+                  if (!zone) return null;
+                  return (
+                    <span key={`${currentSection.id}-${zone.key}`} className={`text-[11px] px-2 py-0.5 rounded ${zone.badgeClass}`}>
+                      {zone.icon} {zone.label}
+                    </span>
+                  );
+                })}
+              </div>
             </div>
             <span className={`text-xs px-2 py-1 rounded ${getWorkflowTrackMeta(currentSection.track).badgeClass}`}>
               {getWorkflowTrackMeta(currentSection.track).icon} {getWorkflowTrackMeta(currentSection.track).label}
@@ -874,6 +1033,20 @@ export default function WorkflowGuide() {
                     <h2 className="text-xl m-0" style={{ fontFamily: "'Playfair Display', serif" }}>
                       {section.icon} {section.title}
                     </h2>
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      <span className={`text-[11px] px-2 py-0.5 rounded ${getProductionPhaseMeta(section.productionPhase).badgeClass}`}>
+                        {getProductionPhaseMeta(section.productionPhase).icon} {getProductionPhaseMeta(section.productionPhase).label}
+                      </span>
+                      {(section.taylorZones || []).map((zoneKey) => {
+                        const zone = getTaylorZoneMeta(zoneKey);
+                        if (!zone) return null;
+                        return (
+                          <span key={`${section.id}-${zone.key}`} className={`text-[11px] px-2 py-0.5 rounded ${zone.badgeClass}`}>
+                            {zone.icon} {zone.label}
+                          </span>
+                        );
+                      })}
+                    </div>
                   </div>
                   <span className={`text-xs px-2 py-1 rounded ${trackMeta.badgeClass}`}>
                     {trackMeta.icon} {trackMeta.label}

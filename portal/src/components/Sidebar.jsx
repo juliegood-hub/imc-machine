@@ -14,6 +14,7 @@ export default function Sidebar() {
         { to: '/', label: 'Dashboard', icon: '📊' },
         { to: '/workflow', label: 'How It Works', icon: '📖' },
         { to: '/events/create', label: 'Start Event', icon: '🎪' },
+        { to: '/events/create?ai=intake&input=email', label: 'AI Intake (Voice + Email)', icon: '📥' },
         { to: '/imc-composer', label: 'IMC Composer', icon: '✨' },
         { to: '/campaigns', label: 'Campaign Tracker', icon: '📈' },
         { to: '/chat', label: 'Chat Hub', icon: '💬' },
@@ -24,6 +25,9 @@ export default function Sidebar() {
       links: [
         { to: '/production-ops', label: 'Production Ops Hub', icon: '🎬' },
         { to: '/production-ops/event-ops?focus=event_ops', label: 'Event Ops Modules', icon: '🧵' },
+        { to: '/production-ops?focus=role_map', label: 'Role Responsibility Map', icon: '🧭' },
+        { to: '/production-ops/event-ops?focus=event_ops&opsTab=concessions', label: 'Menus + Bev Specials', icon: '🍔' },
+        { to: '/production-ops/event-ops?focus=event_ops&opsTab=merch', label: 'Merch + Vendors', icon: '🛍️' },
         { to: '/production-ops/staffing?focus=staffing', label: 'Staff Scheduler', icon: '🧑‍💼' },
         { to: '/production-ops/training?focus=training', label: 'Training + Certs', icon: '🎓' },
         { to: '/production-ops/inventory?focus=inventory', label: 'Inventory + Ordering', icon: '📦' },

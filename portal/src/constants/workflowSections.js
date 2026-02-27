@@ -47,6 +47,97 @@ export const WORKFLOW_ACTOR_META = {
   review: { icon: '🤝', label: 'AI + Human Review', className: 'bg-purple-100 text-purple-700' },
 };
 
+export const TAYLOR_FRAMEWORK_ATTRIBUTION = 'Framework alignment credit: Andrew Taylor (people, money, stuff/place, and purpose/program) adapted for live-event operations.';
+
+export const TAYLOR_FOUR_ZONE_META = [
+  {
+    key: 'people',
+    icon: '👥',
+    label: 'People',
+    description: 'Artists, crew, audience, collaborators, and partners.',
+    badgeClass: 'bg-blue-100 text-blue-700',
+  },
+  {
+    key: 'money',
+    icon: '💵',
+    label: 'Money',
+    description: 'Budgets, ticketing, settlements, payouts, and financial outcomes.',
+    badgeClass: 'bg-emerald-100 text-emerald-700',
+  },
+  {
+    key: 'place_stuff',
+    icon: '🏛️',
+    label: 'Place + Stuff',
+    description: 'Venues, zones, inventory, logistics, and technical infrastructure.',
+    badgeClass: 'bg-amber-100 text-amber-700',
+  },
+  {
+    key: 'purpose_program',
+    icon: '🎭',
+    label: 'Purpose + Program',
+    description: 'Creative intent, run-of-show, messaging, and program outcomes.',
+    badgeClass: 'bg-fuchsia-100 text-fuchsia-700',
+  },
+];
+
+export const PRODUCTION_PHASE_META = [
+  {
+    key: 'pre_production',
+    label: 'Pre-Production',
+    icon: '🛠️',
+    description: 'Plan, build, and align before doors open.',
+    badgeClass: 'bg-indigo-100 text-indigo-700',
+  },
+  {
+    key: 'production',
+    label: 'Production',
+    icon: '🎬',
+    description: 'Execute live operations and day-of-show performance.',
+    badgeClass: 'bg-emerald-100 text-emerald-700',
+  },
+  {
+    key: 'post_production',
+    label: 'Post-Production',
+    icon: '📦',
+    description: 'Close out settlement, reporting, and learnings.',
+    badgeClass: 'bg-slate-100 text-slate-700',
+  },
+];
+
+export const PRODUCTION_PHASE_ORDER = PRODUCTION_PHASE_META.map((phase) => phase.key);
+
+const SECTION_TAYLOR_ZONE_MAP = {
+  account_profile: ['people', 'purpose_program'],
+  ai_intake: ['people', 'money', 'place_stuff', 'purpose_program'],
+  reusable_libraries: ['people', 'place_stuff'],
+  production_ops: ['people', 'place_stuff', 'purpose_program'],
+  staffing_workforce: ['people', 'money'],
+  capture_pipeline: ['people', 'place_stuff', 'purpose_program'],
+  marketing_distribution: ['people', 'money', 'purpose_program'],
+  ticketing_revenue: ['people', 'money', 'purpose_program'],
+  event_build: ['people', 'place_stuff', 'purpose_program'],
+  production_readiness: ['people', 'place_stuff', 'purpose_program'],
+  marketing_assets: ['people', 'money', 'purpose_program'],
+  distribution_delivery: ['people', 'money', 'purpose_program'],
+  staffing_day_of_show: ['people', 'money'],
+};
+
+const SECTION_PRODUCTION_PHASE_MAP = {
+  account_profile: 'pre_production',
+  ai_intake: 'pre_production',
+  reusable_libraries: 'pre_production',
+  production_ops: 'production',
+  staffing_workforce: 'production',
+  capture_pipeline: 'production',
+  marketing_distribution: 'pre_production',
+  ticketing_revenue: 'post_production',
+  event_build: 'pre_production',
+  production_readiness: 'pre_production',
+  marketing_assets: 'pre_production',
+  distribution_delivery: 'pre_production',
+  staffing_day_of_show: 'production',
+};
+
 export const WORKFLOW_SECTIONS = [
   {
     id: 'account_profile',
@@ -54,6 +145,8 @@ export const WORKFLOW_SECTIONS = [
     title: 'Account + Profile Setup',
     icon: '🏗️',
     track: 'booking_setup',
+    productionPhase: 'pre_production',
+    taylorZones: ['people', 'purpose_program'],
     summary: 'Set up your identity once so all campaigns and operations stay consistent.',
     steps: [
       { title: 'Sign up by client type', actor: 'human', desc: 'Choose role(s) like Booking Agent, Staff Scheduler, Venue, Artist, or Artisan so forms adapt.' },
@@ -63,11 +156,29 @@ export const WORKFLOW_SECTIONS = [
     ],
   },
   {
-    id: 'reusable_libraries',
+    id: 'ai_intake',
     number: 2,
+    title: 'AI Intake (Voice + Email + Upload)',
+    icon: '📥',
+    track: 'booking_setup',
+    productionPhase: 'pre_production',
+    taylorZones: ['people', 'money', 'place_stuff', 'purpose_program'],
+    summary: 'Speak it, paste it, or upload it. I will turn messy source material into clean, reviewable event data.',
+    steps: [
+      { title: 'Choose your input style', actor: 'human', desc: 'Use voice, paste an email thread, or upload a photo/scan, PDF, Word file, or text doc.' },
+      { title: 'Review proposed field changes', actor: 'review', desc: 'I map extracted details into form fields with confidence and evidence so you approve each change.' },
+      { title: 'Create related records', actor: 'review', desc: 'From one intake, create contact, venue, and event records in one pass when details are present.' },
+      { title: 'Capture missing info as tasks', actor: 'automatic', desc: 'If details are missing, I spin up follow-up tasks and reminders so nothing falls through.' },
+    ],
+  },
+  {
+    id: 'reusable_libraries',
+    number: 3,
     title: 'Reusable Libraries + Booking Basics',
     icon: '🧩',
     track: 'booking_setup',
+    productionPhase: 'pre_production',
+    taylorZones: ['people', 'place_stuff'],
     summary: 'Stop retyping by storing acts, venues, zones, and show templates.',
     steps: [
       { title: 'Build reusable acts/participants', actor: 'human', desc: 'Store multiple bands, speakers, artists, and collaborators for reuse.' },
@@ -78,10 +189,12 @@ export const WORKFLOW_SECTIONS = [
   },
   {
     id: 'production_ops',
-    number: 3,
+    number: 4,
     title: 'Production Ops',
     icon: '🎛️',
     track: 'production_ops',
+    productionPhase: 'production',
+    taylorZones: ['people', 'place_stuff', 'purpose_program'],
     summary: 'Prepare show execution with run-of-show, checklists, and department plans.',
     steps: [
       { title: 'Stage plot + tech specs', actor: 'human', desc: 'Configure inputs, monitors, backline, power, and stage layout.' },
@@ -92,10 +205,12 @@ export const WORKFLOW_SECTIONS = [
   },
   {
     id: 'staffing_workforce',
-    number: 4,
+    number: 5,
     title: 'Staffing + Workforce',
     icon: '👥',
     track: 'production_ops',
+    productionPhase: 'production',
+    taylorZones: ['people', 'money'],
     summary: 'Assign shifts, publish schedules, and confirm day-of-show staffing coverage.',
     steps: [
       { title: 'Onboard staff once', actor: 'human', desc: 'Create reusable staff/contractor/volunteer profiles with roles and rates.' },
@@ -106,10 +221,12 @@ export const WORKFLOW_SECTIONS = [
   },
   {
     id: 'capture_pipeline',
-    number: 5,
+    number: 6,
     title: 'Capture (Audio + Video)',
     icon: '🎥',
     track: 'production_ops',
+    productionPhase: 'production',
+    taylorZones: ['people', 'place_stuff', 'purpose_program'],
     summary: 'Manage capture inputs/devices, Zoom podcast video sessions, and YouTube output routing.',
     steps: [
       { title: 'Set capture plan', actor: 'human', desc: 'Choose recording type (video/audio/both), capture mode, and rights status.' },
@@ -120,10 +237,12 @@ export const WORKFLOW_SECTIONS = [
   },
   {
     id: 'marketing_distribution',
-    number: 6,
+    number: 7,
     title: 'Marketing + Distribution',
     icon: '📣',
     track: 'marketing_distribution',
+    productionPhase: 'pre_production',
+    taylorZones: ['people', 'money', 'purpose_program'],
     summary: 'Generate campaign assets, distribute to channels, and track outcomes.',
     steps: [
       { title: 'Generate campaign copy + assets', actor: 'review', desc: 'Create press, social, email, SMS, and channel-ready messaging with edit control.' },
@@ -134,10 +253,12 @@ export const WORKFLOW_SECTIONS = [
   },
   {
     id: 'ticketing_revenue',
-    number: 7,
+    number: 8,
     title: 'Ticketing + Revenue + Reporting',
     icon: '📊',
     track: 'revenue_reporting',
+    productionPhase: 'post_production',
+    taylorZones: ['people', 'money', 'purpose_program'],
     summary: 'Keep ticketing, settlement, and stakeholder visibility in one place.',
     steps: [
       { title: 'Connect ticketing providers', actor: 'human', desc: 'Use Eventbrite now and Ticketmaster/manual linking where needed.' },
@@ -175,12 +296,38 @@ function asChecks(items = []) {
   return items.map(item => ({ label: item.label, done: !!item.done }));
 }
 
+function getSectionTaylorZones(sectionId) {
+  const configured = SECTION_TAYLOR_ZONE_MAP[sectionId];
+  if (!Array.isArray(configured)) return [];
+  const valid = new Set(TAYLOR_FOUR_ZONE_META.map(zone => zone.key));
+  return configured.filter(zone => valid.has(zone));
+}
+
+function getSectionProductionPhase(sectionId) {
+  const configured = SECTION_PRODUCTION_PHASE_MAP[sectionId];
+  const valid = new Set(PRODUCTION_PHASE_META.map(phase => phase.key));
+  return valid.has(configured) ? configured : 'pre_production';
+}
+
 function buildProgressSection({ id, title, track, opsTab, ctaLabel, checks = [] }) {
   const completed = checks.filter(check => check.done).length;
   const total = checks.length;
   const missing = checks.filter(check => !check.done).map(check => check.label);
   const status = completed >= total ? 'complete' : (completed > 0 ? 'in_progress' : 'not_started');
-  return { id, title, track, opsTab, ctaLabel, checks, completed, total, missing, status };
+  return {
+    id,
+    title,
+    track,
+    opsTab,
+    ctaLabel,
+    checks,
+    completed,
+    total,
+    missing,
+    status,
+    taylorZones: getSectionTaylorZones(id),
+    productionPhase: getSectionProductionPhase(id),
+  };
 }
 
 export function computeEventWorkflowProgress({
@@ -195,6 +342,9 @@ export function computeEventWorkflowProgress({
   youtubeDistribution = null,
 } = {}) {
   const productionDetails = event?.productionDetails || {};
+  const debrief = (productionDetails?.postProductionDebrief && typeof productionDetails.postProductionDebrief === 'object')
+    ? productionDetails.postProductionDebrief
+    : {};
   const runOfShow = event?.run_of_show || {};
   const workflowSteps = Array.isArray(runOfShow.workflowSteps) ? runOfShow.workflowSteps : [];
   const techChecklist = Array.isArray(runOfShow.techChecklist) ? runOfShow.techChecklist : [];
@@ -220,6 +370,17 @@ export function computeEventWorkflowProgress({
   const seatsAvailable = Number(productionDetails.seatsAvailable || productionDetails.seats_available || event?.seatsAvailable || 0);
   const hasTicketSnapshot = Number.isFinite(ticketSalesCount) && ticketSalesCount > 0
     || Number.isFinite(seatsAvailable) && seatsAvailable > 0;
+  const hasDebriefContent = [
+    debrief.peopleSummary,
+    debrief.moneySummary,
+    debrief.placeStuffSummary,
+    debrief.purposeProgramSummary,
+    debrief.wins,
+    debrief.issues,
+    debrief.nextActions,
+  ].some(hasText);
+  const debriefStatus = normalizeStatus(debrief.status);
+  const debriefComplete = ['submitted', 'complete', 'completed', 'done'].includes(debriefStatus) || hasDebriefContent;
 
   const staffingRows = Array.isArray(staffingRequests) ? staffingRequests : [];
   const staffingFilledRows = staffingRows.filter((row) => ['filled', 'sent', 'confirmed'].includes(normalizeStatus(row.status)));
@@ -332,9 +493,142 @@ export function computeEventWorkflowProgress({
         { label: 'Ticketing snapshot tracked', done: hasTicketSnapshot },
         { label: 'Settlement/reconciliation started', done: settlementRows.length > 0 },
         { label: 'Settlement approved/closed', done: closedSettlements.length > 0 },
+        { label: 'Post-production debrief saved', done: debriefComplete },
       ]),
     }),
   ];
+}
+
+function mergeUniqueText(target = [], values = []) {
+  const seen = new Set(target);
+  values.forEach((value) => {
+    const normalized = String(value || '').trim();
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    target.push(normalized);
+  });
+  return target;
+}
+
+export function computeTaylorZoneProgress(sectionProgress = []) {
+  const sections = Array.isArray(sectionProgress) ? sectionProgress : [];
+  const zoneMap = new Map(
+    TAYLOR_FOUR_ZONE_META.map((zone) => [zone.key, {
+      ...zone,
+      completed: 0,
+      total: 0,
+      sectionsCovered: 0,
+      missing: [],
+      status: 'not_started',
+    }])
+  );
+
+  sections.forEach((section) => {
+    const zoneKeys = Array.isArray(section?.taylorZones) && section.taylorZones.length
+      ? section.taylorZones
+      : getSectionTaylorZones(section?.id);
+    zoneKeys.forEach((zoneKey) => {
+      const zone = zoneMap.get(zoneKey);
+      if (!zone) return;
+      zone.completed += Number(section?.completed || 0);
+      zone.total += Number(section?.total || 0);
+      zone.sectionsCovered += 1;
+      mergeUniqueText(zone.missing, section?.missing || []);
+    });
+  });
+
+  return TAYLOR_FOUR_ZONE_META.map((meta) => {
+    const zone = zoneMap.get(meta.key);
+    const completed = Number(zone?.completed || 0);
+    const total = Number(zone?.total || 0);
+    const status = total > 0
+      ? (completed >= total ? 'complete' : (completed > 0 ? 'in_progress' : 'not_started'))
+      : 'not_started';
+    return {
+      ...meta,
+      completed,
+      total,
+      missing: zone?.missing || [],
+      sectionsCovered: zone?.sectionsCovered || 0,
+      status,
+    };
+  });
+}
+
+export function computeProductionPhaseProgress(sectionProgress = []) {
+  const sections = Array.isArray(sectionProgress) ? sectionProgress : [];
+  const phaseMap = new Map(
+    PRODUCTION_PHASE_META.map((phase) => [phase.key, {
+      ...phase,
+      completed: 0,
+      total: 0,
+      sectionsCovered: 0,
+      missing: [],
+      status: 'not_started',
+    }])
+  );
+
+  sections.forEach((section) => {
+    const phaseKey = section?.productionPhase || getSectionProductionPhase(section?.id);
+    const phase = phaseMap.get(phaseKey);
+    if (!phase) return;
+    phase.completed += Number(section?.completed || 0);
+    phase.total += Number(section?.total || 0);
+    phase.sectionsCovered += 1;
+    mergeUniqueText(phase.missing, section?.missing || []);
+  });
+
+  return PRODUCTION_PHASE_META.map((meta) => {
+    const phase = phaseMap.get(meta.key);
+    const completed = Number(phase?.completed || 0);
+    const total = Number(phase?.total || 0);
+    const status = total > 0
+      ? (completed >= total ? 'complete' : (completed > 0 ? 'in_progress' : 'not_started'))
+      : 'not_started';
+    return {
+      ...meta,
+      completed,
+      total,
+      missing: phase?.missing || [],
+      sectionsCovered: phase?.sectionsCovered || 0,
+      status,
+    };
+  });
+}
+
+export function computePhaseGateStatus(sectionProgress = []) {
+  const phases = computeProductionPhaseProgress(sectionProgress);
+  const byKey = {};
+  let blockingPhase = null;
+
+  const gated = phases.map((phase) => {
+    const total = Number(phase?.total || 0);
+    const completed = Number(phase?.completed || 0);
+    const isComplete = total <= 0 ? true : completed >= total;
+    const locked = !!blockingPhase;
+    const blockedBy = locked ? blockingPhase : null;
+
+    const row = {
+      ...phase,
+      isComplete,
+      locked,
+      blockedBy,
+    };
+
+    byKey[phase.key] = row;
+
+    if (!isComplete && !blockingPhase) {
+      blockingPhase = phase.key;
+    }
+
+    return row;
+  });
+
+  return {
+    phases: gated,
+    byKey,
+    blockingPhase,
+  };
 }
 
 export function summarizeWorkflowProgress(sectionProgress = []) {
