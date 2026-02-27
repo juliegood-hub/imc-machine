@@ -4,8 +4,10 @@ import { useVenue } from '../context/VenueContext';
 import { useAuth } from '../context/AuthContext';
 import CompletionBar from '../components/CompletionBar';
 import FormAIAssist from '../components/FormAIAssist';
+import DeepResearchPromptBox from '../components/DeepResearchPromptBox';
 import ShowConfigurationManager from '../components/ShowConfigurationManager';
 import { extractFromImages, openCamera, openFileUpload } from '../services/photo-to-form';
+import { deepResearchDraft } from '../services/research';
 import { isArtistRole, normalizeClientType } from '../constants/clientTypes';
 
 const PERFORMANCE_GENRES = [
@@ -296,6 +298,16 @@ const POLICY_PRIORITY_OPTIONS = [
 const REQUIRED_FIELDS = ['firstName', 'lastName', 'stageName', 'email', 'city', 'state'];
 const ARTIST_FIELDS = ['firstName', 'lastName', 'stageName', 'genre', 'bio', 'website', 'headshot'];
 const SOCIAL_FIELDS = ['website', 'facebook', 'instagram', 'tiktok', 'youtube', 'spotify', 'linkedin', 'bandcamp', 'soundcloud', 'appleMusic'];
+const DEEP_STYLE_OPTIONS = [
+  { value: 'clean', label: 'Clean' },
+  { value: 'feature', label: 'Feature' },
+  { value: 'punchy', label: 'Punchy' },
+];
+const DEEP_STYLE_HELP = {
+  clean: 'Clean keeps your bio tight and factual.',
+  feature: 'Feature adds voice and richer scene context while staying grounded.',
+  punchy: 'Punchy sharpens the same facts with faster, high-energy phrasing.',
+};
 
 export default function ArtistSetup() {
   const { venue, saveVenue } = useVenue();
@@ -370,6 +382,7 @@ export default function ArtistSetup() {
     headshot: venue.headshot || null,
     brandPrimary: venue.brandPrimary || '#c8a45e',
     brandSecondary: venue.brandSecondary || '#0d1b2a',
+    defaultOfficialAssetsOnly: !!venue.defaultOfficialAssetsOnly,
     
     type: venue.type || normalizedClientType || 'artist',
     members: venue.members || [],
@@ -389,6 +402,12 @@ export default function ArtistSetup() {
     band: false,
     brand: false,
   });
+  const [bioResearching, setBioResearching] = useState(false);
+  const [bioResearchStatus, setBioResearchStatus] = useState('');
+  const [bioStyleIntensity, setBioStyleIntensity] = useState('feature');
+  const [bioResearchCorrections, setBioResearchCorrections] = useState('');
+  const [bioResearchIncludeTerms, setBioResearchIncludeTerms] = useState('');
+  const [bioResearchAvoidTerms, setBioResearchAvoidTerms] = useState('');
 
   const update = (field) => (e) => setForm({ ...form, [field]: e.target.value });
   const updateCheckbox = (field) => (e) => setForm({ ...form, [field]: e.target.checked });
@@ -446,6 +465,57 @@ export default function ArtistSetup() {
       console.error(err);
     } finally {
       setExtracting(false);
+    }
+  };
+
+  const runBioDeepResearch = async ({
+    correctionPrompt = '',
+    includeTerms = '',
+    avoidTerms = '',
+  } = {}) => {
+    const artistName = String(form.stageName || '').trim();
+    if (!artistName) {
+      setBioResearchStatus('Add artist or act name first, then I can run deep research.');
+      return;
+    }
+    setBioResearching(true);
+    setBioResearchStatus('Researching artist context and drafting bio...');
+    try {
+      const result = await deepResearchDraft({
+        target: 'artist_bio',
+        styleIntensity: bioStyleIntensity,
+        correctionPrompt: String(correctionPrompt || bioResearchCorrections || '').trim(),
+        includeTerms: String(includeTerms || bioResearchIncludeTerms || '').trim(),
+        avoidTerms: String(avoidTerms || bioResearchAvoidTerms || '').trim(),
+        artist: {
+          stageName: artistName,
+          genre: form.genre,
+          city: form.city,
+          state: form.state,
+          subgenres: form.subgenres,
+          website: form.website,
+          instagram: form.instagram,
+          youtube: form.youtube,
+          bio: form.bio,
+        },
+      });
+      const draft = String(result?.draft || '').trim();
+      if (!draft) {
+        setBioResearchStatus('I could not draft a bio yet. Add one more detail and run it again.');
+        return;
+      }
+      setForm(prev => ({ ...prev, bio: draft }));
+      if (String(correctionPrompt || bioResearchCorrections || '').trim()
+        || String(includeTerms || bioResearchIncludeTerms || '').trim()
+        || String(avoidTerms || bioResearchAvoidTerms || '').trim()) {
+        setBioResearchStatus('Updated bio draft is ready with your guidance terms.');
+      } else {
+        setBioResearchStatus('Bio draft is ready. Review and edit as needed before you save.');
+      }
+    } catch (err) {
+      setBioResearchStatus(`I hit a snag researching this artist: ${err.message}`);
+    } finally {
+      setBioResearching(false);
     }
   };
 
@@ -777,6 +847,31 @@ export default function ArtistSetup() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">{isArtisanUser ? 'Artist Statement / Bio' : isPoliticianUser ? 'Candidate Bio / Platform Summary' : isKnowledgeCreatorUser ? 'Professional Bio' : 'Bio'}</label>
+                  <DeepResearchPromptBox
+                    title="OpenAI Deep Research Bio"
+                    subtitle="I will research this act and draft a first-pass bio. Add corrections and regenerate until it feels right."
+                    styleValue={bioStyleIntensity}
+                    onStyleChange={setBioStyleIntensity}
+                    styleOptions={DEEP_STYLE_OPTIONS}
+                    styleHelp={DEEP_STYLE_HELP}
+                    correctionValue={bioResearchCorrections}
+                    onCorrectionChange={setBioResearchCorrections}
+                    includeTermsValue={bioResearchIncludeTerms}
+                    onIncludeTermsChange={setBioResearchIncludeTerms}
+                    includeTermsLabel="Use these words or phrases"
+                    includeTermsPlaceholder="Example: celebrated, juried, gallery-ready, community-centered"
+                    avoidTermsValue={bioResearchAvoidTerms}
+                    onAvoidTermsChange={setBioResearchAvoidTerms}
+                    avoidTermsLabel="Avoid these words or phrases"
+                    avoidTermsPlaceholder="Example: amateur, hobbyist, underground"
+                    correctionLabel="Corrections or specific terms for regenerate"
+                    correctionPlaceholder="Example: Include Bexar County DA nomination context, correct spelling, and keep language community-focused."
+                    onGenerate={(payload = {}) => runBioDeepResearch(payload)}
+                    onRegenerate={(payload = {}) => runBioDeepResearch(payload)}
+                    generating={bioResearching}
+                    canGenerate={!!String(form.stageName || '').trim()}
+                    statusText={bioResearchStatus}
+                  />
                   <textarea value={form.bio} onChange={update('bio')} rows={4}
                     className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-[#c8a45e] resize-y"
                     placeholder={isArtisanUser ? 'Tell us about your artistic practice, materials, and themes. This will be used in press releases and bios.' : isPoliticianUser ? 'Share campaign mission, core issues, public service background, and key priorities. This will be used in bios and campaign copy.' : isKnowledgeCreatorUser ? 'Tell us about your work, expertise, and audience. This will be used in bios and media copy.' : 'Tell us about yourself or your band... This will be used in press releases and bios.'} />
@@ -906,6 +1001,22 @@ export default function ArtistSetup() {
             <div className="card">
               <p className="text-xs text-gray-500 mb-4">Used in generated graphics and press materials.</p>
               <div className="space-y-4">
+                <div className="p-3 border border-gray-200 rounded-lg bg-[#faf8f3]">
+                  <label className="inline-flex items-start gap-2 text-sm font-medium text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={!!form.defaultOfficialAssetsOnly}
+                      onChange={updateCheckbox('defaultOfficialAssetsOnly')}
+                      className="mt-0.5 w-4 h-4 text-[#c8a45e] border-gray-300 rounded focus:ring-[#c8a45e]"
+                    />
+                    <span>
+                      Default new events to official uploaded artwork only
+                    </span>
+                  </label>
+                  <p className="text-xs text-gray-500 mt-2 mb-0">
+                    When this is on, new events you create start in official-assets mode and skip AI graphics unless you turn it off per event.
+                  </p>
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Headshot / Press Photo</label>
                   <div className="border-2 border-dashed border-gray-200 rounded-lg p-6 text-center text-sm text-gray-400 cursor-pointer hover:border-[#c8a45e]"

@@ -9,6 +9,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { createClient } from '@supabase/supabase-js';
+import { ApiAuthError, requireApiAuth } from './_auth.js';
 
 // Initialize Supabase client for server-side operations
 const supabase = createClient(
@@ -19,7 +20,7 @@ const supabase = createClient(
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET' && req.method !== 'POST') {
@@ -30,6 +31,9 @@ export default async function handler(req, res) {
   if (!action) return res.status(400).json({ error: 'Tell me what action to run and I will take it from there.' });
 
   try {
+    const adminOnly = action === 'save-secret' || action === 'test-connections';
+    await requireApiAuth(req, { supabase, admin: adminOnly });
+
     let result;
     
     switch (action) {
@@ -50,6 +54,9 @@ export default async function handler(req, res) {
     
   } catch (err) {
     console.error(`[setup] ${action} error:`, err);
+    if (err instanceof ApiAuthError) {
+      return res.status(err.status || 401).json({ success: false, error: err.message });
+    }
     return res.status(500).json({ success: false, error: err.message });
   }
 }

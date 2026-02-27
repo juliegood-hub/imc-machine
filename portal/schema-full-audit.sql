@@ -9,94 +9,12 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- ═══════════════════════════════════════════════════════════════
--- SECTION 1: DISABLE RLS AND DROP EXISTING POLICIES
--- (We'll re-enable later after ensuring schema consistency)
+-- SECTION 1: SAFETY GUARD
+-- This script is additive only. It does NOT disable RLS or drop policies.
 -- ═══════════════════════════════════════════════════════════════
-
--- Disable RLS on all tables to avoid conflicts during schema updates
-ALTER TABLE IF EXISTS users DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS invites DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS profiles DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS events DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS campaigns DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS activity_log DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS generated_content DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS generated_images DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS app_settings DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS media DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS participant_profiles DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS venue_profiles DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS event_series DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS event_participants DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS performance_zones DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS show_configurations DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS stage_plot_documents DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS ticketing_providers DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS venue_ticketing_connections DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS booking_ticketing_records DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS production_checklists DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS production_checklist_items DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS venue_inventory_items DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS venue_maintenance_contacts DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS venue_maintenance_tasks DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS venue_suppliers DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS supplier_contacts DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS inventory_item_supplier_links DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS google_place_cache DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS booking_purchase_orders DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS production_costume_plans DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS costume_characters DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS production_set_plans DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS set_elements DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS parking_plans DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS parking_assets DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS parking_assignments DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS dressing_rooms DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS dressing_room_assignments DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS operations_packets DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS media_capture_plans DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS capture_sources DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS zoom_meeting_configs DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS zoom_assets DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS youtube_distributions DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS concessions_plans DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS concessions_menu_items DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS merch_plans DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS merch_participants DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS merch_revenue_splits DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS festivals DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS festival_stages DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS festival_bookings DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS touring_shows DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS tour_dates DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS board_risk_items DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS job_titles DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS staff_profiles DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS staff_assignments DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS venue_staffing_policies DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS staffing_publish_logs DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS staffing_inbound_messages DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS document_templates DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS booking_documents DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS booking_budgets DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS booking_budget_lines DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS booking_riders DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS booking_rider_items DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS show_checkins DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS settlement_reports DISABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS deal_memos DISABLE ROW LEVEL SECURITY;
-
--- Drop all existing RLS policies to avoid conflicts
-DO $$ 
-DECLARE
-    r RECORD;
+DO $$
 BEGIN
-    FOR r IN SELECT schemaname, tablename, policyname 
-             FROM pg_policies 
-             WHERE schemaname = 'public'
-    LOOP
-        EXECUTE 'DROP POLICY IF EXISTS ' || quote_ident(r.policyname) || ' ON ' || quote_ident(r.tablename);
-    END LOOP;
+  RAISE NOTICE 'schema-full-audit.sql running in additive-safe mode (RLS/policies untouched).';
 END $$;
 
 -- ═══════════════════════════════════════════════════════════════
@@ -106,6 +24,7 @@ END $$;
 -- USERS TABLE
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  auth_user_id UUID UNIQUE,
   email TEXT UNIQUE NOT NULL,
   name TEXT,
   client_type TEXT DEFAULT 'venue',
@@ -116,6 +35,28 @@ CREATE TABLE IF NOT EXISTS users (
   last_login TIMESTAMPTZ,
   metadata JSONB DEFAULT '{}'::jsonb
 );
+
+ALTER TABLE IF EXISTS users
+  ADD COLUMN IF NOT EXISTS auth_user_id UUID;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE table_name = 'users' AND constraint_name = 'users_auth_user_fk'
+  ) THEN
+    ALTER TABLE users
+      ADD CONSTRAINT users_auth_user_fk
+      FOREIGN KEY (auth_user_id) REFERENCES auth.users(id) ON DELETE SET NULL;
+  END IF;
+EXCEPTION
+  WHEN undefined_table THEN
+    NULL;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_auth_user_id_unique
+  ON users(auth_user_id)
+  WHERE auth_user_id IS NOT NULL;
 
 -- INVITES TABLE
 CREATE TABLE IF NOT EXISTS invites (
@@ -254,6 +195,36 @@ CREATE TABLE IF NOT EXISTS generated_images (
   width INTEGER,
   height INTEGER,
   created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- CALENDAR SUBMISSIONS QUEUE
+CREATE TABLE IF NOT EXISTS calendar_submissions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  event_id UUID REFERENCES events(id) ON DELETE CASCADE,
+  event_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+  platforms TEXT[] DEFAULT ARRAY['do210', 'sacurrent', 'evvnt']::text[],
+  status TEXT DEFAULT 'pending',
+  results JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  processed_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  error TEXT
+);
+
+-- VIDEO TRANSCODE JOB QUEUE
+CREATE TABLE IF NOT EXISTS video_transcode_jobs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  event_id UUID REFERENCES events(id) ON DELETE CASCADE,
+  status TEXT DEFAULT 'pending',
+  source_url TEXT NOT NULL,
+  source_path TEXT,
+  source_meta JSONB DEFAULT '{}'::jsonb,
+  targets JSONB DEFAULT '[]'::jsonb,
+  outputs JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  processed_at TIMESTAMPTZ,
+  error TEXT
 );
 
 -- APP_SETTINGS TABLE (unified definition)
@@ -1065,6 +1036,28 @@ CREATE TABLE IF NOT EXISTS concessions_menu_items (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS concessions_menu_library_items (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  source_booking_id UUID REFERENCES events(id) ON DELETE SET NULL,
+  source_venue_profile_id UUID,
+  name TEXT NOT NULL DEFAULT '',
+  category TEXT DEFAULT 'other',
+  price NUMERIC(12,2),
+  cost_basis NUMERIC(12,2),
+  supplier_reference TEXT,
+  alcohol_flag BOOLEAN DEFAULT FALSE,
+  inventory_link TEXT,
+  is_signature_item BOOLEAN DEFAULT FALSE,
+  availability_status TEXT DEFAULT 'available',
+  notes TEXT DEFAULT '',
+  metadata JSONB DEFAULT '{}'::jsonb,
+  is_public BOOLEAN DEFAULT TRUE,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- MERCHANDISING + VENDOR MARKETPLACE
 CREATE TABLE IF NOT EXISTS merch_plans (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -1651,6 +1644,10 @@ CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status);
 CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
 CREATE INDEX IF NOT EXISTS idx_generated_content_event ON generated_content(event_id);
 CREATE INDEX IF NOT EXISTS idx_generated_images_event ON generated_images(event_id);
+CREATE INDEX IF NOT EXISTS idx_calendar_submissions_event ON calendar_submissions(event_id);
+CREATE INDEX IF NOT EXISTS idx_calendar_submissions_status ON calendar_submissions(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_video_transcode_jobs_event ON video_transcode_jobs(event_id);
+CREATE INDEX IF NOT EXISTS idx_video_transcode_jobs_status ON video_transcode_jobs(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_media_user ON media(user_id);
 CREATE INDEX IF NOT EXISTS idx_media_event ON media(event_id);
 CREATE INDEX IF NOT EXISTS idx_participant_profiles_user ON participant_profiles(user_id);
@@ -1742,6 +1739,9 @@ CREATE INDEX IF NOT EXISTS idx_zoom_assets_booking ON zoom_assets(booking_id);
 CREATE INDEX IF NOT EXISTS idx_youtube_distributions_booking ON youtube_distributions(booking_id);
 CREATE INDEX IF NOT EXISTS idx_concessions_plans_booking ON concessions_plans(booking_id);
 CREATE INDEX IF NOT EXISTS idx_concessions_menu_items_booking ON concessions_menu_items(booking_id);
+CREATE INDEX IF NOT EXISTS idx_concessions_menu_library_items_name ON concessions_menu_library_items(name);
+CREATE INDEX IF NOT EXISTS idx_concessions_menu_library_items_category ON concessions_menu_library_items(category);
+CREATE INDEX IF NOT EXISTS idx_concessions_menu_library_items_public ON concessions_menu_library_items(is_public, is_active);
 CREATE INDEX IF NOT EXISTS idx_merch_plans_booking ON merch_plans(booking_id);
 CREATE INDEX IF NOT EXISTS idx_merch_participants_booking ON merch_participants(booking_id);
 CREATE INDEX IF NOT EXISTS idx_merch_revenue_splits_booking ON merch_revenue_splits(booking_id);
@@ -2225,7 +2225,7 @@ CREATE INDEX IF NOT EXISTS idx_message_mentions_role ON message_mentions(mention
 -- ✅ Media table exists with proper structure
 -- ✅ App settings table has unified structure
 -- ✅ All indexes are created for performance
--- ✅ RLS is disabled (will be re-enabled separately)
+-- ✅ Existing RLS/policies are preserved (additive-safe mode)
 -- ✅ Data migrations are handled safely
 -- ✅ Admin user (Julie Good) is ensured
 -- ✅ Proper constraints and triggers are in place

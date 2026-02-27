@@ -1,6 +1,7 @@
 import { parseLocalDate } from '../lib/dateUtils';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useVenue } from '../context/VenueContext';
+import { useAuth } from '../context/AuthContext';
 import { useSearchParams } from 'react-router-dom';
 import {
   THEATER_GENRE_KEY,
@@ -317,6 +318,95 @@ function makeId(prefix = 'id') {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function sanitizePrimaryView(value = '') {
+  return value === 'source_document' ? 'source_document' : 'clean_editable';
+}
+
+function normalizeSourceDocument(input = {}) {
+  if (!input || typeof input !== 'object') return null;
+  const url = String(input.url || input.original_url || '').trim();
+  if (!url) return null;
+  return {
+    id: input.id || input.mediaId || makeId('source_doc'),
+    url,
+    mimeType: String(input.mimeType || input.mime_type || '').trim() || 'application/octet-stream',
+    label: String(input.label || '').trim() || 'Run of Show Source',
+    uploadedAt: input.uploadedAt || input.created_at || new Date().toISOString(),
+  };
+}
+
+function normalizeSourceDocumentFromMedia(record = {}, index = 0) {
+  return normalizeSourceDocument({
+    id: record.id || `source-${index}`,
+    url: record.original_url || '',
+    mimeType: record.mime_type || '',
+    label: record.label || 'Run of Show Source',
+    uploadedAt: record.created_at || new Date().toISOString(),
+  });
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const value = typeof reader.result === 'string' ? reader.result : '';
+      const base64 = value.includes(',') ? value.split(',')[1] : value;
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function parseClockMinutes(value = '') {
+  const match = String(value || '').match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return null;
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+  return (hours * 60) + minutes;
+}
+
+function formatClockMinutes(totalMinutes = 0) {
+  const wrapped = ((totalMinutes % 1440) + 1440) % 1440;
+  const hours = Math.floor(wrapped / 60);
+  const minutes = wrapped % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+}
+
+function adjustClockTime(value = '', deltaMinutes = 0) {
+  const base = parseClockMinutes(value);
+  if (base === null) return value;
+  return formatClockMinutes(base + deltaMinutes);
+}
+
+function adjustDuration(value = '', deltaMinutes = 0) {
+  const raw = String(value || '').trim();
+  if (!raw) return `${Math.max(deltaMinutes, 0)} min`;
+  const match = raw.match(/(-?\d+)/);
+  if (!match) return raw;
+  const next = Math.max(0, Number(match[1]) + deltaMinutes);
+  return `${next} min`;
+}
+
+function normalizeRunOfShowExtractedCue(cue = {}, index = 0) {
+  const timeValue = String(cue.time || cue.startTime || cue.start_time || '').trim();
+  return {
+    id: makeId('cue'),
+    cueId: String(cue.cueId || cue.cue_id || cue.id || `AUTO-${index + 1}`).trim() || `AUTO-${index + 1}`,
+    department: String(cue.department || cue.dept || cue.team || '').trim().toUpperCase() || inferCueDepartment(String(cue.item || cue.title || cue.notes || '')),
+    scriptRef: String(cue.scriptRef || cue.script_ref || '').trim(),
+    environment: String(cue.environment || cue.location || '').trim(),
+    time: normalizeEmailTime(timeValue) || timeValue,
+    duration: String(cue.duration || cue.length || '').trim(),
+    item: String(cue.item || cue.title || cue.description || '').trim(),
+    crewMember: String(cue.crewMember || cue.operator || cue.owner || '').trim(),
+    status: String(cue.status || 'planned').trim() || 'planned',
+    notes: String(cue.notes || cue.note || '').trim(),
+  };
+}
+
 function normalizeEmailTime(input = '') {
   const raw = String(input || '').trim();
   if (!raw) return '';
@@ -454,6 +544,7 @@ function parseEmailToStageUpdates(emailBody = '', isTheaterEvent = false) {
 }
 
 export default function RunOfShow() {
+  const { user } = useAuth();
   const { events, crew, addCrewMember, updateEvent } = useVenue();
   const [searchParams] = useSearchParams();
   const preselectedEventId = searchParams.get('eventId');
@@ -478,11 +569,27 @@ export default function RunOfShow() {
   const [emailParseStatus, setEmailParseStatus] = useState('');
   const [emailIngesting, setEmailIngesting] = useState(false);
   const [handoffStatus, setHandoffStatus] = useState('');
+  const [primaryView, setPrimaryView] = useState('clean_editable');
+  const [sourceDocument, setSourceDocument] = useState(null);
+  const [sourceDocuments, setSourceDocuments] = useState([]);
+  const [sourceDocumentsLoading, setSourceDocumentsLoading] = useState(false);
+  const [sourceDocumentUploading, setSourceDocumentUploading] = useState(false);
+  const [sourceDocumentExtracting, setSourceDocumentExtracting] = useState(false);
+  const [sourceDocumentStatus, setSourceDocumentStatus] = useState('');
+  const [pendingSourceDraftRows, setPendingSourceDraftRows] = useState([]);
+  const [pendingSourceRawText, setPendingSourceRawText] = useState('');
+  const sourceDocumentInputRef = useRef(null);
   
   const [saving, setSaving] = useState(false);
   const [printView, setPrintView] = useState(false);
 
   const selectedEvent = events.find(e => e.id === selectedEventId);
+  const normalizedClientType = String(user?.clientType || '').trim().toLowerCase();
+  const canChangePrimaryView = !!(
+    user?.isAdmin
+    || selectedEvent?.userId === user?.id
+    || ['producer', 'manager', 'booking_agent', 'venue_owner', 'venue_manager', 'event_planner'].includes(normalizedClientType)
+  );
   const isTheaterEvent = selectedEvent?.genre === THEATER_GENRE_KEY;
   const checklistSummary = {
     total: techChecklist.length,
@@ -537,6 +644,8 @@ export default function RunOfShow() {
     if (selectedEvent?.run_of_show) {
       const runOfShow = selectedEvent.run_of_show;
       const theaterEvent = selectedEvent.genre === THEATER_GENRE_KEY;
+      setPrimaryView(sanitizePrimaryView(runOfShow.primaryView || runOfShow.primary_view));
+      setSourceDocument(normalizeSourceDocument(runOfShow.sourceDocument || runOfShow.source_document));
       if (Array.isArray(runOfShow.cues)) setRows(normalizeCueRows(runOfShow.cues));
       else setRows(getDefaultRowsForEvent(selectedEvent));
       if (Array.isArray(runOfShow.openMicQueue)) setOpenMicQueue(runOfShow.openMicQueue);
@@ -570,9 +679,14 @@ export default function RunOfShow() {
       setEmailParseStatus('');
       setHandoffStatus('');
       setActiveCueId('');
+      setSourceDocumentStatus('');
+      setPendingSourceDraftRows([]);
+      setPendingSourceRawText('');
       return;
     }
 
+    setPrimaryView('clean_editable');
+    setSourceDocument(null);
     setRows(getDefaultRowsForEvent(selectedEvent));
     setOpenMicQueue(selectedEvent.genre === THEATER_GENRE_KEY ? [] : getDefaultOpenMicQueue());
     setSchedulingMode('clock');
@@ -584,6 +698,9 @@ export default function RunOfShow() {
     setEmailParseStatus('');
     setHandoffStatus('');
     setActiveCueId('');
+    setSourceDocumentStatus('');
+    setPendingSourceDraftRows([]);
+    setPendingSourceRawText('');
   }, [selectedEvent]);
 
   useEffect(() => {
@@ -594,6 +711,55 @@ export default function RunOfShow() {
     const hasActive = rows.some(row => row.id === activeCueId);
     if (!hasActive) setActiveCueId(rows[0].id);
   }, [rows, activeCueId]);
+
+  useEffect(() => {
+    if (!selectedEventId || !user?.id) {
+      setSourceDocuments([]);
+      return;
+    }
+
+    let cancelled = false;
+    const load = async () => {
+      setSourceDocumentsLoading(true);
+      try {
+        const res = await fetch('/api/media', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'list',
+            userId: user.id,
+            eventId: selectedEventId,
+            category: 'run_of_show_source',
+          }),
+        });
+        const data = await res.json();
+        if (!data?.success) throw new Error(data?.error || 'I could not load source documents yet.');
+        const nextDocs = (data.media || [])
+          .map((record, index) => normalizeSourceDocumentFromMedia(record, index))
+          .filter(Boolean);
+        if (cancelled) return;
+        setSourceDocuments(nextDocs);
+        setSourceDocument((prev) => {
+          if (prev) {
+            const matched = nextDocs.find((doc) => doc.id === prev.id || doc.url === prev.url);
+            if (matched) return matched;
+            return prev;
+          }
+          return nextDocs[0] || null;
+        });
+      } catch (err) {
+        if (!cancelled) {
+          setSourceDocumentStatus(`I hit a snag loading source documents: ${err.message}`);
+          setSourceDocuments([]);
+        }
+      } finally {
+        if (!cancelled) setSourceDocumentsLoading(false);
+      }
+    };
+
+    load();
+    return () => { cancelled = true; };
+  }, [selectedEventId, user?.id]);
 
   const addRow = () => {
     setRows([...rows, { 
@@ -618,6 +784,18 @@ export default function RunOfShow() {
 
   const updateRow = (id, field, value) => {
     setRows(rows.map(r => r.id === id ? { ...r, [field]: value } : r));
+  };
+
+  const adjustRowTime = (id, deltaMinutes = 0) => {
+    setRows(prev => prev.map(row => (
+      row.id === id ? { ...row, time: adjustClockTime(row.time, deltaMinutes) } : row
+    )));
+  };
+
+  const adjustRowDuration = (id, deltaMinutes = 0) => {
+    setRows(prev => prev.map(row => (
+      row.id === id ? { ...row, duration: adjustDuration(row.duration, deltaMinutes) } : row
+    )));
   };
 
   const moveRow = (index, direction) => {
@@ -1018,27 +1196,205 @@ ${unresolvedIssues}
     }
   };
 
+  const buildRunOfShowPayload = (overrides = {}) => ({
+    cues: rows,
+    openMicQueue,
+    schedulingMode,
+    workflowSteps,
+    staffAssignments,
+    techChecklist,
+    emailInbox,
+    primaryView,
+    sourceDocument,
+    sourceDraftRawText: pendingSourceRawText || '',
+    lastEmailReceivedAt: emailInbox[0]?.receivedAt || null,
+    lastUpdated: new Date().toISOString(),
+    ...overrides,
+  });
+
+  const persistRunOfShowPatch = async (overrides = {}, opts = {}) => {
+    if (!selectedEvent) return;
+    const { silent = false } = opts;
+    if (!silent) setSaving(true);
+    try {
+      const runOfShowData = buildRunOfShowPayload(overrides);
+      await updateEvent(selectedEvent.id, {
+        run_of_show: runOfShowData,
+      });
+    } finally {
+      if (!silent) setSaving(false);
+    }
+  };
+
+  const refreshSourceDocumentsFromMedia = async () => {
+    if (!selectedEventId || !user?.id) return [];
+    const res = await fetch('/api/media', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'list',
+        userId: user.id,
+        eventId: selectedEventId,
+        category: 'run_of_show_source',
+      }),
+    });
+    const data = await res.json();
+    if (!data?.success) throw new Error(data?.error || 'I could not load source documents yet.');
+    const nextDocs = (data.media || [])
+      .map((record, index) => normalizeSourceDocumentFromMedia(record, index))
+      .filter(Boolean);
+    setSourceDocuments(nextDocs);
+    return nextDocs;
+  };
+
+  const applyPrimaryViewChange = async (nextValue) => {
+    if (!canChangePrimaryView) return;
+    const sanitized = sanitizePrimaryView(nextValue);
+    setPrimaryView(sanitized);
+    await persistRunOfShowPatch({ primaryView: sanitized }, { silent: true });
+    setSourceDocumentStatus(`Primary view updated to ${sanitized === 'source_document' ? 'Source Document' : 'Clean Run of Show'}.`);
+  };
+
+  const selectSourceDocument = async (nextDoc) => {
+    const normalized = normalizeSourceDocument(nextDoc);
+    setSourceDocument(normalized);
+    await persistRunOfShowPatch({ sourceDocument: normalized }, { silent: true });
+  };
+
+  const extractSourceDraftFromFile = async (file) => {
+    if (!file) return;
+    const mimeType = String(file.type || '').toLowerCase();
+    if (!(mimeType.includes('pdf') || mimeType.startsWith('image/'))) {
+      setSourceDocumentStatus('Source document uploaded. OCR draft is available for images and PDFs.');
+      return;
+    }
+
+    setSourceDocumentExtracting(true);
+    try {
+      const fileData = await fileToBase64(file);
+      const extractionPrompt = `You are an OCR parser for live production run-of-show documents.
+Return valid JSON only with this shape:
+{
+  "rawText": "all readable text",
+  "cues": [
+    {
+      "cueId": "optional cue id",
+      "department": "STAGE|LX|AUDIO|VIDEO|DECK|FLY|FOH",
+      "time": "HH:MM or text",
+      "duration": "optional duration",
+      "item": "cue title",
+      "crewMember": "optional operator/owner",
+      "notes": "optional note",
+      "environment": "optional location",
+      "scriptRef": "optional script ref",
+      "status": "planned|standby|go|executed|hold"
+    }
+  ]
+}
+Rules:
+- Preserve timeline order from the source when possible.
+- Include only real cues you can read.
+- If time is missing, leave it blank.
+- No markdown. JSON only.`;
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'extract-upload',
+          fileData,
+          mimeType: file.type || 'application/pdf',
+          extractionPrompt,
+        }),
+      });
+      const data = await response.json();
+      if (!data?.success) throw new Error(data?.error || 'OCR extraction failed.');
+
+      const extracted = data.extracted || {};
+      const rawText = String(extracted.rawText || extracted.raw_text || '').trim();
+      const cues = Array.isArray(extracted.cues) ? extracted.cues : [];
+      const draftRows = normalizeCueRows(
+        cues
+          .map((cue, index) => normalizeRunOfShowExtractedCue(cue, index))
+          .filter((row) => row.item || row.time)
+      );
+
+      setPendingSourceRawText(rawText);
+      setPendingSourceDraftRows(draftRows);
+      if (draftRows.length) {
+        setSourceDocumentStatus(`OCR draft ready: ${draftRows.length} cue${draftRows.length === 1 ? '' : 's'} found. Review and apply when ready.`);
+      } else {
+        setSourceDocumentStatus('OCR completed, but I could not map timeline cues yet. You can still use the source document as primary.');
+      }
+    } catch (err) {
+      setSourceDocumentStatus(`I hit a snag extracting this source document: ${err.message}`);
+    } finally {
+      setSourceDocumentExtracting(false);
+    }
+  };
+
+  const handleSourceDocumentUpload = async (filesLike) => {
+    const files = Array.from(filesLike || []).filter(Boolean);
+    if (!files.length || !selectedEventId || !user?.id) return;
+    setSourceDocumentUploading(true);
+    setSourceDocumentStatus('');
+    try {
+      for (const file of files) {
+        const base64 = await fileToBase64(file);
+        const uploadRes = await fetch('/api/media', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'upload',
+            base64,
+            category: 'run_of_show_source',
+            label: String(file.name || 'Run of Show Source').replace(/\.[^.]+$/, ''),
+            eventId: selectedEventId,
+            userId: user.id,
+            fileName: file.name,
+            mimeType: file.type || 'application/octet-stream',
+          }),
+        });
+        const uploadData = await uploadRes.json();
+        if (!uploadData?.success) {
+          throw new Error(uploadData?.error || `Upload failed for ${file.name}.`);
+        }
+      }
+
+      const nextDocs = await refreshSourceDocumentsFromMedia();
+      const newestDoc = nextDocs[0] || null;
+      if (newestDoc) {
+        await selectSourceDocument(newestDoc);
+      }
+      if (files.length === 1) {
+        await extractSourceDraftFromFile(files[0]);
+      } else {
+        setSourceDocumentStatus(`Uploaded ${files.length} source documents.`);
+      }
+    } catch (err) {
+      setSourceDocumentStatus(`I hit a snag uploading source docs: ${err.message}`);
+    } finally {
+      setSourceDocumentUploading(false);
+    }
+  };
+
+  const applySourceDraftToTimeline = (mode = 'merge') => {
+    if (!pendingSourceDraftRows.length) return;
+    if (mode === 'replace') {
+      setRows(normalizeCueRows(pendingSourceDraftRows.map((row) => ({ ...row, id: makeId('cue') }))));
+      setSourceDocumentStatus(`Clean run of show replaced with ${pendingSourceDraftRows.length} OCR draft cues.`);
+    } else {
+      setRows(prev => normalizeCueRows(mergeCueRows(prev, pendingSourceDraftRows)));
+      setSourceDocumentStatus(`Merged ${pendingSourceDraftRows.length} OCR draft cues into the clean run of show.`);
+    }
+    setPendingSourceDraftRows([]);
+  };
+
   const saveToSupabase = async () => {
     if (!selectedEvent) return;
 
     setSaving(true);
     try {
-      const runOfShowData = {
-        cues: rows,
-        openMicQueue,
-        schedulingMode,
-        workflowSteps,
-        staffAssignments,
-        techChecklist,
-        emailInbox,
-        lastEmailReceivedAt: emailInbox[0]?.receivedAt || null,
-        lastUpdated: new Date().toISOString()
-      };
-
-      await updateEvent(selectedEvent.id, { 
-        run_of_show: runOfShowData 
-      });
-
+      await persistRunOfShowPatch({}, { silent: true });
       alert('Perfect. Run of show is saved.');
     } catch (err) {
       console.error('Failed to save:', err);
@@ -1275,6 +1631,258 @@ ${unresolvedIssues}
 
       {selectedEvent && (
         <>
+          <div className="card mb-6">
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div>
+                <h3 className="text-lg m-0">PRIMARY VIEW (Top of Page)</h3>
+                <p className="text-xs text-gray-500 mt-1 mb-0">
+                  Choose which run-of-show representation appears first for everyone on this event.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <select
+                  value={primaryView}
+                  onChange={(e) => applyPrimaryViewChange(e.target.value)}
+                  disabled={!canChangePrimaryView}
+                  className="px-3 py-2 border border-gray-200 rounded text-sm bg-white focus:outline-none focus:border-[#c8a45e] disabled:bg-gray-100"
+                >
+                  <option value="source_document">Source Document (Upload)</option>
+                  <option value="clean_editable">Clean Run of Show (Editable)</option>
+                </select>
+                <button
+                  type="button"
+                  className="btn-secondary text-xs"
+                  onClick={() => sourceDocumentInputRef.current?.click()}
+                  disabled={sourceDocumentUploading}
+                >
+                  {sourceDocumentUploading ? 'Uploading…' : 'Upload Source Document'}
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary text-xs"
+                  onClick={refreshSourceDocumentsFromMedia}
+                  disabled={sourceDocumentsLoading}
+                >
+                  {sourceDocumentsLoading ? 'Refreshing…' : 'Refresh Sources'}
+                </button>
+              </div>
+            </div>
+
+            {!canChangePrimaryView && (
+              <p className="text-xs text-amber-700 mt-3 mb-0">
+                Read-only: event owner, producer, booking agent, or admin can change the primary top-of-page view.
+              </p>
+            )}
+
+            <input
+              ref={sourceDocumentInputRef}
+              type="file"
+              accept="image/*,application/pdf,.pdf,.doc,.docx,.txt"
+              className="hidden"
+              onChange={(e) => {
+                const files = e.target.files || [];
+                handleSourceDocumentUpload(files);
+                e.target.value = '';
+              }}
+            />
+
+            {sourceDocuments.length > 0 && (
+              <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Current Source Document</label>
+                  <select
+                    value={sourceDocument?.id || ''}
+                    onChange={(e) => {
+                      const nextDoc = sourceDocuments.find((doc) => doc.id === e.target.value);
+                      if (nextDoc) selectSourceDocument(nextDoc);
+                    }}
+                    className="w-full px-3 py-2 border border-gray-200 rounded text-sm bg-white focus:outline-none focus:border-[#c8a45e]"
+                  >
+                    {sourceDocuments.map((doc) => (
+                      <option key={doc.id} value={doc.id}>
+                        {doc.label || 'Source Document'} · {new Date(doc.uploadedAt).toLocaleString()}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">OCR Draft Actions</label>
+                  <div className="flex gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      className="btn-secondary text-xs"
+                      disabled={!pendingSourceDraftRows.length}
+                      onClick={() => applySourceDraftToTimeline('merge')}
+                    >
+                      Merge OCR Draft
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secondary text-xs"
+                      disabled={!pendingSourceDraftRows.length}
+                      onClick={() => {
+                        if (window.confirm('Replace the clean run of show timeline with OCR draft rows?')) {
+                          applySourceDraftToTimeline('replace');
+                        }
+                      }}
+                    >
+                      Replace with OCR Draft
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secondary text-xs"
+                      disabled={!sourceDocument}
+                      onClick={() => {
+                        setPendingSourceDraftRows([]);
+                        setPendingSourceRawText('');
+                        setSourceDocumentStatus('Cleared pending OCR draft.');
+                      }}
+                    >
+                      Clear Draft
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-1 mb-0">
+                    {sourceDocumentExtracting
+                      ? 'Extracting OCR draft…'
+                      : pendingSourceDraftRows.length
+                        ? `${pendingSourceDraftRows.length} draft cue${pendingSourceDraftRows.length === 1 ? '' : 's'} ready to apply.`
+                        : 'Upload a PDF/image source to generate an OCR draft for review.'}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {(sourceDocumentStatus || pendingSourceRawText) && (
+              <div className="mt-3 p-2 rounded border border-gray-200 bg-gray-50">
+                {sourceDocumentStatus && <p className="text-xs text-gray-700 m-0">{sourceDocumentStatus}</p>}
+                {pendingSourceRawText && (
+                  <details className="mt-2">
+                    <summary className="text-xs text-gray-600 cursor-pointer">View OCR raw text</summary>
+                    <pre className="text-[11px] mt-2 max-h-40 overflow-auto whitespace-pre-wrap">{pendingSourceRawText}</pre>
+                  </details>
+                )}
+              </div>
+            )}
+          </div>
+
+          {primaryView === 'source_document' ? (
+            <>
+              <div className="card mb-6 border-2 border-[#c8a45e]">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <h3 className="text-lg m-0">Official Run of Show Source Document</h3>
+                  <span className="text-xs px-2 py-1 rounded bg-[#f8f2e4] text-[#7f5f2b] border border-[#d8bf84]">Primary</span>
+                </div>
+                {sourceDocument ? (
+                  <>
+                    <p className="text-xs text-gray-500 mt-0 mb-3">
+                      {sourceDocument.label || 'Source document'} · {new Date(sourceDocument.uploadedAt).toLocaleString()}
+                    </p>
+                    {String(sourceDocument.mimeType || '').startsWith('image/') ? (
+                      <img src={sourceDocument.url} alt={sourceDocument.label || 'Source document'} className="w-full rounded border border-gray-200" />
+                    ) : String(sourceDocument.mimeType || '').includes('pdf') ? (
+                      <iframe src={sourceDocument.url} title="Run of show source document" className="w-full h-[640px] rounded border border-gray-200 bg-white" />
+                    ) : (
+                      <a href={sourceDocument.url} target="_blank" rel="noreferrer" className="text-sm text-[#7f5f2b] underline">
+                        Open source document
+                      </a>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-sm text-gray-500 m-0">Upload a source document to show it here.</p>
+                )}
+              </div>
+              <div className="card mb-6">
+                <div className="flex items-start justify-between gap-3 mb-2">
+                  <div>
+                    <h3 className="text-lg m-0">Clean Editable Run of Show</h3>
+                    <p className="text-xs text-gray-500 mt-1 mb-0">This is your structured manual schedule. Edit full details in the editor below.</p>
+                  </div>
+                  <a href="#clean-run-of-show-editor" className="btn-secondary text-xs no-underline">Jump to Editor</a>
+                </div>
+                {rows.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs min-w-[680px]">
+                      <thead>
+                        <tr className="border-b border-gray-200">
+                          <th className="text-left py-2 px-2 font-medium text-gray-500">Time</th>
+                          <th className="text-left py-2 px-2 font-medium text-gray-500">Cue</th>
+                          <th className="text-left py-2 px-2 font-medium text-gray-500">Department</th>
+                          <th className="text-left py-2 px-2 font-medium text-gray-500">Operator</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((row) => (
+                          <tr key={`preview-${row.id}`} className="border-b border-gray-100">
+                            <td className="py-1 px-2">{row.time || '—'}</td>
+                            <td className="py-1 px-2">{row.item || '—'}</td>
+                            <td className="py-1 px-2">{row.department || 'STAGE'}</td>
+                            <td className="py-1 px-2">{row.crewMember || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500 m-0">No cue rows yet.</p>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="card mb-6 border-2 border-[#c8a45e]">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <h3 className="text-lg m-0">Clean Editable Run of Show</h3>
+                  <span className="text-xs px-2 py-1 rounded bg-[#f8f2e4] text-[#7f5f2b] border border-[#d8bf84]">Primary</span>
+                </div>
+                <p className="text-xs text-gray-500 mt-0 mb-2">Use the editable timeline below to adjust times, ordering, and cue details.</p>
+                <div className="overflow-x-auto mb-2">
+                  <table className="w-full text-xs min-w-[680px]">
+                    <thead>
+                      <tr className="border-b border-gray-200">
+                        <th className="text-left py-2 px-2 font-medium text-gray-500">Time</th>
+                        <th className="text-left py-2 px-2 font-medium text-gray-500">Cue</th>
+                        <th className="text-left py-2 px-2 font-medium text-gray-500">Department</th>
+                        <th className="text-left py-2 px-2 font-medium text-gray-500">Operator</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row) => (
+                        <tr key={`clean-primary-${row.id}`} className="border-b border-gray-100">
+                          <td className="py-1 px-2">{row.time || '—'}</td>
+                          <td className="py-1 px-2">{row.item || '—'}</td>
+                          <td className="py-1 px-2">{row.department || 'STAGE'}</td>
+                          <td className="py-1 px-2">{row.crewMember || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <a href="#clean-run-of-show-editor" className="btn-secondary text-xs no-underline">Open Full Editor</a>
+              </div>
+              <div className="card mb-6">
+                <h3 className="text-lg m-0 mb-2">Official Run of Show Source Document</h3>
+                {sourceDocument ? (
+                  <>
+                    <p className="text-xs text-gray-500 mt-0 mb-3">
+                      {sourceDocument.label || 'Source document'} · {new Date(sourceDocument.uploadedAt).toLocaleString()}
+                    </p>
+                    {String(sourceDocument.mimeType || '').startsWith('image/') ? (
+                      <img src={sourceDocument.url} alt={sourceDocument.label || 'Source document'} className="w-full rounded border border-gray-200" />
+                    ) : String(sourceDocument.mimeType || '').includes('pdf') ? (
+                      <iframe src={sourceDocument.url} title="Run of show source document" className="w-full h-[520px] rounded border border-gray-200 bg-white" />
+                    ) : (
+                      <a href={sourceDocument.url} target="_blank" rel="noreferrer" className="text-sm text-[#7f5f2b] underline">
+                        Open source document
+                      </a>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-sm text-gray-500 m-0">Upload a source document to show it here.</p>
+                )}
+              </div>
+            </>
+          )}
+
           {isTheaterEvent && (
             <div className="card mb-6 overflow-x-auto">
               <div className="flex items-start justify-between mb-3 flex-wrap gap-3">
@@ -1774,7 +2382,7 @@ Lighting Designer: Dana Hall dana@example.com 210-555-0144 Call time 5:30 PM"
           )}
 
           {/* Timeline */}
-          <div className="card mb-6 overflow-x-auto">
+          <div id="clean-run-of-show-editor" className="card mb-6 overflow-x-auto">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg m-0">Event Timeline</h3>
               <div className="flex gap-2">
@@ -1880,12 +2488,44 @@ Lighting Designer: Dana Hall dana@example.com 210-555-0144 Call time 5:30 PM"
                     </td>
                     <td className="py-1 px-2">
                       {schedulingMode === 'clock' ? (
-                        <input 
-                          type="time" 
-                          value={row.time} 
-                          onChange={e => updateRow(row.id, 'time', e.target.value)}
-                          className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:border-[#c8a45e]" 
-                        />
+                        <div className="space-y-1">
+                          <input 
+                            type="time" 
+                            value={row.time} 
+                            onChange={e => updateRow(row.id, 'time', e.target.value)}
+                            className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:border-[#c8a45e]" 
+                          />
+                          <div className="flex gap-1">
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); adjustRowTime(row.id, -10); }}
+                              className="px-1.5 py-0.5 rounded text-[10px] border border-gray-200 bg-white text-gray-600"
+                            >
+                              -10
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); adjustRowTime(row.id, -5); }}
+                              className="px-1.5 py-0.5 rounded text-[10px] border border-gray-200 bg-white text-gray-600"
+                            >
+                              -5
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); adjustRowTime(row.id, 5); }}
+                              className="px-1.5 py-0.5 rounded text-[10px] border border-gray-200 bg-white text-gray-600"
+                            >
+                              +5
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); adjustRowTime(row.id, 10); }}
+                              className="px-1.5 py-0.5 rounded text-[10px] border border-gray-200 bg-white text-gray-600"
+                            >
+                              +10
+                            </button>
+                          </div>
+                        </div>
                       ) : (
                         <input 
                           type="text" 
@@ -1897,13 +2537,31 @@ Lighting Designer: Dana Hall dana@example.com 210-555-0144 Call time 5:30 PM"
                       )}
                     </td>
                     <td className="py-1 px-2">
-                      <input 
-                        type="text" 
-                        value={row.duration} 
-                        onChange={e => updateRow(row.id, 'duration', e.target.value)}
-                        className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:border-[#c8a45e]" 
-                        placeholder="15 min" 
-                      />
+                      <div className="space-y-1">
+                        <input 
+                          type="text" 
+                          value={row.duration} 
+                          onChange={e => updateRow(row.id, 'duration', e.target.value)}
+                          className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:border-[#c8a45e]" 
+                          placeholder="15 min" 
+                        />
+                        <div className="flex gap-1">
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); adjustRowDuration(row.id, -5); }}
+                            className="px-1.5 py-0.5 rounded text-[10px] border border-gray-200 bg-white text-gray-600"
+                          >
+                            -5
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); adjustRowDuration(row.id, 5); }}
+                            className="px-1.5 py-0.5 rounded text-[10px] border border-gray-200 bg-white text-gray-600"
+                          >
+                            +5
+                          </button>
+                        </div>
+                      </div>
                     </td>
                     <td className="py-1 px-2">
                       <input 

@@ -37,6 +37,7 @@ const defaultVenue = {
   tiktok: '', youtube: '', spotify: '', linkedin: '',
   onlineMenu: '', squareStore: '', shopifyStore: '', amazonStore: '',
   etsyStore: '', merchStore: '', otherStore: '',
+  defaultOfficialAssetsOnly: false,
 };
 
 function readLocalArray(key) {
@@ -281,6 +282,7 @@ function mapDbEvent(e, fallback = {}) {
 
   return {
     id: e.id,
+    userId: e.user_id || '',
     title: e.title || '',
     description: e.description || '',
     genre: e.genre || '',
@@ -403,6 +405,9 @@ export function VenueProvider({ children }) {
         if (cancelled) return;
 
         if (profile) {
+          const profileMetadata = (profile.metadata && typeof profile.metadata === 'object')
+            ? profile.metadata
+            : {};
           setVenue({
             name: profile.venue_name || profile.name || '',
             businessName: profile.name || '',
@@ -506,6 +511,12 @@ export function VenueProvider({ children }) {
 
             driveRootFolderId: profile.drive_root_folder_id || '',
             driveBrandFolderId: profile.drive_brand_folder_id || '',
+            metadata: profileMetadata,
+            defaultOfficialAssetsOnly: !!(
+              profileMetadata.defaultOfficialAssetsOnly
+              ?? profile.default_official_assets_only
+              ?? false
+            ),
           });
         }
 
@@ -587,6 +598,13 @@ export function VenueProvider({ children }) {
     if (!user?.id) return;
 
     try {
+      const existingMetadata = (updated.metadata && typeof updated.metadata === 'object')
+        ? updated.metadata
+        : {};
+      const mergedMetadata = {
+        ...existingMetadata,
+        defaultOfficialAssetsOnly: !!updated.defaultOfficialAssetsOnly,
+      };
       await upsertProfile({
         user_id: user.id,
         venue_name: updated.businessName || updated.stageName || updated.name || '',
@@ -700,6 +718,7 @@ export function VenueProvider({ children }) {
 
         members: updated.members || [],
         band_members: updated.members || [],
+        metadata: mergedMetadata,
       });
     } catch (err) {
       console.error('[VenueContext] Failed to save profile:', err);
@@ -2577,6 +2596,32 @@ export function VenueProvider({ children }) {
     return response?.removed === true;
   }, [callProductionAction]);
 
+  const listConcessionsMenuLibraryItems = useCallback(async (options = {}) => {
+    const response = await callProductionAction('get-concessions-menu-library-items', {
+      userId: user?.id,
+      ...options,
+    });
+    return response?.items || [];
+  }, [callProductionAction, user?.id]);
+
+  const saveConcessionsMenuLibraryItem = useCallback(async (item = {}, options = {}) => {
+    const response = await callProductionAction('upsert-concessions-menu-library-item', {
+      userId: user?.id,
+      item,
+      ...options,
+    });
+    return response?.item || null;
+  }, [callProductionAction, user?.id]);
+
+  const removeConcessionsMenuLibraryItem = useCallback(async (itemId) => {
+    if (!itemId) throw new Error('itemId is required');
+    const response = await callProductionAction('delete-concessions-menu-library-item', {
+      userId: user?.id,
+      itemId,
+    });
+    return response?.removed === true;
+  }, [callProductionAction, user?.id]);
+
   const getMerchPlan = useCallback(async (eventId) => {
     if (!eventId) return null;
     const response = await callProductionAction('get-merch-plan', {
@@ -2816,6 +2861,13 @@ export function VenueProvider({ children }) {
       ...options,
     });
   }, [callProductionAction, user?.id]);
+
+  const exportSectionStakeholderReport = useCallback(async (options = {}) => (
+    callProductionAction('export-section-stakeholder-report', {
+      userId: user?.id,
+      ...options,
+    })
+  ), [callProductionAction, user?.id]);
 
   const listShowCheckins = useCallback(async (eventId) => {
     if (!eventId) return [];
@@ -3078,6 +3130,9 @@ export function VenueProvider({ children }) {
       listConcessionsMenuItems,
       saveConcessionsMenuItem,
       removeConcessionsMenuItem,
+      listConcessionsMenuLibraryItems,
+      saveConcessionsMenuLibraryItem,
+      removeConcessionsMenuLibraryItem,
       getMerchPlan,
       saveMerchPlan,
       listMerchParticipants,
@@ -3106,6 +3161,7 @@ export function VenueProvider({ children }) {
       saveDressingRoomAssignment,
       removeDressingRoomAssignment,
       exportOperationsPacket,
+      exportSectionStakeholderReport,
       listShowCheckins,
       createShowCheckinRecord,
       updateShowCheckinRecord,

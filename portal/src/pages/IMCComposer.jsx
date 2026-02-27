@@ -1,5 +1,5 @@
 import { parseLocalDate } from '../lib/dateUtils';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useVenue } from '../context/VenueContext';
 import { useAuth } from '../context/AuthContext';
 import { upsertCampaign } from '../lib/supabase';
@@ -8,6 +8,13 @@ import ChannelToggle from '../components/ChannelToggle';
 import GeneratedContent from '../components/GeneratedContent';
 import FacebookEventWizard from '../components/FacebookEventWizard';
 import SACurrentWizard from '../components/SACurrentWizard';
+import {
+  isLegalProgramGenre,
+  normalizeLegalWorkflowMode,
+  LEGAL_WORKFLOW_MODES,
+  getLegalDisclaimerTemplate,
+  buildLegalDisclaimerText,
+} from '../constants/legalProgram';
 
 const CHANNELS = [
   { key: 'press', label: 'Press Release', icon: '📰' },
@@ -19,7 +26,7 @@ const CHANNELS = [
 ];
 
 export default function IMCComposer() {
-  const { events, venue, updateEvent } = useVenue();
+  const { events, venue, updateEvent, exportSectionStakeholderReport } = useVenue();
   const { user } = useAuth();
   const [selectedEventId, setSelectedEventId] = useState('');
   const [channels, setChannels] = useState({ press: true, calendar: true, email: true, sms: true, social: true, video: true });
@@ -27,6 +34,9 @@ export default function IMCComposer() {
   const [generating, setGenerating] = useState(false);
   const [generatingChannel, setGeneratingChannel] = useState('');
   const [images, setImages] = useState([]);
+  const [officialImages, setOfficialImages] = useState([]);
+  const [officialAssetsLoading, setOfficialAssetsLoading] = useState(false);
+  const [uploadingOfficialImages, setUploadingOfficialImages] = useState(false);
   const [videoAsset, setVideoAsset] = useState(null);
   const [uploadingVideo, setUploadingVideo] = useState(false);
   const [videoVariantJobId, setVideoVariantJobId] = useState('');
@@ -39,6 +49,13 @@ export default function IMCComposer() {
   const [researching, setResearching] = useState(false);
 
   const selectedEvent = events.find(e => e.id === selectedEventId);
+  const productionDetails = selectedEvent?.productionDetails || {};
+  const officialAssetsOnly = !!productionDetails?.officialAssetsOnly;
+  const persistedOfficialAssetUrls = Array.isArray(productionDetails?.officialAssetUrls)
+    ? productionDetails.officialAssetUrls.filter((url) => /^https?:\/\//i.test(String(url || '').trim()))
+    : [];
+  const persistedPrimaryOfficialAssetUrl = cleanText(productionDetails?.primaryOfficialAssetUrl || '');
+  const officialUploadInputRef = useRef(null);
   const activeChannels = CHANNELS.filter(c => channels[c.key]);
 
   // Load previously generated content when event changes
@@ -59,6 +76,50 @@ export default function IMCComposer() {
       } catch (e) { console.warn('Could not load saved content:', e); }
     })();
   }, [selectedEventId]);
+
+  useEffect(() => {
+    if (!selectedEventId || !user?.id) {
+      setOfficialImages([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setOfficialAssetsLoading(true);
+      try {
+        const res = await fetch('/api/media', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'list',
+            userId: user.id,
+            eventId: selectedEventId,
+            category: 'official_event_art',
+          }),
+        });
+        const data = await res.json();
+        if (!cancelled && data?.success) {
+          const next = (data.media || [])
+            .filter((row) => String(row?.mime_type || '').startsWith('image/'))
+            .map((row, idx) => ({
+              id: row.id || `official-${idx}`,
+              url: row.original_url,
+              label: row.label || 'Official Asset',
+              source: 'official',
+            }))
+            .filter((row) => /^https?:\/\//i.test(String(row.url || '')));
+          setOfficialImages(next);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.warn('Could not load official event assets:', err.message);
+          setOfficialImages([]);
+        }
+      } finally {
+        if (!cancelled) setOfficialAssetsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedEventId, user?.id]);
 
   useEffect(() => {
     if (!videoVariantJobId) return;
@@ -117,6 +178,32 @@ export default function IMCComposer() {
 
   function cleanText(value) {
     return String(value || '').trim();
+  }
+
+  function parseRecipientEmails(input = '') {
+    return String(input || '')
+      .split(/[,\n;]/g)
+      .map((value) => value.trim().toLowerCase())
+      .filter((value) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value));
+  }
+
+  function triggerDataUrlDownload(url = '', fileName = 'report.pdf') {
+    if (!url) return;
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+  }
+
+  function appendDisclaimerText(content = '', disclaimer = '') {
+    const body = String(content || '').trim();
+    const note = String(disclaimer || '').trim();
+    if (!note) return body;
+    if (!body) return note;
+    if (body.toLowerCase().includes(note.toLowerCase())) return body;
+    return `${body}\n\n${note}`.trim();
   }
 
   function normalizeEventDate(value) {
@@ -201,6 +288,152 @@ export default function IMCComposer() {
       missing,
     };
   }
+
+  async function saveOfficialAssetSettings(patch = {}) {
+    if (!selectedEventId || !selectedEvent) return;
+    const next = {
+      ...(selectedEvent.productionDetails || {}),
+      ...patch,
+    };
+    await updateEvent(selectedEventId, { productionDetails: next });
+  }
+
+  async function updateDistributionApproval({
+    approved = false,
+    approvedBy = '',
+    approvalNotes = '',
+  } = {}) {
+    if (!selectedEventId || !selectedEvent) return;
+    const nextDetails = {
+      ...(selectedEvent.productionDetails || {}),
+      distributionApproved: !!approved,
+      distributionApprovedBy: approved ? String(approvedBy || user?.name || user?.email || '').trim() : '',
+      distributionApprovedAt: approved ? new Date().toISOString() : '',
+      distributionApprovalNotes: approved ? String(approvalNotes || selectedEvent.productionDetails?.distributionApprovalNotes || '').trim() : '',
+    };
+    await updateEvent(selectedEventId, { productionDetails: nextDetails });
+  }
+
+  const fileToBase64 = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+  const loadOfficialImagesFromMedia = async () => {
+    if (!selectedEventId || !user?.id) return [];
+    const res = await fetch('/api/media', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'list',
+        userId: user.id,
+        eventId: selectedEventId,
+        category: 'official_event_art',
+      }),
+    });
+    const data = await res.json();
+    if (!data?.success) return [];
+    const next = (data.media || [])
+      .filter((row) => String(row?.mime_type || '').startsWith('image/'))
+      .map((row, idx) => ({
+        id: row.id || `official-${idx}`,
+        url: row.original_url,
+        label: row.label || 'Official Asset',
+        source: 'official',
+      }))
+      .filter((row) => /^https?:\/\//i.test(String(row.url || '')));
+    setOfficialImages(next);
+    return next;
+  };
+
+  const handleOfficialImageUpload = async (filesLike) => {
+    const files = Array.from(filesLike || []);
+    if (!files.length || !selectedEventId || !user?.id) return;
+    setUploadingOfficialImages(true);
+    try {
+      for (const file of files) {
+        if (!String(file.type || '').startsWith('image/')) continue;
+        const base64 = await fileToBase64(file);
+        const uploadRes = await fetch('/api/media', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'upload',
+            base64,
+            category: 'official_event_art',
+            label: String(file.name || 'Official asset').replace(/\.[^.]+$/, ''),
+            eventId: selectedEventId,
+            userId: user.id,
+            fileName: file.name,
+            mimeType: file.type,
+          }),
+        });
+        const uploadData = await uploadRes.json();
+        if (!uploadData?.success) {
+          throw new Error(uploadData?.error || 'Upload failed.');
+        }
+      }
+
+      const nextOfficialImages = await loadOfficialImagesFromMedia();
+      const nextUrls = nextOfficialImages.map((item) => item.url).filter(Boolean);
+      const primaryUrl = persistedPrimaryOfficialAssetUrl && nextUrls.includes(persistedPrimaryOfficialAssetUrl)
+        ? persistedPrimaryOfficialAssetUrl
+        : (nextUrls[0] || '');
+      await saveOfficialAssetSettings({
+        officialAssetUrls: nextUrls,
+        primaryOfficialAssetUrl: primaryUrl,
+      });
+      alert(`✅ Official artwork uploaded. I will keep these assets exactly as-is.`);
+    } catch (err) {
+      alert(`⚠️ I hit a snag uploading official artwork: ${err.message}`);
+    } finally {
+      setUploadingOfficialImages(false);
+    }
+  };
+
+  const handleSetPrimaryOfficialAsset = async (url) => {
+    const nextPrimary = cleanText(url);
+    if (!/^https?:\/\//i.test(nextPrimary)) return;
+    const nextUrls = Array.from(new Set([
+      ...officialImages.map((item) => item.url),
+      ...persistedOfficialAssetUrls,
+    ])).filter(Boolean);
+    try {
+      await saveOfficialAssetSettings({
+        officialAssetUrls: nextUrls,
+        primaryOfficialAssetUrl: nextPrimary,
+      });
+      alert('✅ Set as primary official artwork.');
+    } catch (err) {
+      alert(`⚠️ I hit a snag saving primary artwork: ${err.message}`);
+    }
+  };
+
+  const handleToggleOfficialAssetsOnly = async (enabled) => {
+    const nextUrls = Array.from(new Set([
+      ...officialImages.map((item) => item.url),
+      ...persistedOfficialAssetUrls,
+    ])).filter(Boolean);
+    const primaryUrl = enabled
+      ? (persistedPrimaryOfficialAssetUrl && nextUrls.includes(persistedPrimaryOfficialAssetUrl)
+        ? persistedPrimaryOfficialAssetUrl
+        : (nextUrls[0] || ''))
+      : (persistedPrimaryOfficialAssetUrl || '');
+    try {
+      await saveOfficialAssetSettings({
+        officialAssetsOnly: !!enabled,
+        officialAssetUrls: nextUrls,
+        primaryOfficialAssetUrl: primaryUrl,
+      });
+      if (enabled && !nextUrls.length) {
+        alert('Official mode is on. Upload the event poster/banner files next so I can distribute with your exact artwork.');
+      }
+    } catch (err) {
+      alert(`⚠️ I hit a snag saving that setting: ${err.message}`);
+    }
+  };
 
   // Track distribution results in campaigns table
   async function trackCampaign(channel, status, externalUrl, extra = {}) {
@@ -465,6 +698,10 @@ export default function IMCComposer() {
 
   const handleGenerateGraphics = async () => {
     if (!selectedEvent) return;
+    if (officialAssetsOnly) {
+      alert('Official artwork mode is on for this event. Upload approved assets and I will use those without AI edits.');
+      return;
+    }
     setGeneratingImages(true);
     setImageProgress(null);
 
@@ -617,6 +854,15 @@ export default function IMCComposer() {
   const [distributing, setDistributing] = useState(false);
   const [distributionResults, setDistributionResults] = useState(null);
   const [updatingImages, setUpdatingImages] = useState(false);
+  const [stakeholderExportForm, setStakeholderExportForm] = useState({
+    sectionKey: 'overview',
+    markComplete: false,
+    completedBy: '',
+    notes: '',
+    nextStep: '',
+    recipients: '',
+    status: '',
+  });
 
   const handleDistribute = async (channelKey, text, preparedPayload = null) => {
     if (!selectedEvent) return;
@@ -627,6 +873,12 @@ export default function IMCComposer() {
     if (!readiness.ready) {
       const list = readiness.missing.map((item) => `• ${item}`).join('\n');
       alert(`Before I distribute, I need a few details:\n\n${list}`);
+      setDistributed(prev => ({ ...prev, [channelKey]: false }));
+      return;
+    }
+    if (distributionApprovalRequired && !distributionApproved) {
+      const approvalOwner = cleanText(productionDetails?.distributionApprovedBy || '');
+      alert(`Distribution approval is required before publishing this legal event.\n\nWorkflow: ${legalWorkflowLabel}\nApproved: no${approvalOwner ? `\nOwner: ${approvalOwner}` : ''}`);
       setDistributed(prev => ({ ...prev, [channelKey]: false }));
       return;
     }
@@ -644,7 +896,7 @@ export default function IMCComposer() {
             action: 'send-press-release',
             event: distributionEvent,
             venue: distributionVenue,
-            content: text || generated.press
+            content: buildOutboundCopy(text || generated.press, 'press'),
           }),
         });
 
@@ -659,20 +911,20 @@ export default function IMCComposer() {
         }
       } else if (channelKey === 'calendar') {
         // Submit to Eventbrite with full description + banner image
-        const bannerImage = images?.length ? images[0]?.url : null;
+        const bannerImage = activeImages?.length ? activeImages[0]?.url : null;
         const res = await fetch('/api/distribute', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: 'create-eventbrite',
-            event: distributionEvent,
-            venue: distributionVenue,
-            options: {
-              description: generated.press || null,
-              bannerImage,
-            }
-          }),
-        });
+              event: distributionEvent,
+              venue: distributionVenue,
+              options: {
+                description: buildOutboundCopy(generated.press || '', 'calendar') || null,
+                bannerImage,
+              }
+            }),
+          });
 
         const data = await res.json();
         if (data.success) {
@@ -692,20 +944,20 @@ export default function IMCComposer() {
           const fbRes = await fetch('/api/distribute', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: 'post-facebook',
-              event: distributionEvent,
-              venue: distributionVenue,
-              content: { socialFacebook: parsed.facebook || text || generated.social },
-              images: images?.length ? { fb_post_landscape: images[0]?.url, fb_event_banner: images[0]?.url } : undefined
-            }),
-          });
+              body: JSON.stringify({
+                action: 'post-facebook',
+                event: distributionEvent,
+                venue: distributionVenue,
+                content: { socialFacebook: buildOutboundCopy(parsed.facebook || text || generated.social, 'facebook') },
+                images: activeImages?.length ? { fb_post_landscape: activeImages[0]?.url, fb_event_banner: activeImages[0]?.url } : undefined
+              }),
+            });
           results.facebook = await fbRes.json();
         } catch (err) { errors.push(`Facebook: ${err.message}`); results.facebook = { success: false, error: err.message }; }
 
         await new Promise(r => setTimeout(r, 500));
 
-        if (images?.length && images[0]?.url) {
+        if (activeImages?.length && activeImages[0]?.url) {
           try {
             // Server-side auto-uploads base64/data URLs to Supabase Storage for Instagram
             const igRes = await fetch('/api/distribute', {
@@ -715,14 +967,14 @@ export default function IMCComposer() {
                 action: 'post-instagram',
                 event: distributionEvent,
                 venue: distributionVenue,
-                content: { instagramCaption: parsed.instagram || '' },
-                images: { ig_post_square: images[0]?.url, ig_post_portrait: images[0]?.url }
+                content: { instagramCaption: buildOutboundCopy(parsed.instagram || '', 'instagram') },
+                images: { ig_post_square: activeImages[0]?.url, ig_post_portrait: activeImages[0]?.url }
               }),
             });
             results.instagram = await igRes.json();
           } catch (err) { errors.push(`Instagram: ${err.message}`); results.instagram = { success: false, error: err.message }; }
         } else {
-          results.instagram = { success: false, error: 'I need an image first. Generate graphics, then I can post to Instagram.' };
+          results.instagram = { success: false, error: officialAssetsOnly ? 'I need an official uploaded image first. Upload your approved poster/banner, then I can post to Instagram.' : 'I need an image first. Generate graphics, then I can post to Instagram.' };
         }
 
         await new Promise(r => setTimeout(r, 500));
@@ -731,14 +983,14 @@ export default function IMCComposer() {
           const liRes = await fetch('/api/distribute', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: 'post-linkedin',
-              event: distributionEvent,
-              venue: distributionVenue,
-              content: { linkedinPost: parsed.linkedin || parsed.facebook || text || generated.social },
-              images: images?.length ? { linkedin_post: images[0]?.url } : undefined
-            }),
-          });
+              body: JSON.stringify({
+                action: 'post-linkedin',
+                event: distributionEvent,
+                venue: distributionVenue,
+                content: { linkedinPost: buildOutboundCopy(parsed.linkedin || parsed.facebook || text || generated.social, 'linkedin') },
+                images: activeImages?.length ? { linkedin_post: activeImages[0]?.url } : undefined
+              }),
+            });
           results.linkedin = await liRes.json();
         } catch (err) { errors.push(`LinkedIn: ${err.message}`); results.linkedin = { success: false, error: err.message }; }
 
@@ -748,12 +1000,12 @@ export default function IMCComposer() {
           const twRes = await fetch('/api/distribute', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: 'post-twitter',
-              event: distributionEvent,
-              content: { twitterPost: parsed.twitter || '' }
-            }),
-          });
+              body: JSON.stringify({
+                action: 'post-twitter',
+                event: distributionEvent,
+                content: { twitterPost: buildOutboundCopy(parsed.twitter || '', 'twitter') }
+              }),
+            });
           results.twitter = await twRes.json();
         } catch (err) { errors.push(`Twitter: ${err.message}`); results.twitter = { success: false, error: err.message }; }
 
@@ -761,13 +1013,13 @@ export default function IMCComposer() {
           const calRes = await fetch('/api/distribute', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: 'submit-calendars',
-              event: distributionEvent,
-              venue: distributionVenue,
-              content: { calendarListing: generated.calendar || '' }
-            }),
-          });
+              body: JSON.stringify({
+                action: 'submit-calendars',
+                event: distributionEvent,
+                venue: distributionVenue,
+                content: { calendarListing: buildOutboundCopy(generated.calendar || '', 'calendar') }
+              }),
+            });
           results.calendars = await calRes.json();
         } catch (err) { results.calendars = { success: false, error: err.message }; }
 
@@ -888,11 +1140,11 @@ export default function IMCComposer() {
               event: distributionEvent,
               venue: distributionVenue,
               video: fbVideoPayload,
-              content: {
-                facebookReelCaption: parsed.facebookReelCaption || parsed.instagramReelCaption || distributionEvent.title,
-              },
-            }),
-          });
+                content: {
+                  facebookReelCaption: buildOutboundCopy(parsed.facebookReelCaption || parsed.instagramReelCaption || distributionEvent.title, 'facebook'),
+                },
+              }),
+            });
           results.facebook = await fbRes.json();
         } catch (err) { results.facebook = { success: false, error: err.message }; }
 
@@ -908,11 +1160,11 @@ export default function IMCComposer() {
               venue: distributionVenue,
               video: igVideoPayload,
               modes: ['reel', 'story'],
-              content: {
-                instagramReelCaption: parsed.instagramReelCaption || parsed.facebookReelCaption || '',
-                instagramStoryOverlayText: parsed.instagramStoryOverlayText || '',
-              },
-            }),
+                content: {
+                  instagramReelCaption: buildOutboundCopy(parsed.instagramReelCaption || parsed.facebookReelCaption || '', 'instagram'),
+                  instagramStoryOverlayText: parsed.instagramStoryOverlayText || '',
+                },
+              }),
           });
           results.instagram = await igRes.json();
         } catch (err) { results.instagram = { success: false, error: err.message }; }
@@ -928,11 +1180,11 @@ export default function IMCComposer() {
               event: distributionEvent,
               venue: distributionVenue,
               video: linkedinVideoPayload,
-              content: {
-                linkedinVideoPost: parsed.linkedinVideoPost || parsed.facebookReelCaption || distributionEvent.title,
-              },
-            }),
-          });
+                content: {
+                  linkedinVideoPost: buildOutboundCopy(parsed.linkedinVideoPost || parsed.facebookReelCaption || distributionEvent.title, 'linkedin'),
+                },
+              }),
+            });
           results.linkedin = await liRes.json();
         } catch (err) { results.linkedin = { success: false, error: err.message }; }
 
@@ -947,12 +1199,12 @@ export default function IMCComposer() {
               event: distributionEvent,
               venue: distributionVenue,
               video: youtubeVideoPayload,
-              content: {
-                youtubeTitle: parsed.youtubeTitle || distributionEvent.title,
-                youtubeDescription: parsed.youtubeDescription || distributionEvent.description || '',
-                youtubeTags: parsed.youtubeTags || '',
-              },
-            }),
+                content: {
+                  youtubeTitle: parsed.youtubeTitle || distributionEvent.title,
+                  youtubeDescription: buildOutboundCopy(parsed.youtubeDescription || distributionEvent.description || '', 'youtube'),
+                  youtubeTags: parsed.youtubeTags || '',
+                },
+              }),
           });
           results.youtube = await ytRes.json();
         } catch (err) { results.youtube = { success: false, error: err.message }; }
@@ -984,13 +1236,13 @@ export default function IMCComposer() {
           const res = await fetch('/api/distribute', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: 'send-email-blast',
-              event: distributionEvent,
-              venue: distributionVenue,
-              content: text || generated.email
-            }),
-          });
+              body: JSON.stringify({
+                action: 'send-email-blast',
+                event: distributionEvent,
+                venue: distributionVenue,
+                content: buildOutboundCopy(text || generated.email, 'email')
+              }),
+            });
           const data = await res.json();
           if (data.success) {
             setDistributed(prev => ({ ...prev, [channelKey]: true }));
@@ -1008,12 +1260,12 @@ export default function IMCComposer() {
           const res = await fetch('/api/distribute', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: 'send-sms',
-              event: distributionEvent,
-              content: { smsText: text || generated.sms }
-            }),
-          });
+              body: JSON.stringify({
+                action: 'send-sms',
+                event: distributionEvent,
+                content: { smsText: buildOutboundCopy(text || generated.sms, 'sms') }
+              }),
+            });
           const data = await res.json();
           if (data.success) {
             setDistributed(prev => ({ ...prev, [channelKey]: true }));
@@ -1044,6 +1296,11 @@ export default function IMCComposer() {
     if (!readiness.ready) {
       const list = readiness.missing.map((item) => `• ${item}`).join('\n');
       alert(`Before I distribute everything, I need these details:\n\n${list}`);
+      return;
+    }
+    if (distributionApprovalRequired && !distributionApproved) {
+      const approvalOwner = cleanText(productionDetails?.distributionApprovedBy || '');
+      alert(`Distribution approval is still pending for this legal event.\n\nWorkflow: ${legalWorkflowLabel}\nApproved: no${approvalOwner ? `\nOwner: ${approvalOwner}` : ''}`);
       return;
     }
 
@@ -1089,12 +1346,12 @@ export default function IMCComposer() {
 
   // Push generated graphics to already-distributed platforms
   const handleUpdatePlatformImages = async () => {
-    if (!selectedEvent || images.length === 0) return;
+    if (!selectedEvent || activeImages.length === 0) return;
     setUpdatingImages(true);
     const eventVenue = getEventVenue(selectedEvent);
-    const publicImage = images.find(img => img.url && !img.url.startsWith('data:'));
+    const publicImage = activeImages.find(img => img.url && !img.url.startsWith('data:'));
     if (!publicImage) {
-      alert('⚠️ I do not see a public image URL yet. Upload the image first, then I can push it to platforms.');
+      alert('⚠️ I do not see a public image URL yet. Upload the approved image first, then I can push it to platforms.');
       setUpdatingImages(false);
       return;
     }
@@ -1240,10 +1497,44 @@ export default function IMCComposer() {
   const youtubeVideoReady = !!videoAsset && videoIsPublicHttps && (hasLandscapeVariant || videoAspect !== 'unknown');
   const youtubeTargetMode = youtubeShortReady ? 'Short' : 'Standard Video';
 
+  const mergedOfficialImages = (() => {
+    const combined = [];
+    const seen = new Set();
+    const pushImage = (url, idPrefix = 'official', label = 'Official Asset') => {
+      const cleanUrl = cleanText(url);
+      if (!/^https?:\/\//i.test(cleanUrl)) return;
+      if (seen.has(cleanUrl)) return;
+      seen.add(cleanUrl);
+      combined.push({ id: `${idPrefix}-${combined.length + 1}`, url: cleanUrl, label, source: 'official' });
+    };
+    if (persistedPrimaryOfficialAssetUrl) {
+      pushImage(persistedPrimaryOfficialAssetUrl, 'official-primary', 'Official Primary Asset');
+    }
+    officialImages.forEach((image) => pushImage(image.url, String(image.id || 'official'), image.label || 'Official Asset'));
+    persistedOfficialAssetUrls.forEach((url) => pushImage(url, 'official-saved', 'Official Asset'));
+    return combined;
+  })();
+  const activeImages = officialAssetsOnly ? mergedOfficialImages : images;
+  const primaryActiveImageUrl = activeImages?.[0]?.url || '';
+
   const eventDistributionPayload = selectedEvent ? buildDistributionPayload(selectedEvent) : null;
   const eventCompleteness = eventDistributionPayload ? getEventCompleteness(eventDistributionPayload) : { ready: false, missing: [] };
   const missingEventFields = eventCompleteness?.missing || [];
   const eventReadyForDistribution = !!selectedEvent && eventCompleteness.ready;
+  const legalEvent = isLegalProgramGenre(selectedEvent?.genre || '');
+  const legalWorkflowMode = normalizeLegalWorkflowMode(productionDetails?.legalWorkflowMode || 'cle_full');
+  const legalWorkflowLabel = LEGAL_WORKFLOW_MODES.find((item) => item.value === legalWorkflowMode)?.label || 'CLE Compliance + Promotion';
+  const legalDisclaimerTemplate = getLegalDisclaimerTemplate(productionDetails?.legalDisclaimerTemplate || 'cle_education');
+  const distributionApprovalRequired = legalEvent
+    ? (productionDetails?.distributionApprovalRequired === true && legalWorkflowMode !== 'branding_only')
+    : false;
+  const distributionApproved = !distributionApprovalRequired || !!productionDetails?.distributionApproved;
+  const legalDisclaimerEnabled = legalEvent && !!buildLegalDisclaimerText({ productionDetails, channelKey: 'email' });
+  const buildOutboundCopy = (content = '', channelKey = '') => {
+    if (!legalEvent) return String(content || '').trim();
+    const disclaimer = buildLegalDisclaimerText({ productionDetails, channelKey });
+    return appendDisclaimerText(content, disclaimer);
+  };
   const facebookEventUrlForQr = cleanText(
     distributionResults?.social?.facebook?.event?.eventUrl
     || distributionResults?.social?.facebook?.event_url
@@ -1258,12 +1549,112 @@ export default function IMCComposer() {
   const facebookEventQrImageUrl = buildQrCodeImageUrl(facebookEventUrlForQr, 320);
 
   const requiresVideoUpload = !!(channels.video && generated.video && !videoAsset);
-  const distributeAllDisabled = distributing || requiresVideoUpload || !eventReadyForDistribution;
+  const distributeAllDisabled = distributing || requiresVideoUpload || !eventReadyForDistribution || (distributionApprovalRequired && !distributionApproved);
   const distributeAllTitle = requiresVideoUpload
     ? 'Upload a short video first so I can distribute video posts'
+    : (distributionApprovalRequired && !distributionApproved)
+      ? 'Distribution approval is required before we publish this legal event'
     : !eventReadyForDistribution
       ? `I still need event details first: ${missingEventFields.join(', ')}`
       : '';
+
+  const stakeholderSectionOptions = [
+    { key: 'overview', label: 'Campaign Overview' },
+    ...CHANNELS.map((channel) => ({ key: channel.key, label: channel.label })),
+  ];
+  const selectedStakeholderSectionKey = stakeholderExportForm.sectionKey || 'overview';
+  const selectedStakeholderSectionLabel = stakeholderSectionOptions.find((item) => item.key === selectedStakeholderSectionKey)?.label || 'Campaign Overview';
+
+  const stakeholderSectionCompletionChecklist = (() => {
+    if (selectedStakeholderSectionKey === 'overview') {
+      return [
+        { label: 'Event selected', done: !!selectedEvent },
+        { label: 'Core event details complete', done: !!eventReadyForDistribution },
+        { label: 'At least one channel selected', done: activeChannels.length > 0 },
+      ];
+    }
+    if (selectedStakeholderSectionKey === 'video') {
+      return [
+        { label: 'Video copy generated', done: !!generated.video },
+        { label: 'Video file uploaded', done: !!videoAsset },
+        { label: 'Distribution attempted', done: !!distributed.video },
+      ];
+    }
+    return [
+      { label: 'Copy generated', done: !!generated[selectedStakeholderSectionKey] },
+      { label: 'Distribution attempted', done: !!distributed[selectedStakeholderSectionKey] },
+    ];
+  })();
+  const stakeholderSectionCompletionDone = stakeholderSectionCompletionChecklist.filter((item) => item.done).length;
+  const stakeholderSectionCompletionTotal = stakeholderSectionCompletionChecklist.length || 1;
+  const stakeholderSectionComplete = stakeholderSectionCompletionDone === stakeholderSectionCompletionTotal;
+
+  const stakeholderSectionContent = (() => {
+    if (selectedStakeholderSectionKey === 'overview') {
+      return {
+        event: selectedEvent || null,
+        channelToggles: channels,
+        generatedKeys: Object.keys(generated || {}),
+        distributionStatus: distributed || {},
+        distributionResults: distributionResults || {},
+        officialAssetsOnly,
+        officialAssetsCount: mergedOfficialImages.length,
+      };
+    }
+    return {
+      channel: selectedStakeholderSectionKey,
+      channelEnabled: !!channels[selectedStakeholderSectionKey],
+      generatedCopy: generated[selectedStakeholderSectionKey] || '',
+      distributedStatus: distributed[selectedStakeholderSectionKey] || '',
+      distributionResults: distributionResults?.[selectedStakeholderSectionKey] || null,
+      activeImageCount: activeImages.length,
+      activeVideoAsset: selectedStakeholderSectionKey === 'video' ? videoAsset : null,
+    };
+  })();
+
+  const handleExportComposerSectionForStakeholders = async ({ sendEmail = false } = {}) => {
+    if (!selectedEvent) {
+      setStakeholderExportForm((prev) => ({ ...prev, status: 'Choose an event first so I can export this section.' }));
+      return;
+    }
+    const recipients = parseRecipientEmails(stakeholderExportForm.recipients);
+    if (sendEmail && !recipients.length) {
+      setStakeholderExportForm((prev) => ({ ...prev, status: 'Add at least one stakeholder email before sending.' }));
+      return;
+    }
+    try {
+      setStakeholderExportForm((prev) => ({
+        ...prev,
+        status: sendEmail ? 'Exporting and emailing stakeholder report...' : 'Exporting stakeholder report...',
+      }));
+      const result = await exportSectionStakeholderReport({
+        eventId: selectedEvent.id,
+        event: eventDistributionPayload?.event || selectedEvent,
+        sectionKey: `imc_composer_${selectedStakeholderSectionKey}`,
+        sectionTitle: `IMC Composer - ${selectedStakeholderSectionLabel}`,
+        sectionDescription: `Campaign export for ${selectedStakeholderSectionLabel}.`,
+        completion: {
+          isComplete: stakeholderExportForm.markComplete || stakeholderSectionComplete,
+          completedBy: stakeholderExportForm.completedBy || '',
+          completedAt: new Date().toISOString(),
+          checklist: stakeholderSectionCompletionChecklist,
+          notes: stakeholderExportForm.notes || '',
+        },
+        nextStep: stakeholderExportForm.nextStep || '',
+        content: stakeholderSectionContent,
+        recipients: sendEmail ? recipients : [],
+      });
+      triggerDataUrlDownload(result?.downloadUrl, result?.fileName || 'imc-composer-stakeholder-report.pdf');
+      setStakeholderExportForm((prev) => ({
+        ...prev,
+        status: sendEmail && result?.email?.emailId
+          ? `Report emailed to ${recipients.length} stakeholder${recipients.length === 1 ? '' : 's'}.`
+          : 'Report exported. Share the PDF with stakeholders.',
+      }));
+    } catch (err) {
+      setStakeholderExportForm((prev) => ({ ...prev, status: `Stakeholder export failed: ${err.message}` }));
+    }
+  };
 
   return (
     <div className="p-4 md:p-8 max-w-4xl">
@@ -1281,7 +1672,26 @@ export default function IMCComposer() {
       {/* Event Selector */}
       <div className="card mb-6">
         <label className="block text-sm font-medium text-gray-700 mb-2">Pick Your Event</label>
-        <select value={selectedEventId} onChange={e => { setSelectedEventId(e.target.value); setGenerated({}); setImages([]); setVideoAsset(null); setVideoVariants(null); setVideoVariantJob(null); setVideoVariantJobId(''); setDistributed({}); }}
+        <select value={selectedEventId} onChange={e => {
+          setSelectedEventId(e.target.value);
+          setGenerated({});
+          setImages([]);
+          setOfficialImages([]);
+          setVideoAsset(null);
+          setVideoVariants(null);
+          setVideoVariantJob(null);
+          setVideoVariantJobId('');
+          setDistributed({});
+          setStakeholderExportForm(prev => ({
+            ...prev,
+            sectionKey: 'overview',
+            markComplete: false,
+            notes: '',
+            nextStep: '',
+            recipients: '',
+            status: '',
+          }));
+        }}
           className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-[#c8a45e] bg-white">
           <option value="">Choose an event...</option>
           {events.map(e => <option key={e.id} value={e.id}>{e.title} · {parseLocalDate(e.date).toLocaleDateString()}</option>)}
@@ -1310,6 +1720,80 @@ export default function IMCComposer() {
             </div>
           )}
 
+          {legalEvent && (
+            <div className={`card mb-6 border-l-4 ${distributionApprovalRequired && !distributionApproved ? 'border-amber-500 bg-amber-50' : 'border-blue-500 bg-blue-50'}`}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold m-0">⚖️ Legal Distribution Controls</p>
+                  <p className="text-xs mt-1 mb-0 text-gray-700">Workflow Mode: {legalWorkflowLabel}</p>
+                  <p className="text-xs mt-1 mb-0 text-gray-700">
+                    Approval Gate: {distributionApprovalRequired ? 'Required before distribution' : 'Optional (branding flow)'}
+                  </p>
+                  <p className="text-xs mt-1 mb-0 text-gray-700">
+                    Approval Status: {distributionApproved ? 'Approved' : 'Pending'}
+                    {distributionApproved && productionDetails?.distributionApprovedBy ? ` · ${productionDetails.distributionApprovedBy}` : ''}
+                  </p>
+                  {productionDetails?.distributionApprovedAt && (
+                    <p className="text-xs mt-1 mb-0 text-gray-700">
+                      Approved At: {new Date(productionDetails.distributionApprovedAt).toLocaleString('en-US')}
+                    </p>
+                  )}
+                  {legalDisclaimerEnabled && (
+                    <p className="text-xs mt-1 mb-0 text-gray-700">
+                      Disclaimer: {legalDisclaimerTemplate.label}
+                    </p>
+                  )}
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  {!distributionApproved && (
+                    <button
+                      type="button"
+                      className="btn-secondary text-xs"
+                      onClick={async () => {
+                        const approver = window.prompt('Approved by (name/email)', user?.name || user?.email || '');
+                        if (approver === null) return;
+                        const notes = window.prompt('Approval notes (optional)', productionDetails?.distributionApprovalNotes || '');
+                        try {
+                          await updateDistributionApproval({
+                            approved: true,
+                            approvedBy: approver,
+                            approvalNotes: notes || '',
+                          });
+                          alert('Distribution approval saved.');
+                        } catch (err) {
+                          alert(`I hit a snag saving approval: ${err.message}`);
+                        }
+                      }}
+                    >
+                      Mark Approved
+                    </button>
+                  )}
+                  {distributionApproved && (
+                    <button
+                      type="button"
+                      className="btn-secondary text-xs"
+                      onClick={async () => {
+                        try {
+                          await updateDistributionApproval({ approved: false });
+                          alert('Distribution approval cleared.');
+                        } catch (err) {
+                          alert(`I hit a snag clearing approval: ${err.message}`);
+                        }
+                      }}
+                    >
+                      Clear Approval
+                    </button>
+                  )}
+                </div>
+              </div>
+              {distributionApprovalRequired && !distributionApproved && (
+                <p className="text-xs text-amber-700 mt-2 mb-0">
+                  Approval is required for this legal workflow before any press, social, email, SMS, or calendar distribution call runs.
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Channel Toggles */}
           <div className="card mb-6">
             <h3 className="text-lg mb-3">Where We Are Sending It</h3>
@@ -1324,6 +1808,176 @@ export default function IMCComposer() {
               📅 Calendar → Do210, SA Current, Evvnt (→ Express-News/MySA) &nbsp;|&nbsp;
               📱 Social → FB, IG, X, LinkedIn &nbsp;|&nbsp; 🎬 Video → FB Reels, IG Reels/Stories, YouTube, LinkedIn
             </p>
+          </div>
+
+          <div className="card mb-6 bg-gray-50 border border-gray-200">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <h3 className="text-lg m-0">📤 Stakeholder Export</h3>
+              <p className="text-xs text-gray-600 m-0">
+                Completion: {stakeholderSectionCompletionDone}/{stakeholderSectionCompletionTotal}
+              </p>
+            </div>
+            <p className="text-xs text-gray-500 m-0 mb-3">
+              Export any IMC Composer section as a proof report. Add emails and I will send it to your stakeholders directly.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <select
+                value={selectedStakeholderSectionKey}
+                onChange={(e) => setStakeholderExportForm((prev) => ({ ...prev, sectionKey: e.target.value }))}
+                className="px-3 py-2 border border-gray-200 rounded text-xs bg-white"
+              >
+                {stakeholderSectionOptions.map((option) => (
+                  <option key={option.key} value={option.key}>{option.label}</option>
+                ))}
+              </select>
+              <label className="text-xs flex items-center gap-2 px-3 py-2 border border-gray-200 rounded bg-white">
+                <input
+                  type="checkbox"
+                  checked={stakeholderExportForm.markComplete}
+                  onChange={(e) => setStakeholderExportForm((prev) => ({ ...prev, markComplete: e.target.checked }))}
+                />
+                Mark section complete (auto-detected: {stakeholderSectionComplete ? 'yes' : 'no'})
+              </label>
+              <input
+                type="text"
+                value={stakeholderExportForm.completedBy}
+                onChange={(e) => setStakeholderExportForm((prev) => ({ ...prev, completedBy: e.target.value }))}
+                className="px-3 py-2 border border-gray-200 rounded text-xs bg-white"
+                placeholder="Completed by (name)"
+              />
+              <input
+                type="text"
+                value={stakeholderExportForm.nextStep}
+                onChange={(e) => setStakeholderExportForm((prev) => ({ ...prev, nextStep: e.target.value }))}
+                className="px-3 py-2 border border-gray-200 rounded text-xs bg-white"
+                placeholder="Next step for stakeholders"
+              />
+              <input
+                type="text"
+                value={stakeholderExportForm.recipients}
+                onChange={(e) => setStakeholderExportForm((prev) => ({ ...prev, recipients: e.target.value }))}
+                className="px-3 py-2 border border-gray-200 rounded text-xs bg-white md:col-span-2"
+                placeholder="Stakeholder emails (comma-separated)"
+              />
+              <textarea
+                value={stakeholderExportForm.notes}
+                onChange={(e) => setStakeholderExportForm((prev) => ({ ...prev, notes: e.target.value }))}
+                rows={2}
+                className="px-3 py-2 border border-gray-200 rounded text-xs bg-white md:col-span-2"
+                placeholder="Completion notes for this section"
+              />
+            </div>
+            <div className="flex flex-wrap gap-2 mt-3">
+              <button
+                type="button"
+                className="btn-secondary text-xs"
+                onClick={() => handleExportComposerSectionForStakeholders({ sendEmail: false })}
+              >
+                Export Section PDF
+              </button>
+              <button
+                type="button"
+                className="btn-primary text-xs"
+                onClick={() => handleExportComposerSectionForStakeholders({ sendEmail: true })}
+              >
+                Export + Email Stakeholders
+              </button>
+            </div>
+            {stakeholderExportForm.status && (
+              <p className="text-xs text-gray-600 mt-2 mb-0">{stakeholderExportForm.status}</p>
+            )}
+          </div>
+
+          <div className="card mb-6">
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div>
+                <h3 className="text-lg mb-1">🖼️ Official Event Artwork</h3>
+                <p className="text-xs text-gray-500 m-0">
+                  Upload the real poster/flyer/banner files from your organization. I will use them exactly as provided.
+                </p>
+              </div>
+              <label className="text-xs flex items-center gap-2 px-3 py-2 border border-gray-200 rounded bg-white">
+                <input
+                  type="checkbox"
+                  checked={officialAssetsOnly}
+                  onChange={(e) => handleToggleOfficialAssetsOnly(e.target.checked)}
+                />
+                Official Assets Only (skip AI graphics)
+              </label>
+            </div>
+            <div className="mt-3 flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                className="btn-secondary text-sm"
+                disabled={uploadingOfficialImages}
+                onClick={() => officialUploadInputRef.current?.click()}
+              >
+                {uploadingOfficialImages ? '⏳ Uploading Official Files...' : '📤 Upload Official Artwork'}
+              </button>
+              <button
+                type="button"
+                className="btn-secondary text-sm"
+                disabled={officialAssetsLoading || uploadingOfficialImages}
+                onClick={() => loadOfficialImagesFromMedia()}
+              >
+                {officialAssetsLoading ? '⏳ Refreshing...' : '🔄 Refresh Official Files'}
+              </button>
+              {Object.keys(distributed).length > 0 && mergedOfficialImages.some((img) => img.url) && (
+                <button
+                  type="button"
+                  className="btn-secondary text-sm"
+                  onClick={handleUpdatePlatformImages}
+                  disabled={updatingImages}
+                >
+                  {updatingImages ? '⏳ Updating Platforms...' : '🔄 Push Official Image to Platforms'}
+                </button>
+              )}
+              <input
+                ref={officialUploadInputRef}
+                type="file"
+                multiple
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  handleOfficialImageUpload(e.target.files);
+                  e.target.value = '';
+                }}
+              />
+              <p className="text-xs text-gray-500 m-0">
+                {mergedOfficialImages.length} official file{mergedOfficialImages.length === 1 ? '' : 's'} loaded
+              </p>
+            </div>
+            {officialAssetsOnly && mergedOfficialImages.length === 0 && (
+              <p className="text-xs text-amber-700 mt-3 mb-0">
+                Official mode is active, but no official image is loaded yet. Upload a flyer/poster/banner before social distribution.
+              </p>
+            )}
+            {mergedOfficialImages.length > 0 && (
+              <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-3">
+                {mergedOfficialImages.slice(0, 8).map((img) => {
+                  const isPrimary = persistedPrimaryOfficialAssetUrl
+                    ? persistedPrimaryOfficialAssetUrl === img.url
+                    : primaryActiveImageUrl === img.url;
+                  return (
+                    <div key={img.id} className="border border-gray-200 rounded-lg overflow-hidden">
+                      <a href={img.url} target="_blank" rel="noopener noreferrer">
+                        <img src={img.url} alt={img.label} className="w-full h-28 object-cover" />
+                      </a>
+                      <div className="p-2 text-[11px] space-y-1">
+                        <p className="m-0 text-gray-600 truncate">{img.label}</p>
+                        <button
+                          type="button"
+                          className={`px-2 py-1 rounded border ${isPrimary ? 'border-green-300 text-green-700 bg-green-50' : 'border-gray-300 text-gray-700 bg-white'}`}
+                          onClick={() => handleSetPrimaryOfficialAsset(img.url)}
+                        >
+                          {isPrimary ? '✅ Primary Asset' : 'Set as Primary'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Generate Buttons */}
@@ -1344,10 +1998,12 @@ export default function IMCComposer() {
                 <option value="eventbrite_only">Eventbrite (3)</option>
                 <option value="full">All Platforms</option>
               </select>
-              <button onClick={handleGenerateGraphics} disabled={generatingImages || !selectedEvent}
+              <button onClick={handleGenerateGraphics} disabled={generatingImages || !selectedEvent || officialAssetsOnly}
                 className="btn-secondary flex items-center gap-2 disabled:opacity-50">
                 {generatingImages ? (
                   <><span className="animate-spin inline-block">⟳</span> {imageProgress ? `${imageProgress.current}/${imageProgress.total}: ${imageProgress.label}` : 'Designing graphics...'}</>
+                ) : officialAssetsOnly ? (
+                  '🛑 AI Graphics Disabled (Official Mode)'
                 ) : (
                   '🎨 Create Graphics'
                 )}
@@ -1644,7 +2300,7 @@ export default function IMCComposer() {
                 event={selectedEvent}
                 venue={getEventVenue(selectedEvent)}
                 generatedContent={generated}
-                images={images}
+                images={activeImages}
                 onSaveEventUrl={handleSaveFacebookEventUrl}
               />
               <SACurrentWizard

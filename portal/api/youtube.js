@@ -3,16 +3,19 @@
 // POST /api/youtube
 // ═══════════════════════════════════════════════════════════════
 
+import { ApiAuthError, requireApiAuth } from './_auth.js';
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Send this endpoint a POST request and I can run it.' });
 
-  const { action } = req.body;
+  const { action } = req.body || {};
 
   try {
+    await requireApiAuth(req);
     if (action === 'get-access-token') {
       return res.status(200).json(await refreshAccessToken());
     }
@@ -22,6 +25,9 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: `I do not recognize "${action}" yet. Use get-access-token or upload.` });
   } catch (err) {
     console.error('[youtube]', err);
+    if (err instanceof ApiAuthError) {
+      return res.status(err.status || 401).json({ success: false, error: err.message });
+    }
     return res.status(500).json({ success: false, error: err.message });
   }
 }

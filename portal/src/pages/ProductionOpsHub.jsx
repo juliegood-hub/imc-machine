@@ -2,8 +2,22 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { useVenue } from '../context/VenueContext';
 import { parseLocalDate } from '../lib/dateUtils';
+import TaylorZoneReferenceStrip from '../components/TaylorZoneReferenceStrip';
+import { TAYLOR_FRAMEWORK_ATTRIBUTION, WORKFLOW_SECTIONS } from '../constants/workflowSections';
+import {
+  PRODUCTION_ROLE_DEPARTMENTS,
+  PRODUCTION_ROLE_DIRECTORY,
+  normalizeRoleKey,
+  resolveRoleSectionLink,
+} from '../constants/productionRolesExpanded';
 
-const FOCUS_SECTIONS = ['staffing', 'event_ops', 'inventory', 'training', 'certifications'];
+const FOCUS_SECTIONS = ['role_map', 'staffing', 'event_ops', 'inventory', 'training', 'certifications'];
+const PRODUCTION_OPS_REFERENCE_SECTION_IDS = [
+  'production_ops',
+  'staffing_workforce',
+  'capture_pipeline',
+  'ticketing_revenue',
+];
 
 const TRAINING_CATEGORY_OPTIONS = [
   'software',
@@ -121,6 +135,8 @@ export default function ProductionOpsHub() {
             ? 'certifications'
             : '';
   const focus = FOCUS_SECTIONS.includes(queryFocus) ? queryFocus : pathFocus;
+  const [roleSearch, setRoleSearch] = useState('');
+  const [roleDepartmentFilter, setRoleDepartmentFilter] = useState('all');
 
   const {
     events,
@@ -193,6 +209,11 @@ export default function ProductionOpsHub() {
     venueProfiles?.[0]?.id || ''
   ), [venueProfiles]);
 
+  const productionOpsReferenceSections = useMemo(
+    () => WORKFLOW_SECTIONS.filter((section) => PRODUCTION_OPS_REFERENCE_SECTION_IDS.includes(section.id)),
+    []
+  );
+
   const upcomingEvents = useMemo(() => {
     const now = new Date();
     return [...(events || [])]
@@ -213,6 +234,45 @@ export default function ProductionOpsHub() {
     (events || []).find((event) => event.id === selectedEventId) || null
   ), [events, selectedEventId]);
   const selectedEventVenueProfileId = selectedEvent?.venueProfileId || selectedVenueProfileId;
+  const selectedEventOpsTabs = useMemo(() => (
+    selectedEvent?.id
+      ? [
+        { key: 'staffing', label: 'Staffing' },
+        { key: 'production', label: 'Production' },
+        { key: 'purchasing', label: 'Purchasing' },
+        { key: 'concessions', label: 'Concessions' },
+        { key: 'merch', label: 'Merch' },
+        { key: 'documents', label: 'Documents' },
+        { key: 'ticketing', label: 'Ticketing' },
+      ]
+      : []
+  ), [selectedEvent?.id]);
+
+  const filteredRoleDirectory = useMemo(() => {
+    const needle = String(roleSearch || '').trim().toLowerCase();
+    return PRODUCTION_ROLE_DIRECTORY.filter((role) => {
+      if (roleDepartmentFilter !== 'all' && role.department !== roleDepartmentFilter) return false;
+      if (!needle) return true;
+      const haystack = [
+        role.title,
+        role.department,
+        role.summary,
+        ...(role.duties || []),
+        ...(role.supervises || []),
+        ...(role.interactsWith || []),
+      ].join(' ').toLowerCase();
+      return haystack.includes(needle);
+    });
+  }, [roleDepartmentFilter, roleSearch]);
+
+  const roleDirectoryByKey = useMemo(() => {
+    const map = new Map();
+    PRODUCTION_ROLE_DIRECTORY.forEach((role) => {
+      map.set(normalizeRoleKey(role.title), role);
+      map.set(role.key, role);
+    });
+    return map;
+  }, []);
 
   const [costumePlan, setCostumePlan] = useState(null);
   const [costumeCharacters, setCostumeCharacters] = useState([]);
@@ -648,10 +708,162 @@ export default function ProductionOpsHub() {
         One place for event ops, workforce planning, and venue-side execution.
       </p>
 
+      <div className="card mb-4 border border-[#0d1b2a1a] bg-[#faf8f3]">
+        <p className="m-0 text-sm font-semibold">🧠 Taylor 4-Zone Alignment</p>
+        <p className="m-0 mt-1 text-xs text-gray-500">{TAYLOR_FRAMEWORK_ATTRIBUTION}</p>
+        <TaylorZoneReferenceStrip
+          sections={productionOpsReferenceSections}
+          className="mt-3"
+          description="Production Ops maps these sections to People, Money, Place + Stuff, and Purpose + Program."
+        />
+      </div>
+
       {loading ? <p className="text-sm text-gray-500 mb-4">Loading your ops tools...</p> : null}
       {status ? <p className="text-sm text-gray-600 mb-4">{status}</p> : null}
 
       <div className="space-y-5">
+        <section id="role_map" className="card">
+          <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
+            <div>
+              <h3 className="text-lg m-0">Role Responsibility Map</h3>
+              <p className="text-xs text-gray-500 m-0 mt-1">
+                Names, duties, reporting lines, and cross-team handoffs for stage, technical, FOH, BOH, and venue ops.
+              </p>
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              {selectedEventOpsTabs.map((tab) => (
+                <Link
+                  key={`role-map-tab-${tab.key}`}
+                  to={`/events/${selectedEvent.id}?opsTab=${tab.key}`}
+                  className="px-2 py-1 rounded border border-gray-300 text-gray-700 no-underline text-xs"
+                >
+                  {tab.label}
+                </Link>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-3">
+            <input
+              value={roleSearch}
+              onChange={(e) => setRoleSearch(e.target.value)}
+              placeholder="Search role, duty, or team handoff..."
+              className="px-3 py-2 border border-gray-300 rounded text-sm md:col-span-2"
+            />
+            <select
+              value={roleDepartmentFilter}
+              onChange={(e) => setRoleDepartmentFilter(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded text-sm bg-white"
+            >
+              <option value="all">All departments</option>
+              {PRODUCTION_ROLE_DEPARTMENTS.map((department) => (
+                <option key={`dept-${department}`} value={department}>{department}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-3">
+            {filteredRoleDirectory.map((role) => (
+              <article key={role.key} id={`role-${role.key}`} className="border border-gray-200 rounded p-3">
+                <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
+                  <p className="m-0 text-sm font-semibold">{role.title}</p>
+                  <span className="text-[11px] px-2 py-0.5 rounded bg-[#f5f5f5] text-gray-700">{role.department}</span>
+                </div>
+                <p className="m-0 text-xs text-gray-600">{role.summary}</p>
+
+                <div className="mt-2 grid grid-cols-1 xl:grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <p className="m-0 font-semibold text-gray-700">Core Duties</p>
+                    <ul className="mt-1 mb-0 pl-4 space-y-1">
+                      {(role.duties || []).map((duty) => <li key={`${role.key}-duty-${duty}`}>{duty}</li>)}
+                    </ul>
+                  </div>
+                  <div className="space-y-2">
+                    <div>
+                      <p className="m-0 font-semibold text-gray-700">Reports To</p>
+                      <div className="mt-1 flex flex-wrap gap-1.5">
+                        {(role.reportsTo || []).map((name) => {
+                          const linked = roleDirectoryByKey.get(normalizeRoleKey(name));
+                          return linked ? (
+                            <a
+                              key={`${role.key}-reports-${name}`}
+                              href={`#role-${linked.key}`}
+                              className="px-2 py-0.5 rounded border border-gray-300 text-gray-700 no-underline"
+                            >
+                              {name}
+                            </a>
+                          ) : (
+                            <span key={`${role.key}-reports-${name}`} className="px-2 py-0.5 rounded border border-gray-200 text-gray-600">{name}</span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="m-0 font-semibold text-gray-700">Supervises</p>
+                      <div className="mt-1 flex flex-wrap gap-1.5">
+                        {(role.supervises || []).map((name) => {
+                          const linked = roleDirectoryByKey.get(normalizeRoleKey(name));
+                          return linked ? (
+                            <a
+                              key={`${role.key}-supervises-${name}`}
+                              href={`#role-${linked.key}`}
+                              className="px-2 py-0.5 rounded border border-[#c8a45e] text-[#8c6d2f] no-underline bg-[#faf8f3]"
+                            >
+                              {name}
+                            </a>
+                          ) : (
+                            <span key={`${role.key}-supervises-${name}`} className="px-2 py-0.5 rounded border border-gray-200 text-gray-600">{name}</span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="m-0 font-semibold text-gray-700">Interacts With</p>
+                      <div className="mt-1 flex flex-wrap gap-1.5">
+                        {(role.interactsWith || []).map((name) => {
+                          const linked = roleDirectoryByKey.get(normalizeRoleKey(name));
+                          return linked ? (
+                            <a
+                              key={`${role.key}-interacts-${name}`}
+                              href={`#role-${linked.key}`}
+                              className="px-2 py-0.5 rounded border border-gray-300 text-gray-700 no-underline"
+                            >
+                              {name}
+                            </a>
+                          ) : (
+                            <span key={`${role.key}-interacts-${name}`} className="px-2 py-0.5 rounded border border-gray-200 text-gray-600">{name}</span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-2 pt-2 border-t border-gray-100">
+                  <p className="m-0 text-[11px] font-semibold text-gray-700">Oversight Links</p>
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    {(role.sectionLinks || []).map((link) => (
+                      <Link
+                        key={`${role.key}-link-${link.label}`}
+                        to={resolveRoleSectionLink(link, selectedEvent?.id || '')}
+                        className="px-2 py-0.5 rounded border border-gray-300 text-gray-700 no-underline text-[11px]"
+                      >
+                        {link.label}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              </article>
+            ))}
+
+            {filteredRoleDirectory.length === 0 ? (
+              <p className="text-xs text-gray-500 m-0">
+                No role matched that filter yet. Try another department or search term.
+              </p>
+            ) : null}
+          </div>
+        </section>
+
         <section id="staffing" className={sectionClasses('staffing', focus)}>
           <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
             <div>

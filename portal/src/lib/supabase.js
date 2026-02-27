@@ -88,6 +88,7 @@ export async function getUser(email) {
 
 export async function createUser(userData) {
   return resilientInsert('users', {
+    auth_user_id: userData.authUserId || null,
     email: userData.email.toLowerCase(),
     name: userData.name,
     client_type: userData.clientType || 'venue',

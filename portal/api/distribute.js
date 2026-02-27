@@ -26,6 +26,14 @@
 import { createHash } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import {
+  ApiAuthError,
+  assertEventOwnership,
+  assertWebhookSecret,
+  requireApiAuth,
+  resolvePayloadEventId,
+  scopePayloadToUser,
+} from './_auth.js';
+import {
   DEFAULT_SUPPLIER_SUGGESTIONS,
   buildPurchaseOrderEmailBody,
   buildPurchaseOrderEmailHtml,
@@ -222,7 +230,7 @@ async function refreshYouTubeToken(connection) {
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-IMC-Webhook-Secret');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-IMC-Webhook-Secret');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Send this endpoint a POST request and I can run it.' });
 
@@ -233,7 +241,29 @@ export default async function handler(req, res) {
   if (!action) return res.status(400).json({ error: 'Tell me which action you want me to run.' });
 
   try {
-    const payload = normalizeDistributionPayload(req.body || {});
+    const webhookActions = new Set(['handle-zoom-webhook', 'process-staffing-sms']);
+    const requiresWebhookSecret = webhookActions.has(action);
+    let authContext = null;
+    let payload = normalizeDistributionPayload(req.body || {});
+
+    if (requiresWebhookSecret) {
+      assertWebhookSecret(req, payload, [
+        'IMC_WEBHOOK_SECRET',
+        'ZOOM_WEBHOOK_SECRET',
+        'STAFFING_SMS_WEBHOOK_SECRET',
+      ]);
+    } else {
+      authContext = await requireApiAuth(req, { supabase });
+      payload = scopePayloadToUser(payload, authContext);
+      const eventId = resolvePayloadEventId(payload);
+      if (eventId) {
+        await assertEventOwnership(supabase, authContext, eventId);
+      }
+      if (action === 'check-status' && !authContext?.isAdmin) {
+        throw new ApiAuthError(403, 'Forbidden: admin access required.');
+      }
+    }
+
     const { event, venue, content, images, channels, options } = payload;
 
     if (requiresCompleteEvent(action)) {
@@ -698,6 +728,15 @@ export default async function handler(req, res) {
       case 'delete-concessions-menu-item':
         result = await deleteConcessionsMenuItem(payload);
         break;
+      case 'get-concessions-menu-library-items':
+        result = await getConcessionsMenuLibraryItems(payload);
+        break;
+      case 'upsert-concessions-menu-library-item':
+        result = await upsertConcessionsMenuLibraryItem(payload);
+        break;
+      case 'delete-concessions-menu-library-item':
+        result = await deleteConcessionsMenuLibraryItem(payload);
+        break;
       case 'get-merch-plan':
         result = await getMerchPlan(payload);
         break;
@@ -784,6 +823,9 @@ export default async function handler(req, res) {
         break;
       case 'generate-ops-share-message':
         result = await generateOperationsShareMessage(payload);
+        break;
+      case 'export-section-stakeholder-report':
+        result = await exportSectionStakeholderReport(payload);
         break;
       case 'get-festivals':
         result = await getFestivals(payload);
@@ -875,7 +917,7 @@ export default async function handler(req, res) {
     return res.status(200).json({ success: true, ...voiceifyBackendPayload(result) });
   } catch (err) {
     console.error(`[distribute] ${action} error:`, err);
-    const status = err.statusCode || 500;
+    const status = err.status || err.statusCode || 500;
     const voiceError = toJulieBackendError(err.message);
     if (err.missingFields) {
       return res.status(status).json({ success: false, error: voiceError, missingFields: err.missingFields });
@@ -888,7 +930,7 @@ export default async function handler(req, res) {
 // EMAIL via Resend
 // ═══════════════════════════════════════════════════════════════
 
-async function sendEmail({ to, subject, html, from, replyTo }) {
+async function sendEmail({ to, subject, html, from, replyTo, attachments }) {
   const key = process.env.RESEND_API_KEY;
   if (!key) throw new Error('RESEND_API_KEY not configured');
 
@@ -908,6 +950,7 @@ async function sendEmail({ to, subject, html, from, replyTo }) {
         subject,
         html,
         reply_to: replyTo || 'juliegood@goodcreativemedia.com',
+        ...(Array.isArray(attachments) && attachments.length ? { attachments } : {}),
       }),
     });
     const data = await response.json();
@@ -6615,6 +6658,17 @@ function normalizeTicketingProviderType(value) {
   return normalizePlainText(value || '', 80).toLowerCase();
 }
 
+function formatTicketingProviderDisplayName(providerType = '') {
+  const cleanType = normalizeTicketingProviderType(providerType)
+    .replace(/_/g, ' ')
+    .trim();
+  if (!cleanType) return 'Custom Provider';
+  return cleanType
+    .split(/\s+/)
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(' ');
+}
+
 async function getTicketingProviders() {
   const { data, error } = await supabase
     .from('ticketing_providers')
@@ -6788,9 +6842,63 @@ async function getTicketingProvider(providerInput = {}) {
     return data;
   }
   if (providerType) {
-    const { data, error } = await supabase.from('ticketing_providers').select('*').eq('type', providerType).single();
-    if (error) throw error;
-    return data;
+    const { data, error } = await supabase
+      .from('ticketing_providers')
+      .select('*')
+      .eq('type', providerType)
+      .maybeSingle();
+    if (error) {
+      if (isMissingRelationError(error)) {
+        return {
+          id: providerType,
+          name: formatTicketingProviderDisplayName(providerType),
+          type: providerType,
+          auth_type: 'none',
+          is_active: true,
+          metadata: { custom: true, ephemeral: true },
+        };
+      }
+      throw error;
+    }
+    if (data) return data;
+
+    const requestedName = normalizePlainText(providerInput.providerName || providerInput.name || '', 140);
+    const nextName = requestedName || formatTicketingProviderDisplayName(providerType);
+    const next = {
+      name: nextName,
+      type: providerType,
+      auth_type: 'none',
+      is_active: true,
+      metadata: { custom: true },
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data: created, error: createError } = await supabase
+      .from('ticketing_providers')
+      .insert({ ...next, created_at: new Date().toISOString() })
+      .select('*')
+      .single();
+    if (!createError) return created;
+
+    if (createError?.code === '23505') {
+      const { data: existing, error: existingError } = await supabase
+        .from('ticketing_providers')
+        .select('*')
+        .eq('type', providerType)
+        .maybeSingle();
+      if (existingError) throw existingError;
+      if (existing) return existing;
+
+      const fallbackName = `${nextName} (${providerType})`;
+      const { data: fallback, error: fallbackError } = await supabase
+        .from('ticketing_providers')
+        .insert({ ...next, name: fallbackName, created_at: new Date().toISOString() })
+        .select('*')
+        .single();
+      if (fallbackError) throw fallbackError;
+      return fallback;
+    }
+    throw createError;
   }
   return null;
 }
@@ -7408,10 +7516,11 @@ async function upsertVenueInventoryItem(payload = {}) {
 }
 
 function normalizeSupplierType(value) {
-  const type = normalizePlainText(value || 'local_store', 80).toLowerCase();
-  return ['local_store', 'online_store', 'distributor', 'rental_house', 'service_vendor'].includes(type)
-    ? type
-    : 'local_store';
+  const type = normalizePlainText(value || 'local_store', 80)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return type || 'local_store';
 }
 
 async function searchLocalSuppliers(query, venueId, userId, maxResults = 8) {
@@ -9814,14 +9923,12 @@ async function getConcessionsMenuItems(payload = {}) {
   return { items: data || [] };
 }
 
-async function upsertConcessionsMenuItem(payload = {}) {
-  const userId = ensureUserId(payload);
-  const input = payload.item || {};
-  const eventId = payload.eventId || payload.bookingId || payload.event?.id || input.bookingId || input.booking_id;
-  if (!eventId) throw new Error('Missing eventId for menu item.');
-  const next = {
-    user_id: userId,
-    booking_id: eventId,
+function normalizeConcessionsMenuItemInput(input = {}) {
+  const metadataInput = (input.metadata && typeof input.metadata === 'object') ? input.metadata : {};
+  const itemUrl = firstValidHttpUrl(metadataInput.itemUrl, input.itemUrl, input.item_url) || '';
+  const imageUrl = firstValidHttpUrl(metadataInput.imageUrl, input.imageUrl, input.image_url) || '';
+
+  return {
     name: normalizePlainText(input.name || '', 200),
     category: normalizePlainText(input.category || 'other', 60) || 'other',
     price: Number.isFinite(Number(input.price)) ? Number(input.price) : null,
@@ -9832,6 +9939,23 @@ async function upsertConcessionsMenuItem(payload = {}) {
     is_signature_item: input.isSignatureItem === true || input.is_signature_item === true,
     availability_status: normalizePlainText(input.availabilityStatus || input.availability_status || 'available', 40) || 'available',
     notes: normalizePlainText(input.notes || '', 3000),
+    metadata: {
+      ...metadataInput,
+      itemUrl,
+      imageUrl,
+    },
+  };
+}
+
+async function upsertConcessionsMenuItem(payload = {}) {
+  const userId = ensureUserId(payload);
+  const input = payload.item || {};
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id || input.bookingId || input.booking_id;
+  if (!eventId) throw new Error('Missing eventId for menu item.');
+  const next = {
+    user_id: userId,
+    booking_id: eventId,
+    ...normalizeConcessionsMenuItemInput(input),
     updated_at: new Date().toISOString(),
   };
   if (!next.name) throw new Error('Menu item name is required.');
@@ -9864,6 +9988,99 @@ async function deleteConcessionsMenuItem(payload = {}) {
     .eq('id', itemId);
   if (error) throw error;
   return { removed: true, itemId };
+}
+
+async function getConcessionsMenuLibraryItems(payload = {}) {
+  const userId = normalizePlainText(payload.userId || payload.user_id || '', 120) || null;
+  const category = normalizePlainText(payload.category || '', 60);
+  const queryText = normalizePlainText(payload.query || payload.search || '', 120);
+  const includeInactive = payload.includeInactive === true;
+  const limit = Math.min(300, Math.max(1, Number.parseInt(payload.limit, 10) || 120));
+
+  let query = supabase
+    .from('concessions_menu_library_items')
+    .select('*')
+    .order('name', { ascending: true })
+    .limit(limit);
+
+  if (!includeInactive) query = query.eq('is_active', true);
+  if (category) query = query.eq('category', category);
+  if (queryText) query = query.ilike('name', `%${queryText}%`);
+  if (userId) query = query.or(`is_public.eq.true,user_id.eq.${userId}`);
+  else query = query.eq('is_public', true);
+
+  const { data, error } = await query;
+  if (error) {
+    if (isMissingRelationError(error)) return { items: [] };
+    throw error;
+  }
+  return { items: data || [] };
+}
+
+async function upsertConcessionsMenuLibraryItem(payload = {}) {
+  const userId = ensureUserId(payload);
+  const input = payload.item || payload.libraryItem || {};
+  const sourceBookingId = payload.eventId || payload.bookingId || input.sourceBookingId || input.source_booking_id || null;
+  const sourceVenueProfileId = payload.venueProfileId || input.sourceVenueProfileId || input.source_venue_profile_id || null;
+  const next = {
+    user_id: userId,
+    ...normalizeConcessionsMenuItemInput(input),
+    source_booking_id: sourceBookingId,
+    source_venue_profile_id: sourceVenueProfileId,
+    is_public: input.isPublic === false || input.is_public === false ? false : true,
+    is_active: input.isActive === false || input.is_active === false ? false : true,
+    updated_at: new Date().toISOString(),
+  };
+  if (!next.name) throw new Error('Library item name is required.');
+
+  const itemId = payload.itemId || payload.id || input.id;
+  if (itemId) {
+    const { data, error } = await supabase
+      .from('concessions_menu_library_items')
+      .update(next)
+      .eq('id', itemId)
+      .eq('user_id', userId)
+      .select('*')
+      .single();
+    if (error) {
+      if (isMissingRelationError(error)) throw new Error('Menu library table is missing. Run the latest Supabase SQL first.');
+      throw error;
+    }
+    return { item: data };
+  }
+
+  const { data, error } = await supabase
+    .from('concessions_menu_library_items')
+    .insert({ ...next, created_at: new Date().toISOString() })
+    .select('*')
+    .single();
+  if (error) {
+    if (isMissingRelationError(error)) throw new Error('Menu library table is missing. Run the latest Supabase SQL first.');
+    throw error;
+  }
+  return { item: data };
+}
+
+async function deleteConcessionsMenuLibraryItem(payload = {}) {
+  const userId = ensureUserId(payload);
+  const itemId = payload.itemId || payload.id;
+  if (!itemId) throw new Error('Missing itemId.');
+
+  const { data, error } = await supabase
+    .from('concessions_menu_library_items')
+    .delete()
+    .eq('id', itemId)
+    .eq('user_id', userId)
+    .select('id')
+    .maybeSingle();
+  if (error) {
+    if (isMissingRelationError(error)) throw new Error('Menu library table is missing. Run the latest Supabase SQL first.');
+    throw error;
+  }
+  if (!data?.id) {
+    throw new Error('Could not remove menu library item. It may be owned by another user.');
+  }
+  return { removed: true, itemId: data.id };
 }
 
 async function getMerchPlan(payload = {}) {
@@ -10837,6 +11054,212 @@ async function generateOperationsShareMessage(payload = {}) {
   return {
     message: normalizePlainText(text, 600) || base,
     smsFallback: normalizePlainText(text, 160),
+  };
+}
+
+function normalizeStakeholderRecipientList(input) {
+  if (Array.isArray(input)) {
+    return input
+      .map((value) => normalizePlainText(value || '', 240).toLowerCase())
+      .filter((value) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value));
+  }
+  return String(input || '')
+    .split(/[,\n;]/g)
+    .map((value) => normalizePlainText(value || '', 240).toLowerCase())
+    .filter((value) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value));
+}
+
+function sanitizeSectionExportData(value, depth = 0) {
+  if (depth > 4) return '[nested data truncated]';
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return normalizePlainText(value, 2000);
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (Array.isArray(value)) {
+    return value.slice(0, 120).map((entry) => sanitizeSectionExportData(entry, depth + 1));
+  }
+  if (typeof value === 'object') {
+    const next = {};
+    Object.entries(value).forEach(([key, entry]) => {
+      const safeKey = normalizePlainText(key, 120);
+      if (!safeKey) return;
+      const safeValue = sanitizeSectionExportData(entry, depth + 1);
+      if (
+        safeValue === ''
+        || safeValue === null
+        || safeValue === undefined
+        || (Array.isArray(safeValue) && !safeValue.length)
+      ) {
+        return;
+      }
+      next[safeKey] = safeValue;
+    });
+    return next;
+  }
+  return normalizePlainText(String(value), 2000);
+}
+
+function flattenSectionExportData(value, prefix = '', lines = [], depth = 0) {
+  if (depth > 5 || value === null || value === undefined || value === '') return;
+  if (Array.isArray(value)) {
+    if (!value.length) return;
+    value.forEach((entry, index) => {
+      const nextPrefix = prefix ? `${prefix} #${index + 1}` : `Item #${index + 1}`;
+      flattenSectionExportData(entry, nextPrefix, lines, depth + 1);
+    });
+    return;
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value);
+    if (!entries.length) return;
+    entries.forEach(([key, entry]) => {
+      const safeKey = normalizePlainText(key, 120);
+      if (!safeKey) return;
+      const nextPrefix = prefix ? `${prefix} > ${safeKey}` : safeKey;
+      flattenSectionExportData(entry, nextPrefix, lines, depth + 1);
+    });
+    return;
+  }
+  const text = normalizePlainText(String(value), 1600);
+  if (!text) return;
+  lines.push(prefix ? `${prefix}: ${text}` : text);
+}
+
+function buildSectionExportSubject({ sectionTitle = '', event = {}, dateLabel = '' } = {}) {
+  const title = normalizePlainText(sectionTitle || 'Section', 120) || 'Section';
+  const eventTitle = normalizePlainText(event?.title || '', 180) || 'Event';
+  const label = dateLabel || new Date().toLocaleDateString('en-US');
+  return `${eventTitle} - ${title} stakeholder update - ${label}`;
+}
+
+function buildSectionExportEmailHtml({
+  sectionTitle = '',
+  event = {},
+  completion = {},
+  nextStep = '',
+  lines = [],
+} = {}) {
+  const title = escapeHtml(sectionTitle || 'Section Report');
+  const eventTitle = escapeHtml(event?.title || 'Event');
+  const eventDate = escapeHtml(event?.date || 'TBD');
+  const eventVenue = escapeHtml(event?.venue_name || event?.venue || 'Venue TBD');
+  const completeText = completion?.isComplete ? 'Complete' : 'In Progress';
+  const completedBy = escapeHtml(completion?.completedBy || completion?.completed_by || '');
+  const completedAt = completion?.completedAt || completion?.completed_at;
+  const completedAtLabel = completedAt ? new Date(completedAt).toLocaleString('en-US') : '';
+  const nextStepText = escapeHtml(nextStep || '');
+  const details = escapeHtml(lines.join('\n'));
+
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: Inter, Helvetica, Arial, sans-serif; line-height: 1.6; color: #222; background: #f6f6f6; margin: 0; padding: 20px; }
+    .card { max-width: 760px; margin: 0 auto; background: #fff; border: 1px solid #e7e7e7; border-radius: 10px; overflow: hidden; }
+    .head { background: #0d1b2a; color: #fff; padding: 22px; }
+    .head h1 { margin: 0; font-size: 20px; }
+    .body { padding: 20px; }
+    .meta { margin: 0 0 14px 0; font-size: 13px; color: #555; }
+    pre { white-space: pre-wrap; background: #fafafa; border: 1px solid #efefef; border-radius: 8px; padding: 12px; font-size: 12px; color: #333; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="head">
+      <h1>${title}</h1>
+      <p class="meta" style="margin:8px 0 0 0;color:#d7d7d7;">${eventTitle} · ${eventDate} · ${eventVenue}</p>
+    </div>
+    <div class="body">
+      <p class="meta"><strong>Status:</strong> ${completeText}${completedBy ? ` · by ${completedBy}` : ''}${completedAtLabel ? ` · ${completedAtLabel}` : ''}</p>
+      ${nextStepText ? `<p class="meta"><strong>Next step:</strong> ${nextStepText}</p>` : ''}
+      <pre>${details}</pre>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+async function exportSectionStakeholderReport(payload = {}) {
+  const userId = ensureUserId(payload);
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id || null;
+  const event = payload.event || (eventId ? await getEventRow(eventId) : null) || {};
+  const sectionKey = normalizePlainText(payload.sectionKey || payload.section || 'section', 80) || 'section';
+  const sectionTitle = normalizePlainText(payload.sectionTitle || payload.title || sectionKey, 180) || 'Section';
+  const sectionDescription = normalizePlainText(payload.sectionDescription || payload.description || '', 500);
+  const completion = sanitizeSectionExportData(payload.completion || payload.completionStatus || {});
+  const content = sanitizeSectionExportData(payload.content || payload.sectionData || payload.data || {});
+  const nextStep = normalizePlainText(payload.nextStep || payload.next_step || '', 500);
+  const recipients = normalizeStakeholderRecipientList(payload.recipients || payload.recipientEmails || payload.to || []);
+  const exportDate = new Date().toISOString();
+
+  const lines = [
+    `Section: ${sectionTitle}`,
+    sectionDescription ? `Purpose: ${sectionDescription}` : '',
+    `Generated: ${new Date(exportDate).toLocaleString('en-US')}`,
+    event?.title ? `Event: ${event.title}` : '',
+    event?.date ? `Event Date: ${event.date}` : '',
+    event?.venue_name || event?.venue ? `Venue: ${event.venue_name || event.venue}` : '',
+    completion?.isComplete !== undefined ? `Completion Status: ${completion.isComplete ? 'Complete' : 'In Progress'}` : '',
+    completion?.completedBy ? `Completed By: ${completion.completedBy}` : '',
+    completion?.completedAt ? `Completed At: ${new Date(completion.completedAt).toLocaleString('en-US')}` : '',
+    nextStep ? `Next Step: ${nextStep}` : '',
+    '',
+    'Section Details',
+  ].filter(Boolean);
+
+  flattenSectionExportData(content, '', lines, 0);
+  if (!lines.length) {
+    lines.push('No details were captured yet for this section.');
+  }
+
+  const fileTitle = `${normalizePlainText(event?.title || 'imc', 80)}-${toSlug(sectionTitle)}-stakeholder-report`;
+  const fileName = `${toSlug(fileTitle)}.pdf`;
+  const pdfBuffer = buildSimplePdfBuffer(sectionTitle, lines);
+  const pdfBase64 = pdfBuffer.toString('base64');
+  const htmlContent = buildSectionExportEmailHtml({
+    sectionTitle,
+    event,
+    completion,
+    nextStep,
+    lines,
+  });
+  const subject = buildSectionExportSubject({
+    sectionTitle,
+    event,
+    dateLabel: new Date(exportDate).toLocaleDateString('en-US'),
+  });
+
+  let emailResult = null;
+  if (recipients.length) {
+    emailResult = await sendEmail({
+      to: recipients,
+      subject,
+      html: htmlContent,
+      attachments: [
+        {
+          filename: fileName,
+          content: pdfBase64,
+        },
+      ],
+    });
+  }
+
+  return {
+    sectionKey,
+    sectionTitle,
+    eventId: eventId || event?.id || null,
+    fileName,
+    pdfBase64,
+    htmlContent,
+    downloadUrl: `data:application/pdf;base64,${pdfBase64}`,
+    recipients,
+    email: emailResult,
+    summary: {
+      completionStatus: completion?.isComplete === true ? 'complete' : 'in_progress',
+      detailLineCount: Math.max(0, lines.length - 2),
+      exportedAt: exportDate,
+    },
   };
 }
 

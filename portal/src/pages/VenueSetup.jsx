@@ -4,15 +4,90 @@ import { useVenue } from '../context/VenueContext';
 import { useAuth } from '../context/AuthContext';
 import CompletionBar from '../components/CompletionBar';
 import FormAIAssist from '../components/FormAIAssist';
+import DeepResearchPromptBox from '../components/DeepResearchPromptBox';
 import PerformanceZonesManager from '../components/PerformanceZonesManager';
 import VenueOperationsManager from '../components/VenueOperationsManager';
 import { extractFromImages, extractionToVenueForm, openCamera, openFileUpload } from '../services/photo-to-form';
+import { deepResearchDraft } from '../services/research';
 import { isVenueRole } from '../constants/clientTypes';
 
 const REQUIRED_FIELDS = ['firstName', 'lastName', 'businessName', 'email', 'city', 'state'];
 const VENUE_FIELDS = ['firstName', 'lastName', 'businessName', 'dbaName', 'email', 'city', 'state', 'streetNumber', 'streetName'];
 const SOCIAL_FIELDS = ['website', 'facebook', 'instagram', 'twitter', 'tiktok', 'youtube', 'spotify', 'linkedin', 'yelp', 'googleBusiness'];
 const VENUE_SETUP_TABS = ['profile', 'zones', 'operations'];
+const DEEP_STYLE_OPTIONS = [
+  { value: 'clean', label: 'Clean' },
+  { value: 'feature', label: 'Feature' },
+  { value: 'punchy', label: 'Punchy' },
+];
+const DEEP_STYLE_HELP = {
+  clean: 'Clean keeps the venue description direct and factual.',
+  feature: 'Feature adds neighborhood vibe and context while staying accurate.',
+  punchy: 'Punchy keeps the same facts in tighter, high-energy phrasing.',
+};
+const VENUE_FOOTPRINT_TRACKS = [
+  {
+    value: 'small_single_room',
+    label: 'Single-Room Venue',
+    description: 'One active room or stage. Fast setup with lean crew defaults.',
+    nextStep: 'Build one primary zone, then move into event creation.',
+  },
+  {
+    value: 'multi_zone',
+    label: 'Multi-Zone Venue',
+    description: 'Two to four active rooms/stages with overlapping schedules.',
+    nextStep: 'Add each room in Performance Zones so booking conflicts stay accurate.',
+  },
+  {
+    value: 'festival_campus',
+    label: 'Festival / Campus',
+    description: 'Five or more zones or frequent simultaneous programming.',
+    nextStep: 'Map every zone first, then configure operations and staffing by zone.',
+  },
+];
+const VENUE_ZONE_COUNT_OPTIONS = [
+  { value: '1', label: '1 active room/stage' },
+  { value: '2', label: '2 active rooms/stages' },
+  { value: '3', label: '3 active rooms/stages' },
+  { value: '4', label: '4 active rooms/stages' },
+  { value: '5', label: '5+ active rooms/stages' },
+];
+const VENUE_AUDIENCE_OPTIONS = [
+  { value: 'up_to_250', label: 'Usually up to 250 attendees' },
+  { value: '251_to_1500', label: 'Usually 251-1,500 attendees' },
+  { value: 'over_1500', label: 'Usually over 1,500 attendees' },
+];
+const VENUE_SIMULTANEOUS_OPTIONS = [
+  { value: 'rare', label: 'Rarely run simultaneous shows' },
+  { value: 'sometimes', label: 'Sometimes run simultaneous shows' },
+  { value: 'frequent', label: 'Frequently run simultaneous shows' },
+];
+const VENUE_CREW_OPTIONS = [
+  { value: 'up_to_8', label: 'Typical day-of-show crew is up to 8 people' },
+  { value: 'nine_to_twenty', label: 'Typical day-of-show crew is 9-20 people' },
+  { value: 'over_20', label: 'Typical day-of-show crew is over 20 people' },
+];
+
+function recommendVenueFootprint(answers = {}) {
+  const zones = Number(answers.zoneCount || '1');
+  const audienceBand = String(answers.audienceBand || 'up_to_250');
+  const simultaneous = String(answers.simultaneousShows || 'rare');
+  const crewBand = String(answers.crewBand || 'up_to_8');
+
+  if (zones >= 5 || audienceBand === 'over_1500' || simultaneous === 'frequent' || crewBand === 'over_20') {
+    return 'festival_campus';
+  }
+  if (zones >= 2 || audienceBand === '251_to_1500' || simultaneous === 'sometimes' || crewBand === 'nine_to_twenty') {
+    return 'multi_zone';
+  }
+  return 'small_single_room';
+}
+
+function defaultCapacityForAudienceBand(audienceBand = 'up_to_250') {
+  if (audienceBand === '251_to_1500') return '600';
+  if (audienceBand === 'over_1500') return '2500';
+  return '200';
+}
 
 export default function VenueSetup() {
   const { venue, saveVenue } = useVenue();
@@ -36,6 +111,7 @@ export default function VenueSetup() {
     businessType: venue.businessType || 'venue',
     taxId: venue.taxId || '',
     yearEstablished: venue.yearEstablished || '',
+    bio: venue.bio || venue.description || '',
     
     // Address
     streetNumber: venue.streetNumber || '',
@@ -88,6 +164,22 @@ export default function VenueSetup() {
     venue: false,
     brand: false,
   });
+  const [venueResearching, setVenueResearching] = useState(false);
+  const [venueResearchStatus, setVenueResearchStatus] = useState('');
+  const [venueStyleIntensity, setVenueStyleIntensity] = useState('feature');
+  const [venueResearchCorrections, setVenueResearchCorrections] = useState('');
+  const [venueResearchIncludeTerms, setVenueResearchIncludeTerms] = useState('');
+  const [venueResearchAvoidTerms, setVenueResearchAvoidTerms] = useState('');
+  const [footprintAnswers, setFootprintAnswers] = useState({
+    zoneCount: String(venue?.metadata?.venueFootprint?.qna?.zoneCount || '1'),
+    audienceBand: String(venue?.metadata?.venueFootprint?.qna?.audienceBand || 'up_to_250'),
+    simultaneousShows: String(venue?.metadata?.venueFootprint?.qna?.simultaneousShows || 'rare'),
+    crewBand: String(venue?.metadata?.venueFootprint?.qna?.crewBand || 'up_to_8'),
+  });
+  const [footprintTrackOverride, setFootprintTrackOverride] = useState(
+    String(venue?.metadata?.venueFootprint?.track || '')
+  );
+  const [footprintStatus, setFootprintStatus] = useState('');
 
   useEffect(() => {
     if (VENUE_SETUP_TABS.includes(requestedTab)) {
@@ -130,6 +222,7 @@ export default function VenueSetup() {
           if (venueData.phone && !prev.workPhone) updated.workPhone = venueData.phone;
           if (venueData.email && !prev.email) updated.email = venueData.email;
           if (venueData.website && !prev.website) updated.website = venueData.website;
+          if (venueData.description && !prev.bio) updated.bio = venueData.description;
           if (venueData.instagram && !prev.instagram) updated.instagram = venueData.instagram;
           if (venueData.facebook && !prev.facebook) updated.facebook = venueData.facebook;
           if (venueData.brandColors?.[0] && !prev.brandPrimary) updated.brandPrimary = venueData.brandColors[0];
@@ -146,14 +239,117 @@ export default function VenueSetup() {
     }
   };
 
+  const runVenueDeepResearch = async ({
+    correctionPrompt = '',
+    includeTerms = '',
+    avoidTerms = '',
+  } = {}) => {
+    const venueName = String(form.businessName || '').trim();
+    if (!venueName) {
+      setVenueResearchStatus('Add venue name first, then I can run deep research.');
+      return;
+    }
+    setVenueResearching(true);
+    setVenueResearchStatus('Researching venue context and drafting profile copy...');
+    try {
+      const result = await deepResearchDraft({
+        target: 'venue_profile',
+        styleIntensity: venueStyleIntensity,
+        correctionPrompt: String(correctionPrompt || '').trim(),
+        includeTerms: String(includeTerms || venueResearchIncludeTerms || '').trim(),
+        avoidTerms: String(avoidTerms || venueResearchAvoidTerms || '').trim(),
+        venue: {
+          businessName: venueName,
+          dbaName: form.dbaName,
+          businessType: form.businessType,
+          city: form.city,
+          state: form.state,
+          zipCode: form.zipCode,
+          website: form.website,
+          instagram: form.instagram,
+          facebook: form.facebook,
+          capacity: form.capacity,
+          hasStage: form.hasStage,
+          hasSound: form.hasSound,
+          hasLighting: form.hasLighting,
+          bio: form.bio,
+        },
+      });
+      const draft = String(result?.draft || '').trim();
+      if (!draft) {
+        setVenueResearchStatus('I could not draft venue copy yet. Add one more detail and run it again.');
+        return;
+      }
+      setForm(prev => ({ ...prev, bio: draft }));
+      if (String(correctionPrompt || '').trim()
+        || String(includeTerms || venueResearchIncludeTerms || '').trim()
+        || String(avoidTerms || venueResearchAvoidTerms || '').trim()) {
+        setVenueResearchStatus('Updated venue description is ready with your guidance terms.');
+      } else {
+        setVenueResearchStatus('Venue description draft is ready. Review and edit before you save.');
+      }
+    } catch (err) {
+      setVenueResearchStatus(`I hit a snag researching this venue: ${err.message}`);
+    } finally {
+      setVenueResearching(false);
+    }
+  };
+
   const { completed, total } = useMemo(() => {
     const t = VENUE_FIELDS.length + 1; // +1 for "at least one social"
     let c = VENUE_FIELDS.filter(f => (form[f] || '').toString().trim()).length;
     if (SOCIAL_FIELDS.some(f => (form[f] || '').trim())) c++;
     return { completed: c, total: t };
   }, [form]);
+  const recommendedFootprintTrack = useMemo(
+    () => recommendVenueFootprint(footprintAnswers),
+    [footprintAnswers]
+  );
+  const selectedFootprintTrack = footprintTrackOverride || recommendedFootprintTrack;
+  const selectedFootprintMeta = useMemo(
+    () => VENUE_FOOTPRINT_TRACKS.find((track) => track.value === selectedFootprintTrack) || VENUE_FOOTPRINT_TRACKS[0],
+    [selectedFootprintTrack]
+  );
 
   const [saving, setSaving] = useState(false);
+
+  const applyFootprintDefaults = (trackValue = selectedFootprintTrack) => {
+    const track = VENUE_FOOTPRINT_TRACKS.find((item) => item.value === trackValue)?.value || selectedFootprintTrack;
+    const capacityDefault = defaultCapacityForAudienceBand(footprintAnswers.audienceBand);
+    setFootprintTrackOverride(track);
+    setForm(prev => {
+      const next = { ...prev };
+      if (!String(next.capacity || '').trim()) next.capacity = capacityDefault;
+
+      if (track === 'small_single_room') {
+        next.hasStage = true;
+        next.hasSound = true;
+        if (!next.parkingType) next.parkingType = 'street';
+      } else if (track === 'multi_zone') {
+        next.hasStage = true;
+        next.hasSound = true;
+        next.hasLighting = true;
+        if (!next.parkingType) next.parkingType = 'lot';
+      } else if (track === 'festival_campus') {
+        next.hasStage = true;
+        next.hasSound = true;
+        next.hasLighting = true;
+        next.adaAccessible = true;
+        if (!next.parkingType) next.parkingType = 'lot';
+      }
+      return next;
+    });
+
+    if (track === 'small_single_room') {
+      setFootprintStatus('Single-room defaults are set. Next, add your primary stage in Performance Zones.');
+      return;
+    }
+    if (track === 'multi_zone') {
+      setFootprintStatus('Multi-zone defaults are set. Add each room/stage in Performance Zones (example: Carver = 2 zones).');
+      return;
+    }
+    setFootprintStatus('Festival/campus defaults are set. Add every active zone before you schedule bookings.');
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -167,7 +363,19 @@ export default function VenueSetup() {
     
     setSaving(true);
     try {
-      await saveVenue(form);
+      const existingMetadata = (venue?.metadata && typeof venue.metadata === 'object') ? venue.metadata : {};
+      await saveVenue({
+        ...form,
+        metadata: {
+          ...existingMetadata,
+          venueFootprint: {
+            track: selectedFootprintTrack,
+            recommendedTrack: recommendedFootprintTrack,
+            qna: footprintAnswers,
+            updatedAt: new Date().toISOString(),
+          },
+        },
+      });
       setSaved(true);
       setTimeout(() => navigate('/'), 1500);
     } catch (err) {
@@ -295,6 +503,92 @@ export default function VenueSetup() {
             entityId={user?.id || ''}
           />
 
+          <div className="card mb-6 border border-blue-200 bg-blue-50">
+            <h3 className="text-base mb-2">🏛 Venue Size and Workflow Setup</h3>
+            <p className="text-xs text-blue-900 mb-3">
+              Answer these four questions and I will apply the same setup pattern most venues use.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-blue-900 mb-1">How many active rooms or stages do you schedule?</label>
+                <select
+                  value={footprintAnswers.zoneCount}
+                  onChange={(e) => setFootprintAnswers(prev => ({ ...prev, zoneCount: e.target.value }))}
+                  className="w-full px-3 py-2 border border-blue-200 rounded text-sm bg-white focus:outline-none focus:border-[#0d1b2a]"
+                >
+                  {VENUE_ZONE_COUNT_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-blue-900 mb-1">Typical attendance at your live events?</label>
+                <select
+                  value={footprintAnswers.audienceBand}
+                  onChange={(e) => setFootprintAnswers(prev => ({ ...prev, audienceBand: e.target.value }))}
+                  className="w-full px-3 py-2 border border-blue-200 rounded text-sm bg-white focus:outline-none focus:border-[#0d1b2a]"
+                >
+                  {VENUE_AUDIENCE_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-blue-900 mb-1">How often do you run simultaneous shows?</label>
+                <select
+                  value={footprintAnswers.simultaneousShows}
+                  onChange={(e) => setFootprintAnswers(prev => ({ ...prev, simultaneousShows: e.target.value }))}
+                  className="w-full px-3 py-2 border border-blue-200 rounded text-sm bg-white focus:outline-none focus:border-[#0d1b2a]"
+                >
+                  {VENUE_SIMULTANEOUS_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-blue-900 mb-1">Typical day-of-show crew size?</label>
+                <select
+                  value={footprintAnswers.crewBand}
+                  onChange={(e) => setFootprintAnswers(prev => ({ ...prev, crewBand: e.target.value }))}
+                  className="w-full px-3 py-2 border border-blue-200 rounded text-sm bg-white focus:outline-none focus:border-[#0d1b2a]"
+                >
+                  {VENUE_CREW_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-3 border border-blue-200 bg-white rounded-lg px-3 py-2">
+              <p className="text-xs text-blue-900 m-0">Recommended setup: <span className="font-semibold">{selectedFootprintMeta.label}</span></p>
+              <p className="text-xs text-blue-800 mt-1 mb-0">{selectedFootprintMeta.description}</p>
+              <p className="text-xs text-blue-700 mt-1 mb-0">Next step: {selectedFootprintMeta.nextStep}</p>
+            </div>
+
+            <div className="flex flex-wrap gap-2 mt-3">
+              {VENUE_FOOTPRINT_TRACKS.map((track) => {
+                const active = selectedFootprintTrack === track.value;
+                return (
+                  <button
+                    key={track.value}
+                    type="button"
+                    onClick={() => setFootprintTrackOverride(track.value)}
+                    className={`px-3 py-1.5 rounded border text-xs ${active ? 'bg-[#0d1b2a] text-white border-[#0d1b2a]' : 'bg-white text-blue-900 border-blue-300'}`}
+                  >
+                    {track.label}
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => applyFootprintDefaults()}
+                className="px-3 py-1.5 rounded border border-[#0d1b2a] bg-[#0d1b2a] text-white text-xs"
+              >
+                Apply Setup Defaults
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('zones')}
+                className="px-3 py-1.5 rounded border border-blue-300 bg-white text-blue-900 text-xs"
+              >
+                Open Performance Zones
+              </button>
+            </div>
+            {footprintStatus && <p className="text-xs text-blue-900 mt-2 mb-0">{footprintStatus}</p>}
+          </div>
+
           {/* Photo-to-Form: AI Data Extraction for Venue */}
           <div className="card mb-6 border-2 border-dashed border-[#c8a45e] bg-[#faf8f3]">
             <div className="flex items-center justify-between mb-3">
@@ -385,6 +679,41 @@ export default function VenueSetup() {
                 </div>
                 {fieldInput("Tax ID / EIN", "taxId", "text", "Optional, for contracts")}
                 {fieldInput("Year Established", "yearEstablished", "number", "2010")}
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Venue Description</label>
+                  <DeepResearchPromptBox
+                    title="OpenAI Deep Research Venue Draft"
+                    subtitle="I will research your venue and draft profile copy you can edit before saving."
+                    styleValue={venueStyleIntensity}
+                    onStyleChange={setVenueStyleIntensity}
+                    styleOptions={DEEP_STYLE_OPTIONS}
+                    styleHelp={DEEP_STYLE_HELP}
+                    correctionValue={venueResearchCorrections}
+                    onCorrectionChange={setVenueResearchCorrections}
+                    correctionLabel="Corrections or specific terms for regenerate"
+                    correctionPlaceholder="Example: Mention rooftop stage, neighborhood name, and parking instructions."
+                    includeTermsValue={venueResearchIncludeTerms}
+                    onIncludeTermsChange={setVenueResearchIncludeTerms}
+                    includeTermsLabel="Use these words or phrases"
+                    includeTermsPlaceholder="Example: intimate, neighborhood favorite, artist-friendly, SATX"
+                    avoidTermsValue={venueResearchAvoidTerms}
+                    onAvoidTermsChange={setVenueResearchAvoidTerms}
+                    avoidTermsLabel="Avoid these words or phrases"
+                    avoidTermsPlaceholder="Example: underground, rave, explicit"
+                    onGenerate={(payload) => runVenueDeepResearch(payload)}
+                    onRegenerate={(payload) => runVenueDeepResearch(payload)}
+                    generating={venueResearching}
+                    canGenerate={!!String(form.businessName || '').trim()}
+                    statusText={venueResearchStatus}
+                  />
+                  <textarea
+                    value={form.bio || ''}
+                    onChange={update('bio')}
+                    rows={4}
+                    className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-[#c8a45e] resize-y"
+                    placeholder="Describe your venue vibe, layout, and what makes it special."
+                  />
+                </div>
               </div>
             </div>
           )}

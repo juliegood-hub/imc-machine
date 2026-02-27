@@ -4,12 +4,24 @@ import { useVenue } from '../context/VenueContext';
 import { getEventCampaigns, deleteEvent } from '../lib/supabase';
 import { parseLocalDate } from '../lib/dateUtils';
 import BookingOperationsWorkspace from '../components/BookingOperationsWorkspace';
+import TaylorZoneReferenceStrip from '../components/TaylorZoneReferenceStrip';
 import {
+  computePhaseGateStatus,
+  computeProductionPhaseProgress,
+  computeTaylorZoneProgress,
   computeEventWorkflowProgress,
   getNextIncompleteWorkflowSection,
+  TAYLOR_FRAMEWORK_ATTRIBUTION,
+  WORKFLOW_SECTIONS,
   getWorkflowTrackMeta,
   summarizeWorkflowProgress,
 } from '../constants/workflowSections';
+import {
+  LEGAL_WORKFLOW_MODES,
+  normalizeLegalWorkflowMode,
+  getLegalDisclaimerTemplate,
+  isLegalProgramGenre,
+} from '../constants/legalProgram';
 
 const STAFFING_DESTINATION_OPTIONS = [
   { value: 'manual', label: 'Manual / Internal Queue' },
@@ -249,6 +261,43 @@ function buildDefaultSettlementForm(event = {}) {
   };
 }
 
+function buildDefaultPostProductionDebrief(event = {}) {
+  return {
+    status: 'draft',
+    overallOutcome: '',
+    peopleSummary: '',
+    moneySummary: '',
+    placeStuffSummary: '',
+    purposeProgramSummary: '',
+    wins: '',
+    issues: '',
+    nextActions: '',
+    owner: '',
+    dueDate: '',
+    eventTitle: event?.title || '',
+  };
+}
+
+function mapPostProductionDebriefToForm(input = {}, event = {}) {
+  const defaults = buildDefaultPostProductionDebrief(event);
+  const source = (input && typeof input === 'object') ? input : {};
+  return {
+    ...defaults,
+    status: source.status || defaults.status,
+    overallOutcome: source.overallOutcome || '',
+    peopleSummary: source.peopleSummary || '',
+    moneySummary: source.moneySummary || '',
+    placeStuffSummary: source.placeStuffSummary || '',
+    purposeProgramSummary: source.purposeProgramSummary || '',
+    wins: source.wins || '',
+    issues: source.issues || '',
+    nextActions: source.nextActions || '',
+    owner: source.owner || '',
+    dueDate: source.dueDate || '',
+    eventTitle: source.eventTitle || defaults.eventTitle,
+  };
+}
+
 function mapSettlementReportToForm(report = {}, event = {}) {
   const defaults = buildDefaultSettlementForm(event);
   return {
@@ -266,6 +315,71 @@ function mapSettlementReportToForm(report = {}, event = {}) {
     actualPayout: report.actual_payout ?? '',
     notes: report.notes || '',
   };
+}
+
+function parseCleAttendanceRows(rawValue = '') {
+  return String(rawValue || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split(',').map((part) => part.trim());
+      return {
+        name: parts[0] || '',
+        barNumber: parts[1] || '',
+        checkinStatus: parts[2] || '',
+        certificateStatus: parts[3] || '',
+      };
+    });
+}
+
+function buildCleComplianceCsv(event = {}, productionDetails = {}) {
+  const rows = [
+    ['Event Title', event.title || ''],
+    ['Event Date', event.date || ''],
+    ['Event Time', event.time || ''],
+    ['Venue', event.venue || event.venue_name || ''],
+    ['CLE Credit Hours', productionDetails.cleCreditHours || ''],
+    ['Legal Workflow Mode', normalizeLegalWorkflowMode(productionDetails.legalWorkflowMode || 'cle_full')],
+    ['MCLE Status', productionDetails.mcleStatus || ''],
+    ['MCLE Approval Code', productionDetails.mcleApprovalCode || ''],
+    ['MCLE Provider', productionDetails.mcleAccreditationProvider || ''],
+    ['Bar Association Sponsor', productionDetails.barAssociationSponsor || ''],
+    ['Registrants', productionDetails.cleRegistrants || ''],
+    ['Check-Ins', productionDetails.cleCheckIns || ''],
+    ['Bar Numbers Collected', productionDetails.cleBarNumbersCollected || ''],
+    ['Certificates Issued', productionDetails.cleCertificatesIssued || ''],
+    ['Certificates Delivered At', productionDetails.cleCertificatesDeliveredAt || ''],
+    ['Attendance Exported At', productionDetails.cleAttendanceExportedAt || ''],
+    ['Compliance Owner', productionDetails.cleComplianceOwner || ''],
+    ['Compliance Notes', productionDetails.cleComplianceNotes || ''],
+    [],
+    ['Attendee Name', 'Bar Number', 'Check-In Status', 'Certificate Status'],
+  ];
+
+  const attendeeRows = parseCleAttendanceRows(productionDetails.cleAttendanceRows || '');
+  if (attendeeRows.length) {
+    attendeeRows.forEach((row) => {
+      rows.push([row.name, row.barNumber, row.checkinStatus, row.certificateStatus]);
+    });
+  }
+
+  return rows.map((row) => row
+    .map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`)
+    .join(','))
+    .join('\n');
+}
+
+function downloadTextFile(text = '', mimeType = 'text/plain', fileName = 'download.txt') {
+  const blob = new Blob([text], { type: `${mimeType};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 export default function EventDetail() {
@@ -324,6 +438,9 @@ export default function EventDetail() {
   const [captureSources, setCaptureSources] = useState([]);
   const [zoomMeetingConfig, setZoomMeetingConfig] = useState(null);
   const [youtubeDistribution, setYouTubeDistribution] = useState(null);
+  const [debriefLoading, setDebriefLoading] = useState(false);
+  const [debriefStatus, setDebriefStatus] = useState('');
+  const [cleComplianceStatus, setCleComplianceStatus] = useState('');
   const [sectionNotice, setSectionNotice] = useState('');
   const previousSectionStatusRef = useRef({});
 
@@ -346,6 +463,7 @@ export default function EventDetail() {
   const [checkinForm, setCheckinForm] = useState(() => buildDefaultCheckinForm());
   const [dealMemoForm, setDealMemoForm] = useState(() => buildDefaultDealMemoForm(event));
   const [settlementForm, setSettlementForm] = useState(() => buildDefaultSettlementForm(event));
+  const [postDebriefForm, setPostDebriefForm] = useState(() => mapPostProductionDebriefToForm(event?.productionDetails?.postProductionDebrief || {}, event));
 
   useEffect(() => {
     if (event) {
@@ -389,12 +507,20 @@ export default function EventDetail() {
     setCaptureSources([]);
     setZoomMeetingConfig(null);
     setYouTubeDistribution(null);
+    setPostDebriefForm(mapPostProductionDebriefToForm(event?.productionDetails?.postProductionDebrief || {}, event));
+    setDebriefStatus('');
+    setCleComplianceStatus('');
   }, [event?.id]);
 
   useEffect(() => {
     previousSectionStatusRef.current = {};
     setSectionNotice('');
   }, [event?.id]);
+
+  useEffect(() => {
+    if (!event?.id) return;
+    setPostDebriefForm(mapPostProductionDebriefToForm(event?.productionDetails?.postProductionDebrief || {}, event));
+  }, [event?.id, event?.productionDetails?.postProductionDebrief, event?.title]);
 
   const loadCampaigns = async () => {
     if (!event?.id) return;
@@ -987,6 +1113,44 @@ export default function EventDetail() {
     }
   };
 
+  const handleExportCleComplianceCsv = () => {
+    if (!event?.id) return;
+    const productionDetails = event.productionDetails || {};
+    const attendeeRows = parseCleAttendanceRows(productionDetails.cleAttendanceRows || '');
+    const csv = buildCleComplianceCsv(event, productionDetails);
+    const fileName = `${String(event.title || 'cle-compliance').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')}-cle-compliance.csv`;
+    downloadTextFile(csv, 'text/csv', fileName);
+    setCleComplianceStatus(`Downloaded ${fileName} (${attendeeRows.length} attendee row${attendeeRows.length === 1 ? '' : 's'}).`);
+  };
+
+  const handleSavePostDebrief = async () => {
+    if (!event?.id) return;
+    setDebriefLoading(true);
+    setDebriefStatus('Saving post-production debrief...');
+    try {
+      const nextDebrief = {
+        ...postDebriefForm,
+        status: postDebriefForm.status || 'draft',
+        updatedAt: new Date().toISOString(),
+      };
+      const nextProductionDetails = {
+        ...(event.productionDetails || {}),
+        postProductionDebrief: nextDebrief,
+      };
+      await updateEvent(event.id, { productionDetails: nextProductionDetails });
+      setDebriefStatus('Post-production debrief saved.');
+    } catch (err) {
+      setDebriefStatus(`I hit a snag saving that debrief: ${err.message}`);
+    } finally {
+      setDebriefLoading(false);
+    }
+  };
+
+  const handleResetPostDebriefTemplate = () => {
+    setPostDebriefForm(buildDefaultPostProductionDebrief(event));
+    setDebriefStatus('Template reset. Fill the four-zone notes and save when ready.');
+  };
+
   const handleDelete = async () => {
     if (!event?.id) return;
     setDeleting(true);
@@ -1018,6 +1182,28 @@ export default function EventDetail() {
   );
   const nextWorkflowSection = useMemo(
     () => getNextIncompleteWorkflowSection(workflowSectionProgress),
+    [workflowSectionProgress]
+  );
+  const productionPhaseProgress = useMemo(
+    () => computeProductionPhaseProgress(workflowSectionProgress),
+    [workflowSectionProgress]
+  );
+  const taylorZoneProgress = useMemo(
+    () => computeTaylorZoneProgress(workflowSectionProgress),
+    [workflowSectionProgress]
+  );
+  const sectionZoneReferenceRows = useMemo(() => {
+    const sectionNumberById = WORKFLOW_SECTIONS.reduce((acc, section) => {
+      acc[section.id] = section.number;
+      return acc;
+    }, {});
+    return workflowSectionProgress.map((section, index) => ({
+      ...section,
+      number: sectionNumberById[section.id] || index + 1,
+    }));
+  }, [workflowSectionProgress]);
+  const phaseGateStatus = useMemo(
+    () => computePhaseGateStatus(workflowSectionProgress),
     [workflowSectionProgress]
   );
 
@@ -1079,16 +1265,45 @@ export default function EventDetail() {
     productionDetails.legalJurisdiction ||
     productionDetails.mcleApprovalCode ||
     productionDetails.mcleStatus ||
+    productionDetails.legalWorkflowMode ||
+    productionDetails.distributionApprovalRequired === true ||
+    productionDetails.distributionApproved === true ||
+    productionDetails.distributionApprovedBy ||
+    productionDetails.distributionApprovedAt ||
+    productionDetails.distributionApprovalNotes ||
+    productionDetails.includeLegalDisclaimer === true ||
+    productionDetails.legalDisclaimerTemplate ||
+    productionDetails.legalDisclaimerCustom ||
     productionDetails.cleProgramNotes ||
+    productionDetails.cleBarNumbersCollected ||
     productionDetails.cleRegistrants ||
     productionDetails.cleCheckIns ||
     productionDetails.cleCertificatesIssued ||
+    productionDetails.cleCertificatesDeliveredAt ||
+    productionDetails.cleAttendanceExportedAt ||
+    productionDetails.cleComplianceOwner ||
+    productionDetails.cleComplianceNotes ||
+    productionDetails.cleAttendanceRows ||
     productionDetails.grossTicketRevenue ||
     productionDetails.netPayoutRevenue ||
+    productionDetails.sponsorshipRevenue ||
+    productionDetails.speakerFeesTotal ||
+    productionDetails.venueCostsTotal ||
+    productionDetails.complianceCostsTotal ||
+    productionDetails.reconciliationStatus ||
+    productionDetails.reconciliationOwner ||
+    productionDetails.reconciliationClosedAt ||
+    productionDetails.reconciliationNotes ||
     productionDetails.analyticsSource ||
     productionDetails.analyticsLastSyncedAt ||
     productionDetails.stakeholderReportExportedAt
   );
+  const legalProgramEvent = isLegalProgramGenre(event.genre || '');
+  const legalWorkflowMode = normalizeLegalWorkflowMode(productionDetails.legalWorkflowMode || 'cle_full');
+  const legalWorkflowLabel = LEGAL_WORKFLOW_MODES.find((mode) => mode.value === legalWorkflowMode)?.label || 'CLE Compliance + Promotion';
+  const legalDisclaimerTemplate = getLegalDisclaimerTemplate(productionDetails.legalDisclaimerTemplate || 'cle_education');
+  const legalDisclaimerEnabled = !!(productionDetails.includeLegalDisclaimer || productionDetails.legalDisclaimerCustom);
+  const legalAttendeeRows = parseCleAttendanceRows(productionDetails.cleAttendanceRows || '');
   const formatCurrency = (value) => {
     const num = Number(value);
     if (!Number.isFinite(num)) return value;
@@ -1102,6 +1317,8 @@ export default function EventDetail() {
     ? activeDealMemo.metadata.googleSignature || null
     : null;
   const activeSettlement = settlementReports.find((row) => row.id === activeSettlementId) || null;
+  const activeBlockingPhase = phaseGateStatus?.blockingPhase ? phaseGateStatus?.byKey?.[phaseGateStatus.blockingPhase] : null;
+  const nextLockedPhase = (phaseGateStatus?.phases || []).find((phase) => phase.locked) || null;
   const resolveWorkflowSectionLink = (section) => {
     if (!section) return `/events/${event.id}`;
     if (section.id === 'distribution_delivery' || section.id === 'marketing_assets') {
@@ -1126,6 +1343,11 @@ export default function EventDetail() {
               {event.genre && (
                 <span className="inline-block text-xs font-semibold text-[#c8a45e] bg-[#c8a45e1a] px-3 py-1 rounded-full">
                   {event.genre}
+                </span>
+              )}
+              {legalProgramEvent && (
+                <span className="inline-block text-xs font-semibold text-blue-700 bg-blue-100 px-3 py-1 rounded-full">
+                  {legalWorkflowLabel}
                 </span>
               )}
               {event.campaign && (
@@ -1211,11 +1433,68 @@ export default function EventDetail() {
           </div>
         )}
 
+        {nextLockedPhase && (
+          <div className="mb-3 p-3 rounded border border-blue-200 bg-blue-50">
+            <p className="m-0 text-sm font-semibold text-blue-900">
+              🔒 Phase gate active: complete {activeBlockingPhase?.label || 'the current phase'} to unlock {nextLockedPhase.label}.
+            </p>
+            {activeBlockingPhase?.missing?.length > 0 && (
+              <p className="m-0 mt-1 text-xs text-blue-800">
+                Still needed: {activeBlockingPhase.missing.slice(0, 3).join(' · ')}
+              </p>
+            )}
+          </div>
+        )}
+
+        <TaylorZoneReferenceStrip
+          sections={sectionZoneReferenceRows}
+          className="mb-3"
+          description="This event maps each workflow section to People, Money, Place + Stuff, and Purpose + Program."
+        />
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-3">
+          {productionPhaseProgress.map((phase) => {
+            const pct = phase.total > 0 ? Math.round((phase.completed / phase.total) * 100) : 0;
+            const statusIcon = phase.status === 'complete' ? '✅' : (phase.status === 'in_progress' ? '🟡' : '⚪');
+            return (
+              <div key={phase.key} className="rounded border border-gray-200 bg-white px-3 py-2">
+                <p className="m-0 text-sm font-semibold">{statusIcon} {phase.icon} {phase.label}</p>
+                <p className="m-0 text-xs text-gray-600">{phase.completed}/{phase.total} checks ({pct}%)</p>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="mb-3 rounded border border-[#0d1b2a1a] bg-white p-3">
+          <p className="m-0 text-sm font-semibold">🧠 Taylor 4-Zone Readiness</p>
+          <p className="m-0 mt-1 text-xs text-gray-500">{TAYLOR_FRAMEWORK_ATTRIBUTION}</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
+            {taylorZoneProgress.map((zone) => {
+              const pct = zone.total > 0 ? Math.round((zone.completed / zone.total) * 100) : 0;
+              const statusIcon = zone.status === 'complete' ? '✅' : (zone.status === 'in_progress' ? '🟡' : '⚪');
+              return (
+                <div key={zone.key} className="rounded border border-gray-200 bg-gray-50 px-3 py-2">
+                  <p className="m-0 text-sm font-semibold">{statusIcon} {zone.icon} {zone.label}</p>
+                  <p className="m-0 text-xs text-gray-600">{zone.completed}/{zone.total} checks ({pct}%)</p>
+                  {zone.missing.length > 0 && (
+                    <p className="m-0 mt-1 text-xs text-gray-500">
+                      Remaining: {zone.missing.slice(0, 2).join(' · ')}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
         <div className="space-y-2">
           {workflowSectionProgress.map((section) => {
             const trackMeta = getWorkflowTrackMeta(section.track);
             const pct = section.total > 0 ? Math.round((section.completed / section.total) * 100) : 0;
             const isComplete = section.status === 'complete';
+            const phaseGate = phaseGateStatus?.byKey?.[section.productionPhase];
+            const sectionLocked = !!phaseGate?.locked;
+            const blockedByLabel = phaseGate?.blockedBy ? (phaseGateStatus?.byKey?.[phaseGate.blockedBy]?.label || phaseGate.blockedBy) : '';
             return (
               <div key={section.id} className={`rounded border p-3 ${trackMeta.borderClass} ${trackMeta.cardClass}`}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1223,17 +1502,43 @@ export default function EventDetail() {
                     <p className={`m-0 text-xs font-semibold ${trackMeta.accentClass}`}>{trackMeta.icon} {trackMeta.label}</p>
                     <p className="m-0 text-sm font-semibold">{isComplete ? '✅' : '🟡'} {section.title}</p>
                     <p className="m-0 text-xs text-gray-600">{section.completed}/{section.total} checks complete ({pct}%)</p>
+                    <p className="m-0 mt-1 text-[11px] text-gray-500">
+                      {section.productionPhase === 'post_production' ? '📦 Post-Production' : section.productionPhase === 'production' ? '🎬 Production' : '🛠️ Pre-Production'}
+                      {Array.isArray(section.taylorZones) && section.taylorZones.length > 0
+                        ? ` · ${section.taylorZones
+                          .map((zone) => {
+                            if (zone === 'people') return '👥 People';
+                            if (zone === 'money') return '💵 Money';
+                            if (zone === 'place_stuff') return '🏛️ Place + Stuff';
+                            if (zone === 'purpose_program') return '🎭 Purpose + Program';
+                            return null;
+                          })
+                          .filter(Boolean)
+                          .join(' · ')}`
+                        : ''}
+                    </p>
                   </div>
-                  <Link
-                    to={resolveWorkflowSectionLink(section)}
-                    className="text-xs px-2 py-1 rounded border border-gray-300 bg-white text-gray-700 hover:border-[#c8a45e] no-underline"
-                  >
-                    {section.ctaLabel || 'Open section'} →
-                  </Link>
+                  {sectionLocked ? (
+                    <span className="text-xs px-2 py-1 rounded border border-gray-200 bg-gray-100 text-gray-500">
+                      Locked until {blockedByLabel || 'prior phase'} is complete
+                    </span>
+                  ) : (
+                    <Link
+                      to={resolveWorkflowSectionLink(section)}
+                      className="text-xs px-2 py-1 rounded border border-gray-300 bg-white text-gray-700 hover:border-[#c8a45e] no-underline"
+                    >
+                      {section.ctaLabel || 'Open section'} →
+                    </Link>
+                  )}
                 </div>
                 {section.missing.length > 0 && (
                   <p className="m-0 mt-2 text-xs text-gray-600">
                     Remaining: {section.missing.slice(0, 2).join(' · ')}
+                  </p>
+                )}
+                {sectionLocked && (
+                  <p className="m-0 mt-2 text-xs text-blue-700">
+                    Complete {blockedByLabel || 'the previous phase'} first, then this section unlocks automatically.
                   </p>
                 )}
               </div>
@@ -1339,7 +1644,129 @@ export default function EventDetail() {
         </div>
       </div>
 
-      <BookingOperationsWorkspace event={event} initialTab={searchParams.get('opsTab') || ''} />
+      <BookingOperationsWorkspace
+        event={event}
+        initialTab={searchParams.get('opsTab') || ''}
+        phaseGateStatus={phaseGateStatus}
+      />
+
+      <div className="card mb-6 border border-[#0d1b2a1a] bg-[#faf8f3]">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <div>
+            <h3 className="text-lg m-0">🧾 Post-Production Debrief (Taylor 4-Zone)</h3>
+            <p className="text-xs text-gray-500 m-0 mt-1">Close out people, money, place/stuff, and purpose/program in one debrief record.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              value={postDebriefForm.status}
+              onChange={(e) => setPostDebriefForm((prev) => ({ ...prev, status: e.target.value }))}
+              className="px-2 py-1.5 border border-gray-200 rounded text-xs bg-white"
+            >
+              <option value="draft">Draft</option>
+              <option value="in_review">In Review</option>
+              <option value="submitted">Submitted</option>
+              <option value="complete">Complete</option>
+            </select>
+            <button
+              type="button"
+              onClick={handleResetPostDebriefTemplate}
+              className="btn-secondary text-xs"
+              disabled={debriefLoading}
+            >
+              Reset Template
+            </button>
+            <button
+              type="button"
+              onClick={handleSavePostDebrief}
+              className="btn-primary text-xs"
+              disabled={debriefLoading}
+            >
+              {debriefLoading ? 'Saving...' : 'Save Debrief'}
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+          <div className="bg-white border border-gray-200 rounded p-3">
+            <p className="m-0 text-xs font-semibold">👥 People</p>
+            <textarea
+              rows={3}
+              value={postDebriefForm.peopleSummary}
+              onChange={(e) => setPostDebriefForm((prev) => ({ ...prev, peopleSummary: e.target.value }))}
+              className="w-full mt-2 px-2 py-1.5 border border-gray-200 rounded text-xs"
+              placeholder="Crew performance, staffing gaps, communication wins, and handoff notes."
+            />
+          </div>
+          <div className="bg-white border border-gray-200 rounded p-3">
+            <p className="m-0 text-xs font-semibold">💵 Money</p>
+            <textarea
+              rows={3}
+              value={postDebriefForm.moneySummary}
+              onChange={(e) => setPostDebriefForm((prev) => ({ ...prev, moneySummary: e.target.value }))}
+              className="w-full mt-2 px-2 py-1.5 border border-gray-200 rounded text-xs"
+              placeholder="Ticket pace, settlement notes, overages, savings, and payout issues."
+            />
+          </div>
+          <div className="bg-white border border-gray-200 rounded p-3">
+            <p className="m-0 text-xs font-semibold">🏛️ Place + Stuff</p>
+            <textarea
+              rows={3}
+              value={postDebriefForm.placeStuffSummary}
+              onChange={(e) => setPostDebriefForm((prev) => ({ ...prev, placeStuffSummary: e.target.value }))}
+              className="w-full mt-2 px-2 py-1.5 border border-gray-200 rounded text-xs"
+              placeholder="Venue flow, zone logistics, inventory, gear reliability, and load-in/strike notes."
+            />
+          </div>
+          <div className="bg-white border border-gray-200 rounded p-3">
+            <p className="m-0 text-xs font-semibold">🎭 Purpose + Program</p>
+            <textarea
+              rows={3}
+              value={postDebriefForm.purposeProgramSummary}
+              onChange={(e) => setPostDebriefForm((prev) => ({ ...prev, purposeProgramSummary: e.target.value }))}
+              className="w-full mt-2 px-2 py-1.5 border border-gray-200 rounded text-xs"
+              placeholder="How the show/program landed, audience response, and artistic/program outcomes."
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <textarea
+            rows={2}
+            value={postDebriefForm.wins}
+            onChange={(e) => setPostDebriefForm((prev) => ({ ...prev, wins: e.target.value }))}
+            className="w-full px-3 py-2 border border-gray-200 rounded text-xs"
+            placeholder="Top wins to repeat next time."
+          />
+          <textarea
+            rows={2}
+            value={postDebriefForm.issues}
+            onChange={(e) => setPostDebriefForm((prev) => ({ ...prev, issues: e.target.value }))}
+            className="w-full px-3 py-2 border border-gray-200 rounded text-xs"
+            placeholder="Issues to fix before the next event."
+          />
+          <textarea
+            rows={2}
+            value={postDebriefForm.nextActions}
+            onChange={(e) => setPostDebriefForm((prev) => ({ ...prev, nextActions: e.target.value }))}
+            className="w-full px-3 py-2 border border-gray-200 rounded text-xs md:col-span-2"
+            placeholder="Next actions, owners, and due dates."
+          />
+          <input
+            type="text"
+            value={postDebriefForm.owner}
+            onChange={(e) => setPostDebriefForm((prev) => ({ ...prev, owner: e.target.value }))}
+            className="w-full px-3 py-2 border border-gray-200 rounded text-xs"
+            placeholder="Debrief owner"
+          />
+          <input
+            type="date"
+            value={postDebriefForm.dueDate}
+            onChange={(e) => setPostDebriefForm((prev) => ({ ...prev, dueDate: e.target.value }))}
+            className="w-full px-3 py-2 border border-gray-200 rounded text-xs"
+          />
+        </div>
+        {debriefStatus && <p className="text-xs text-gray-600 mt-3 mb-0">{debriefStatus}</p>}
+      </div>
 
       <div className="card mb-6">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
@@ -2083,7 +2510,18 @@ export default function EventDetail() {
 
       {hasProductionDetails && (
         <div className="card mb-6">
-          <h3 className="text-lg mb-4">{hasCleDetails ? 'CLE / Legal Program Details' : 'Production Details'}</h3>
+          <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
+            <h3 className="text-lg m-0">{hasCleDetails ? 'CLE / Legal Program Details' : 'Production Details'}</h3>
+            {hasCleDetails && (
+              <button
+                type="button"
+                className="btn-secondary text-xs"
+                onClick={handleExportCleComplianceCsv}
+              >
+                Export CLE Compliance CSV
+              </button>
+            )}
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
             {hasTicketingDetails && (
               <>
@@ -2107,18 +2545,36 @@ export default function EventDetail() {
             )}
             {hasCleDetails && (
               <>
+                <p className="m-0"><span className="text-gray-500">Workflow Mode:</span> {legalWorkflowLabel}</p>
+                <p className="m-0"><span className="text-gray-500">Approval Gate:</span> {productionDetails.distributionApprovalRequired ? 'Required' : 'Optional'}</p>
+                <p className="m-0"><span className="text-gray-500">Distribution Approved:</span> {productionDetails.distributionApproved ? 'Yes' : 'No'}</p>
+                {productionDetails.distributionApprovedBy && <p className="m-0"><span className="text-gray-500">Approved By:</span> {productionDetails.distributionApprovedBy}</p>}
+                {productionDetails.distributionApprovedAt && <p className="m-0"><span className="text-gray-500">Approved At:</span> {productionDetails.distributionApprovedAt}</p>}
+                {legalDisclaimerEnabled && <p className="m-0"><span className="text-gray-500">Disclaimer Template:</span> {legalDisclaimerTemplate.label}</p>}
                 {productionDetails.cleCreditHours && <p className="m-0"><span className="text-gray-500">CLE Credit Hours:</span> {productionDetails.cleCreditHours}</p>}
                 {productionDetails.legalJurisdiction && <p className="m-0"><span className="text-gray-500">Legal Jurisdiction:</span> {productionDetails.legalJurisdiction}</p>}
                 {productionDetails.mcleAccreditationProvider && <p className="m-0"><span className="text-gray-500">MCLE Provider:</span> {productionDetails.mcleAccreditationProvider}</p>}
                 {productionDetails.barAssociationSponsor && <p className="m-0"><span className="text-gray-500">Bar Sponsor:</span> {productionDetails.barAssociationSponsor}</p>}
                 {productionDetails.mcleApprovalCode && <p className="m-0"><span className="text-gray-500">MCLE Approval Code:</span> {productionDetails.mcleApprovalCode}</p>}
                 {productionDetails.mcleStatus && <p className="m-0"><span className="text-gray-500">MCLE Status:</span> {productionDetails.mcleStatus}</p>}
+                {productionDetails.cleBarNumbersCollected && <p className="m-0"><span className="text-gray-500">Bar Numbers Collected:</span> {productionDetails.cleBarNumbersCollected}</p>}
                 {productionDetails.cleRegistrants && <p className="m-0"><span className="text-gray-500">Registrants:</span> {productionDetails.cleRegistrants}</p>}
                 {productionDetails.cleCheckIns && <p className="m-0"><span className="text-gray-500">Check-Ins:</span> {productionDetails.cleCheckIns}</p>}
                 {productionDetails.cleCertificatesIssued && <p className="m-0"><span className="text-gray-500">Certificates Issued:</span> {productionDetails.cleCertificatesIssued}</p>}
+                {productionDetails.cleCertificatesDeliveredAt && <p className="m-0"><span className="text-gray-500">Certificates Delivered:</span> {productionDetails.cleCertificatesDeliveredAt}</p>}
+                {productionDetails.cleAttendanceExportedAt && <p className="m-0"><span className="text-gray-500">Attendance Exported:</span> {productionDetails.cleAttendanceExportedAt}</p>}
+                {productionDetails.cleComplianceOwner && <p className="m-0"><span className="text-gray-500">Compliance Owner:</span> {productionDetails.cleComplianceOwner}</p>}
+                {legalAttendeeRows.length > 0 && <p className="m-0"><span className="text-gray-500">Attendance Rows:</span> {legalAttendeeRows.length}</p>}
                 {productionDetails.ticketSalesCount && <p className="m-0"><span className="text-gray-500">Tickets Sold:</span> {productionDetails.ticketSalesCount}</p>}
                 {productionDetails.grossTicketRevenue && <p className="m-0"><span className="text-gray-500">Gross Ticket Revenue:</span> {formatCurrency(productionDetails.grossTicketRevenue)}</p>}
                 {productionDetails.netPayoutRevenue && <p className="m-0"><span className="text-gray-500">Net Payout Revenue:</span> {formatCurrency(productionDetails.netPayoutRevenue)}</p>}
+                {productionDetails.sponsorshipRevenue && <p className="m-0"><span className="text-gray-500">Sponsorship Revenue:</span> {formatCurrency(productionDetails.sponsorshipRevenue)}</p>}
+                {productionDetails.speakerFeesTotal && <p className="m-0"><span className="text-gray-500">Speaker Fees:</span> {formatCurrency(productionDetails.speakerFeesTotal)}</p>}
+                {productionDetails.venueCostsTotal && <p className="m-0"><span className="text-gray-500">Venue Costs:</span> {formatCurrency(productionDetails.venueCostsTotal)}</p>}
+                {productionDetails.complianceCostsTotal && <p className="m-0"><span className="text-gray-500">Compliance Costs:</span> {formatCurrency(productionDetails.complianceCostsTotal)}</p>}
+                {productionDetails.reconciliationStatus && <p className="m-0"><span className="text-gray-500">Reconciliation:</span> {String(productionDetails.reconciliationStatus).replace(/_/g, ' ')}</p>}
+                {productionDetails.reconciliationOwner && <p className="m-0"><span className="text-gray-500">Reconciliation Owner:</span> {productionDetails.reconciliationOwner}</p>}
+                {productionDetails.reconciliationClosedAt && <p className="m-0"><span className="text-gray-500">Reconciliation Closed:</span> {productionDetails.reconciliationClosedAt}</p>}
                 {productionDetails.analyticsSource && <p className="m-0"><span className="text-gray-500">Analytics Source:</span> {productionDetails.analyticsSource}</p>}
                 {productionDetails.analyticsLastSyncedAt && <p className="m-0"><span className="text-gray-500">Analytics Last Synced:</span> {productionDetails.analyticsLastSyncedAt}</p>}
                 {productionDetails.stakeholderReportExportedAt && <p className="m-0"><span className="text-gray-500">Stakeholder Report Exported:</span> {productionDetails.stakeholderReportExportedAt}</p>}
@@ -2130,6 +2586,18 @@ export default function EventDetail() {
           )}
           {productionDetails.cleProgramNotes && (
             <p className="text-xs text-gray-600 mt-3 mb-0">{productionDetails.cleProgramNotes}</p>
+          )}
+          {productionDetails.distributionApprovalNotes && (
+            <p className="text-xs text-gray-600 mt-3 mb-0">Approval Notes: {productionDetails.distributionApprovalNotes}</p>
+          )}
+          {productionDetails.cleComplianceNotes && (
+            <p className="text-xs text-gray-600 mt-3 mb-0">Compliance Notes: {productionDetails.cleComplianceNotes}</p>
+          )}
+          {productionDetails.reconciliationNotes && (
+            <p className="text-xs text-gray-600 mt-3 mb-0">Reconciliation Notes: {productionDetails.reconciliationNotes}</p>
+          )}
+          {cleComplianceStatus && (
+            <p className="text-xs text-gray-600 mt-3 mb-0">{cleComplianceStatus}</p>
           )}
         </div>
       )}

@@ -3,6 +3,8 @@
 // POST /api/media  { action: 'upload' | 'list' | 'delete', ... }
 // ═══════════════════════════════════════════════════════════════
 
+import { ApiAuthError, requireApiAuth, scopePayloadToUser } from './_auth.js';
+
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const BUCKET = 'media';
@@ -43,16 +45,19 @@ async function ensureBucket() {
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Send this endpoint a POST request and I can run it.' });
 
-  const { action } = req.body;
+  const { action } = req.body || {};
 
   try {
+    const authContext = await requireApiAuth(req);
+    const payload = scopePayloadToUser(req.body || {}, authContext);
+
     switch (action) {
       case 'upload': {
-        const { base64, category, label, eventId, userId, fileName, mimeType } = req.body;
+        const { base64, category, label, eventId, userId, fileName, mimeType } = payload;
         if (!base64 || !userId) return res.status(400).json({ error: 'I need the file payload and user ID before I can upload this.' });
 
         await ensureBucket();
@@ -96,7 +101,8 @@ export default async function handler(req, res) {
       }
 
       case 'list': {
-        const { userId, category, eventId } = req.body;
+        const { userId, category, eventId } = payload;
+        if (!userId) return res.status(400).json({ error: 'I need the user ID before I can list media.' });
         let query = `media?user_id=eq.${userId}&order=created_at.desc`;
         if (category) query += `&category=eq.${category}`;
         if (eventId) query += `&event_id=eq.${eventId}`;
@@ -105,7 +111,7 @@ export default async function handler(req, res) {
       }
 
       case 'delete': {
-        const { id, userId } = req.body;
+        const { id, userId } = payload;
         if (!id) return res.status(400).json({ error: 'I need the media ID so I can delete the right file.' });
 
         // Get record to find storage path
@@ -132,6 +138,9 @@ export default async function handler(req, res) {
     }
   } catch (err) {
     console.error('[media]', err);
+    if (err instanceof ApiAuthError) {
+      return res.status(err.status || 401).json({ success: false, error: err.message });
+    }
     return res.status(500).json({ success: false, error: err.message });
   }
 }
