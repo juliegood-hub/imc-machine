@@ -8,9 +8,17 @@
   --light-gray: #f5f5f5;
 }
 
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 html {
   height: 100%;
   min-height: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior-y: auto;
 }
@@ -21,6 +29,7 @@ body {
   color: var(--navy);
   margin: 0;
   min-height: 100%;
+  max-width: 100%;
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
@@ -29,6 +38,8 @@ body {
 
 #root {
   min-height: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
   position: relative;
 }
 
@@ -84,6 +95,7 @@ h1, h2, h3, h4, h5, h6 {
   border-radius: 0.75rem;
   padding: 1.5rem;
   box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  max-width: 100%;
 }
 
 input, textarea, select {
@@ -109,4 +121,19 @@ input:focus, textarea:focus, select:focus {
 input:-webkit-autofill {
   -webkit-box-shadow: 0 0 0 30px white inset !important;
   -webkit-text-fill-color: var(--navy) !important;
+}
+
+img,
+video,
+canvas,
+svg,
+iframe {
+  max-width: 100%;
+  height: auto;
+}
+
+pre,
+code {
+  white-space: pre-wrap;
+  word-break: break-word;
 }

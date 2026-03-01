@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useVenue } from '../context/VenueContext';
+import { useAuth } from '../context/AuthContext';
 import FormAIAssist from './FormAIAssist';
+import IntakePromptPanel from './IntakePromptPanel';
 import DeepResearchPromptBox from './DeepResearchPromptBox';
 import EventMessagingPanel from './EventMessagingPanel';
-import { deepResearchDraft } from '../services/research';
+import StagePlotEditor from './StagePlotEditor';
+import { deepResearchDraft, deepResearchImageCaptionPack } from '../services/research';
+import { extractFromImages, openCamera, openFileUpload } from '../services/photo-to-form';
 import {
   MERCH_PARTY_TYPE_OPTIONS,
   normalizeMerchAllocations,
@@ -26,7 +30,7 @@ const DEEP_STYLE_HELP = {
 const TABS = [
   { key: 'overview', label: 'Overview' },
   { key: 'media', label: 'Media' },
-  { key: 'production', label: 'Production' },
+  { key: 'production', label: 'Production Ops' },
   { key: 'staffing', label: 'Staffing' },
   { key: 'messaging', label: 'Messaging' },
   { key: 'budget', label: 'Budget' },
@@ -93,6 +97,184 @@ const CHECKLIST_STATUS_OPTIONS = [
 const OTHER_OPTION_VALUE = 'other';
 const TICKETING_OTHER_PROVIDER_ID = '__other__';
 
+const CONCESSIONS_CATEGORY_OPTIONS = [
+  'beer',
+  'wine',
+  'cocktail',
+  'soda',
+  'coffee',
+  'snack',
+  'meal',
+  'dessert',
+  'other',
+];
+
+const CONCESSIONS_PROMO_TYPE_OPTIONS = [
+  { value: 'none', label: 'No Promo' },
+  { value: 'special', label: 'Special' },
+  { value: 'coupon', label: 'Coupon' },
+  { value: 'game', label: 'Game / Contest' },
+  { value: 'bundle', label: 'Bundle Offer' },
+  { value: 'happy_hour', label: 'Happy Hour' },
+  { value: 'limited_time', label: 'Limited-Time Offer' },
+  { value: 'other', label: 'Other (write-in)' },
+];
+
+const PRODUCTION_OPS_SUBSECTIONS = [
+  { key: 'overview', label: 'Overview' },
+  { key: 'stage_plot', label: 'Stage Plot' },
+  { key: 'power_view', label: 'Power View' },
+  { key: 'safety_egress', label: 'Safety / Egress' },
+  { key: 'lighting_lx', label: 'Lighting (LX)' },
+  { key: 'audio_sound', label: 'Audio / Sound (A1 / A2)' },
+  { key: 'projection_video', label: 'Projection / Video' },
+  { key: 'comms', label: 'Comms' },
+  { key: 'run_of_show', label: 'Run of Show & Cueing' },
+  { key: 'department_checklists', label: 'Department Checklists' },
+  { key: 'technical_riders', label: 'Technical Riders & Attachments' },
+];
+
+const PRODUCTION_BROADWAY_TERMS = [
+  'House Left / House Right',
+  'Stage Left / Stage Right',
+  'Upstage / Downstage',
+  'SR / SL',
+  'FOH',
+  'Catwalk',
+  'Rail',
+  'Fly system',
+  'Electrics',
+  'Cyc',
+  'Scrim',
+  'Boom',
+  'Apron',
+  'Paper tech',
+  'Dry tech',
+  'Cue-to-cue',
+  'Tech rehearsal',
+  'Dress rehearsal',
+  'Preview',
+  'Load-in',
+  'Strike',
+  'Turnover',
+];
+
+const DEPARTMENT_CHECKLIST_TEMPLATES = {
+  stage_management: {
+    label: 'Stage Management',
+    items: [
+      { label: 'Prompt book updated with cue IDs and standby/go call language', role: 'Stage Manager', category: 'stage' },
+      { label: 'Call script posted to departments before paper tech', role: 'Assistant Stage Manager', category: 'stage' },
+      { label: 'Daily rehearsal and performance reports distributed', role: 'Stage Manager', category: 'logistics' },
+    ],
+  },
+  lighting: {
+    label: 'Lighting',
+    items: [
+      { label: 'Plot approved', role: 'Lighting Designer', category: 'lighting' },
+      { label: 'Instrument schedule finalized', role: 'Lighting Designer', category: 'lighting' },
+      { label: 'Focus complete', role: 'Lighting Designer', category: 'lighting' },
+      { label: 'Cue stack programmed', role: 'Lighting Designer', category: 'lighting' },
+      { label: 'Hang complete', role: 'Master Electrician', category: 'lighting' },
+      { label: 'Circuiting complete', role: 'Master Electrician', category: 'lighting' },
+      { label: 'Patch verified', role: 'Master Electrician', category: 'lighting' },
+      { label: 'Dimmers tested', role: 'Master Electrician', category: 'lighting' },
+      { label: 'Show file loaded', role: 'Lighting Board Operator', category: 'lighting' },
+      { label: 'Backup saved', role: 'Lighting Board Operator', category: 'lighting' },
+      { label: 'Cue-to-cue complete', role: 'Lighting Board Operator', category: 'lighting' },
+    ],
+  },
+  sound: {
+    label: 'Sound',
+    items: [
+      { label: 'Console file saved', role: 'Audio Engineer (FOH)', category: 'audio' },
+      { label: 'Line check complete', role: 'Audio Engineer (FOH)', category: 'audio' },
+      { label: 'RF scan complete', role: 'Audio Engineer (FOH)', category: 'audio' },
+      { label: 'Playback tested', role: 'Audio Engineer (FOH)', category: 'audio' },
+      { label: 'Mic tape complete', role: 'A2 (Audio Assistant)', category: 'audio' },
+      { label: 'Actor fit confirmed', role: 'A2 (Audio Assistant)', category: 'audio' },
+      { label: 'Spare packs ready', role: 'A2 (Audio Assistant)', category: 'audio' },
+      { label: 'Quick-change routing set', role: 'A2 (Audio Assistant)', category: 'audio' },
+    ],
+  },
+  deck: {
+    label: 'Deck Crew',
+    items: [
+      { label: 'Preset map verified against stage plot', role: 'Deck Crew Chief', category: 'stage' },
+      { label: 'Scene shift paths taped and blocked', role: 'Deck Crew Chief', category: 'stage' },
+      { label: 'Spike marks updated after dry tech notes', role: 'Assistant Stage Manager', category: 'stage' },
+    ],
+  },
+  wardrobe: {
+    label: 'Wardrobe',
+    items: [
+      { label: 'Quick-change tracks posted by dressing room', role: 'Wardrobe Supervisor', category: 'wardrobe' },
+      { label: 'Preset costumes checked and signed off', role: 'Costumer', category: 'wardrobe' },
+      { label: 'Laundry and repair queue logged before house open', role: 'Wardrobe Supervisor', category: 'wardrobe' },
+    ],
+  },
+  props: {
+    label: 'Props',
+    items: [
+      { label: 'Props table preset completed and labeled', role: 'Props Master', category: 'stage' },
+      { label: 'Consumable props restocked', role: 'Props Master', category: 'stage' },
+      { label: 'Breakaway or special-effect props safety check complete', role: 'Props Master', category: 'safety' },
+    ],
+  },
+  foh: {
+    label: 'FOH',
+    items: [
+      { label: 'House open/hold protocol aligned with stage manager', role: 'House Manager', category: 'foh' },
+      { label: 'Late seating and accessibility routes briefed', role: 'House Manager', category: 'foh' },
+      { label: 'Intermission reset timing confirmed with deck and concessions', role: 'House Manager', category: 'foh' },
+    ],
+  },
+  production_management: {
+    label: 'Production Management',
+    items: [
+      { label: 'Daily budget and staffing variance reviewed', role: 'Production Manager', category: 'logistics' },
+      { label: 'Risk log reviewed with department heads', role: 'Production Manager', category: 'safety' },
+      { label: 'Load-in / strike staffing and overtime approvals locked', role: 'Production Manager', category: 'logistics' },
+    ],
+  },
+  doors_open: {
+    label: 'Before Doors (Open)',
+    phase: 'before_doors',
+    title: 'Before Doors Checklist',
+    items: [
+      { label: 'FOH briefing complete: door policy, re-entry, late seating, emergency flow', role: 'House Manager', category: 'foh' },
+      { label: 'Ticket scanners and check-in stations online and tested', role: 'Box Office Manager', category: 'ticketing' },
+      { label: 'Security post assignments confirmed for entries, stage edge, and exits', role: 'Security Lead', category: 'safety' },
+      { label: 'Concessions/bar count complete, pricing visible, and POS tested', role: 'Concessions Manager', category: 'concessions' },
+      { label: 'Merch table preset complete: inventory, cashless device, QR signs', role: 'Merch Manager', category: 'merch' },
+      { label: 'Stage clear and preset confirmed with deck and stage management', role: 'Stage Manager', category: 'stage' },
+      { label: 'Audio/LX go-no-go check complete and comms check confirmed', role: 'Technical Director', category: 'audio' },
+      { label: 'Restrooms, public areas, and ADA routes checked and open', role: 'Facilities Manager', category: 'foh' },
+      { label: 'Parking/loading zones set and guest-facing signage in place', role: 'Parking Coordinator', category: 'logistics' },
+      { label: 'Open doors approved by Stage Manager + House Manager', role: 'Stage Manager', category: 'foh' },
+    ],
+  },
+  after_show_closeout: {
+    label: 'After Show Closeout',
+    phase: 'after_show_closeout',
+    title: 'After Show Closeout Checklist',
+    items: [
+      { label: 'FOH cleared safely: audience exited, incident sweep complete', role: 'House Manager', category: 'foh' },
+      { label: 'Merch and concessions reconciliation logged (cash/card totals)', role: 'Merch Manager', category: 'merch' },
+      { label: 'Backline/mics/comms collected, counted, and powered down', role: 'Technical Director', category: 'audio' },
+      { label: 'LX shutdown complete and board/show file backup saved', role: 'Lighting Board Operator', category: 'lighting' },
+      { label: 'Stage strike complete: props, wardrobe, and set returned to storage', role: 'Deck Crew Chief', category: 'stage' },
+      { label: 'Load-out lanes managed and venue exits secured', role: 'Security Lead', category: 'safety' },
+      { label: 'Cleanup complete for FOH, backstage, dressing rooms, and loading', role: 'Facilities Manager', category: 'logistics' },
+      { label: 'Post-show notes entered: issues, delays, damage, or follow-up items', role: 'Stage Manager', category: 'logistics' },
+      { label: 'Final lock-up done and alarm/keys checklist completed', role: 'Venue Manager', category: 'safety' },
+    ],
+  },
+};
+
+const DOORS_CLOSEOUT_PACK_TEMPLATE_KEYS = ['doors_open', 'after_show_closeout'];
+const DOORS_OPEN_GATE_CATEGORIES = ['foh', 'safety'];
+
 function resolveTabKey(value) {
   const requested = String(value || '').trim().toLowerCase();
   if (!requested) return 'overview';
@@ -131,6 +313,33 @@ function normalizeTypeSlug(value = '') {
     .replace(/^_+|_+$/g, '');
 }
 
+function normalizeChecklistPhase(value = '') {
+  return normalizeTypeSlug(value);
+}
+
+function isBeforeDoorsPhase(phase = '') {
+  const normalized = normalizeChecklistPhase(phase);
+  return normalized === 'before_doors'
+    || normalized === 'before_doors_open'
+    || normalized === 'doors_open';
+}
+
+function isAfterShowCloseoutPhase(phase = '') {
+  const normalized = normalizeChecklistPhase(phase);
+  return normalized === 'after_show_closeout'
+    || normalized === 'after_show'
+    || normalized === 'show_closeout'
+    || normalized === 'closeout';
+}
+
+function isDoorsOpenApprovalItem(item = {}) {
+  const label = String(item?.label || '').toLowerCase();
+  return label.includes('open doors approved')
+    || label.includes('doors open approved')
+    || label.includes('open doors approval')
+    || label.includes('doors open approval');
+}
+
 function hasOption(options = [], value = '') {
   const normalizedValue = normalizeOtherText(value);
   return options.some((option) => option.value === normalizedValue);
@@ -164,6 +373,7 @@ function mapChecklistDraftItem(rawItem = {}) {
   return {
     ...rawItem,
     label: normalizeOtherText(rawItem.label),
+    sortOrder: Number.isFinite(Number(rawItem.sortOrder)) ? Number(rawItem.sortOrder) : 0,
     category: hasKnownCategory ? rawCategory : OTHER_OPTION_VALUE,
     categoryOther: hasKnownCategory
       ? normalizeOtherText(rawItem.categoryOther || '')
@@ -176,18 +386,31 @@ function mapChecklistDraftItem(rawItem = {}) {
     statusOther: hasKnownStatus
       ? normalizeOtherText(rawItem.statusOther || '')
       : (normalizeOtherText(rawItem.statusOther || '') || rawStatus),
+    required: rawItem.required !== false,
+    assigneeName: normalizeOtherText(rawItem.assigneeName || ''),
+    assigneeRole: normalizeOtherText(rawItem.assigneeRole || ''),
+    dueAt: normalizeOtherText(rawItem.dueAt || ''),
+    checkedAt: normalizeOtherText(rawItem.checkedAt || ''),
+    notes: normalizeOtherText(rawItem.notes || ''),
   };
 }
 
 function blankChecklistItem() {
   return {
     label: '',
+    sortOrder: 0,
     category: 'general',
     categoryOther: '',
     providerScope: 'house',
     providerScopeOther: '',
     status: 'todo',
     statusOther: '',
+    required: true,
+    assigneeName: '',
+    assigneeRole: '',
+    dueAt: '',
+    checkedAt: '',
+    notes: '',
   };
 }
 
@@ -262,6 +485,16 @@ function blankConcessionsMenuItem() {
     inventoryLink: '',
     itemUrl: '',
     imageUrl: '',
+    promoType: 'none',
+    promoTypeOther: '',
+    promoTitle: '',
+    promoDetails: '',
+    couponCode: '',
+    couponTerms: '',
+    imageDescription: '',
+    caption: '',
+    altText: '',
+    tags: '',
     isSignatureItem: false,
     availabilityStatus: 'available',
     notes: '',
@@ -280,10 +513,75 @@ function mapStoredConcessionsItemToDraft(item = {}) {
     inventoryLink: item?.inventory_link || '',
     itemUrl: metadata.itemUrl || '',
     imageUrl: metadata.imageUrl || '',
+    promoType: metadata.promoType || 'none',
+    promoTypeOther: metadata.promoType === 'other' ? (metadata.promoTypeOther || '') : '',
+    promoTitle: metadata.promoTitle || '',
+    promoDetails: metadata.promoDetails || '',
+    couponCode: metadata.couponCode || '',
+    couponTerms: metadata.couponTerms || '',
+    imageDescription: metadata.shortDescription || metadata.imageDescription || '',
+    caption: metadata.caption || '',
+    altText: metadata.altText || '',
+    tags: Array.isArray(metadata.tags) ? metadata.tags.join(', ') : (metadata.tags || ''),
     isSignatureItem: !!item?.is_signature_item,
     availabilityStatus: item?.availability_status || 'available',
     notes: item?.notes || '',
   };
+}
+
+function parsePriceText(value) {
+  if (value === null || value === undefined) return '';
+  const normalized = String(value).replace(/[^0-9.]/g, '');
+  if (!normalized) return '';
+  const numeric = Number(normalized);
+  if (!Number.isFinite(numeric)) return '';
+  return String(numeric);
+}
+
+function buildConcessionsDraftsFromExtraction(extracted = {}) {
+  const menuItems = Array.isArray(extracted?.menuItems) ? extracted.menuItems : [];
+  const promoOffers = Array.isArray(extracted?.promoOffers) ? extracted.promoOffers : [];
+  const imageInsights = Array.isArray(extracted?.imageInsights) ? extracted.imageInsights : [];
+
+  const fromMenu = menuItems.map((item) => ({
+    ...blankConcessionsMenuItem(),
+    name: String(item?.name || '').trim(),
+    category: String(item?.category || 'other').trim() || 'other',
+    price: parsePriceText(item?.price),
+    notes: String(item?.description || '').trim(),
+    promoType: String(item?.promoType || 'none').trim() || 'none',
+    promoTitle: String(item?.promoTitle || '').trim(),
+    couponCode: String(item?.couponCode || '').trim(),
+    couponTerms: String(item?.couponTerms || '').trim(),
+  })).filter((item) => item.name);
+
+  const fromPromos = promoOffers.map((offer) => ({
+    ...blankConcessionsMenuItem(),
+    name: String(offer?.title || '').trim() || 'Venue Promotion',
+    category: 'other',
+    promoType: String(offer?.promoType || 'special').trim() || 'special',
+    promoTitle: String(offer?.title || '').trim(),
+    promoDetails: String(offer?.description || '').trim(),
+    couponCode: String(offer?.couponCode || '').trim(),
+    couponTerms: [offer?.terms, offer?.validUntil ? `Valid until ${offer.validUntil}` : ''].filter(Boolean).join(' · '),
+    notes: String(offer?.description || '').trim(),
+  })).filter((item) => item.promoTitle || item.couponCode);
+
+  const drafts = [...fromMenu, ...fromPromos];
+  if (drafts.length === 0 && imageInsights.length > 0) {
+    const insight = imageInsights[0];
+    return [{
+      ...blankConcessionsMenuItem(),
+      name: String(insight?.title || 'Featured Offer').trim() || 'Featured Offer',
+      caption: String(insight?.caption || '').trim(),
+      imageDescription: String(insight?.shortDescription || insight?.altText || '').trim(),
+      altText: String(insight?.altText || '').trim(),
+      tags: Array.isArray(insight?.tags) ? insight.tags.join(', ') : '',
+      promoType: 'special',
+      promoTitle: String(insight?.title || '').trim(),
+    }];
+  }
+  return drafts;
 }
 
 function blankMerchParticipant() {
@@ -419,8 +717,165 @@ function triggerDataUrlDownload(url = '', fileName = 'report.pdf') {
   document.body.removeChild(anchor);
 }
 
+function defaultProductionOpsData(event = {}) {
+  return {
+    primarySubsection: 'overview',
+    stagePlot: {
+      layout: { width: 24, depth: 16, items: [] },
+      prosceniumWidthFeet: '',
+      playingSpaceWidthFeet: '',
+      playingSpaceDepthFeet: '',
+      trimHeightFeet: '',
+      gridHeightFeet: '',
+      deckSurfaceType: '',
+      wingSpaceDepthFeet: '',
+      houseCapacity: event?.capacity || '',
+      stagePlotUrl: '',
+      stageNotes: '',
+    },
+    power: {
+      mainServiceCapacityAmps: '',
+      generatorCapacityAmps: '',
+      distributionNotes: '',
+      cableRoutingNotes: '',
+      departmentOwnershipNotes: '',
+    },
+    safety: {
+      fireLaneNotes: '',
+      crowdFlowNotes: '',
+      occupancyNotes: '',
+      adaRouteNotes: '',
+      emergencyNotes: '',
+    },
+    lighting: {
+      lightingPlotUrl: '',
+      instrumentSchedule: '',
+      channelHookup: '',
+      dimmerSchedule: '',
+      patchSheet: '',
+      dmxUniverseMap: '',
+      cueListReference: '',
+      notes: '',
+    },
+    audio: {
+      audioPlotUrl: '',
+      inputList: '',
+      channelList: '',
+      monitorMixes: '',
+      fohConsole: '',
+      wirelessAssignments: '',
+      rfNotes: '',
+      notes: '',
+    },
+    projection: {
+      projectionPlotUrl: '',
+      mediaCueList: '',
+      mediaAssetList: '',
+      outputMap: '',
+      playbackDevices: '',
+      routingNotes: '',
+      notes: '',
+    },
+    comms: {
+      clearComChannels: '',
+      headsetAssignments: '',
+      walkieChannels: '',
+      callboardChannel: '',
+      smDeskChannel: '',
+      fohChannel: '',
+      emergencyChannel: '',
+      notes: '',
+    },
+    runOfShow: {
+      cuePrefixHint: 'LX 1, SND 1, FLY 1, DECK 1, PROJ 1',
+      goCallFormat: 'Standby LX 12... LX 12 GO',
+      triggerNotes: '',
+      standbyNotes: '',
+      notes: '',
+    },
+    technicalRiders: {
+      riderUrl: '',
+      attachmentsNotes: '',
+      loadInNotes: '',
+      strikeNotes: '',
+    },
+  };
+}
+
+function normalizeProductionOpsData(raw = {}, event = {}) {
+  const base = defaultProductionOpsData(event);
+  const source = (raw && typeof raw === 'object') ? raw : {};
+  return {
+    ...base,
+    ...source,
+    stagePlot: {
+      ...base.stagePlot,
+      ...(source.stagePlot && typeof source.stagePlot === 'object' ? source.stagePlot : {}),
+      stageNotes: (source.stagePlot?.stageNotes ?? source.stagePlot?.notes ?? base.stagePlot.stageNotes),
+      layout: {
+        ...base.stagePlot.layout,
+        ...((source.stagePlot && source.stagePlot.layout && typeof source.stagePlot.layout === 'object') ? source.stagePlot.layout : {}),
+      },
+    },
+    power: {
+      ...base.power,
+      ...(source.power && typeof source.power === 'object' ? source.power : {}),
+    },
+    safety: {
+      ...base.safety,
+      ...(source.safety && typeof source.safety === 'object' ? source.safety : {}),
+    },
+    lighting: {
+      ...base.lighting,
+      ...(source.lighting && typeof source.lighting === 'object' ? source.lighting : {}),
+    },
+    audio: {
+      ...base.audio,
+      ...(source.audio && typeof source.audio === 'object' ? source.audio : {}),
+    },
+    projection: {
+      ...base.projection,
+      ...(source.projection && typeof source.projection === 'object' ? source.projection : {}),
+    },
+    comms: {
+      ...base.comms,
+      ...(source.comms && typeof source.comms === 'object' ? source.comms : {}),
+    },
+    runOfShow: {
+      ...base.runOfShow,
+      ...(source.runOfShow && typeof source.runOfShow === 'object' ? source.runOfShow : {}),
+    },
+    technicalRiders: {
+      ...base.technicalRiders,
+      ...(source.technicalRiders && typeof source.technicalRiders === 'object' ? source.technicalRiders : {}),
+    },
+  };
+}
+
+function buildChecklistTemplateItems(templateKey = '', existingLength = 0) {
+  const template = DEPARTMENT_CHECKLIST_TEMPLATES[templateKey];
+  if (!template) return [];
+  return (template.items || []).map((item, index) => ({
+    sortOrder: existingLength + index,
+    category: item.category || 'general',
+    label: item.label,
+    required: true,
+    status: 'todo',
+    providerScope: 'house',
+    assigneeRole: item.role || '',
+    assigneeName: '',
+    notes: '',
+    metadata: {
+      templateKey,
+      templateLabel: template.label || '',
+    },
+  }));
+}
+
 export default function BookingOperationsWorkspace({ event, initialTab = '', phaseGateStatus = null }) {
+  const { user } = useAuth();
   const {
+    updateEvent,
     getTicketingProviders,
     listVenueTicketingConnections,
     listBookingTicketingRecords,
@@ -561,6 +1016,12 @@ export default function BookingOperationsWorkspace({ event, initialTab = '', pha
     phase: 'preflight',
   });
   const [checklistDraftItems, setChecklistDraftItems] = useState([blankChecklistItem()]);
+  const [productionOpsSubsection, setProductionOpsSubsection] = useState('overview');
+  const [productionOpsDraft, setProductionOpsDraft] = useState(() => normalizeProductionOpsData(
+    event?.productionDetails?.productionOps || {},
+    event
+  ));
+  const [savingProductionOps, setSavingProductionOps] = useState(false);
   const [jobTitleDraft, setJobTitleDraft] = useState({ name: '', department: 'production' });
   const [staffProfileForm, setStaffProfileForm] = useState(blankStaffProfile());
   const [staffAssignmentForm, setStaffAssignmentForm] = useState(blankStaffAssignment());
@@ -636,11 +1097,24 @@ export default function BookingOperationsWorkspace({ event, initialTab = '', pha
     cashlessOnly: false,
     onlineMenuUrl: '',
     specialsImageUrl: '',
+    specialsCaption: '',
+    promoNotes: '',
     notes: '',
   });
   const [concessionsDraftItems, setConcessionsDraftItems] = useState([blankConcessionsMenuItem()]);
   const [concessionsLibraryQuery, setConcessionsLibraryQuery] = useState('');
   const [concessionsLibraryCategory, setConcessionsLibraryCategory] = useState('');
+  const [concessionsLibraryPromoType, setConcessionsLibraryPromoType] = useState('');
+  const [concessionsUploadPreviews, setConcessionsUploadPreviews] = useState([]);
+  const [concessionsPhotoExtracting, setConcessionsPhotoExtracting] = useState(false);
+  const [concessionsPhotoCaptionLoading, setConcessionsPhotoCaptionLoading] = useState(false);
+  const [concessionsPhotoExtractionData, setConcessionsPhotoExtractionData] = useState(null);
+  const [concessionsPhotoCaptionPack, setConcessionsPhotoCaptionPack] = useState({ summary: '', captions: [] });
+  const [concessionsPhotoCaptionStatus, setConcessionsPhotoCaptionStatus] = useState('');
+  const [concessionsPhotoCaptionStyle, setConcessionsPhotoCaptionStyle] = useState('feature');
+  const [concessionsPhotoCaptionCorrections, setConcessionsPhotoCaptionCorrections] = useState('');
+  const [concessionsPhotoCaptionIncludeTerms, setConcessionsPhotoCaptionIncludeTerms] = useState('');
+  const [concessionsPhotoCaptionAvoidTerms, setConcessionsPhotoCaptionAvoidTerms] = useState('');
   const [merchPlanForm, setMerchPlanForm] = useState({
     merchManagerContactId: '',
     tableFee: false,
@@ -708,6 +1182,15 @@ export default function BookingOperationsWorkspace({ event, initialTab = '', pha
     }
     setStatus(`That tab is locked until ${lock.blockedByLabel || 'the previous phase'} is complete.`);
   }, [activeTab, tabLockStateByKey, firstUnlockedTab]);
+
+  useEffect(() => {
+    const next = normalizeProductionOpsData(event?.productionDetails?.productionOps || {}, event);
+    setProductionOpsDraft(next);
+    const sectionKey = PRODUCTION_OPS_SUBSECTIONS.some((section) => section.key === next.primarySubsection)
+      ? next.primarySubsection
+      : 'overview';
+    setProductionOpsSubsection(sectionKey);
+  }, [event?.id, event?.productionDetails, event?.capacity]);
 
   const autofillPayload = useMemo(() => ({
     event_title: event?.title || '',
@@ -779,6 +1262,221 @@ export default function BookingOperationsWorkspace({ event, initialTab = '', pha
       return date >= start && date < end;
     });
   }, [filteredStaffAssignments, staffingWeekStart]);
+
+  const plotMemberDirectory = useMemo(() => {
+    const map = new Map();
+    (staffProfiles || []).forEach((profile) => {
+      const name = profile?.display_name
+        || profile?.displayName
+        || [profile?.first_name, profile?.last_name].filter(Boolean).join(' ')
+        || [profile?.firstName, profile?.lastName].filter(Boolean).join(' ')
+        || '';
+      const email = profile?.email || '';
+      const key = String(email || name || '').toLowerCase();
+      if (!key) return;
+      if (!map.has(key)) map.set(key, { name, email });
+    });
+    (staffAssignments || []).forEach((assignment) => {
+      const name = assignment?.staff_profile?.display_name || assignment?.staff_profile?.displayName || '';
+      const email = assignment?.staff_profile?.email || '';
+      const key = String(email || name || '').toLowerCase();
+      if (!key) return;
+      if (!map.has(key)) map.set(key, { name, email });
+    });
+    return [...map.values()];
+  }, [staffProfiles, staffAssignments]);
+
+  const updateProductionOpsSection = (sectionKey, patch = {}) => {
+    setProductionOpsDraft((prev) => ({
+      ...prev,
+      [sectionKey]: {
+        ...(prev?.[sectionKey] && typeof prev[sectionKey] === 'object' ? prev[sectionKey] : {}),
+        ...patch,
+      },
+    }));
+  };
+
+  const handleSaveProductionOpsDraft = async () => {
+    if (!event?.id) return;
+    setSavingProductionOps(true);
+    try {
+      const nextDetails = {
+        ...(event?.productionDetails || {}),
+        productionOps: {
+          ...productionOpsDraft,
+          primarySubsection: productionOpsSubsection,
+        },
+      };
+      await updateEvent(event.id, { productionDetails: nextDetails });
+      setStatus('Production Ops details saved.');
+    } catch (err) {
+      setStatus(`Could not save Production Ops details: ${err.message}`);
+    } finally {
+      setSavingProductionOps(false);
+    }
+  };
+
+  const handleSeedDepartmentChecklistTemplate = (templateKey) => {
+    const template = DEPARTMENT_CHECKLIST_TEMPLATES[templateKey];
+    const seeded = buildChecklistTemplateItems(templateKey, checklistDraftItems.length);
+    if (!seeded.length) {
+      setStatus('No checklist template found for that department.');
+      return;
+    }
+    if (template?.title || template?.phase) {
+      setChecklistForm((prev) => ({
+        ...prev,
+        title: template.title || prev.title,
+        phase: template.phase || prev.phase,
+      }));
+    }
+    setChecklistDraftItems((prev) => [...prev, ...seeded]);
+    setStatus(`${template?.label || 'Checklist'} template added to draft checklist.`);
+  };
+
+  const productionAssistConfig = useMemo(() => {
+    if (productionOpsSubsection === 'stage_plot') {
+      return {
+        formType: 'stage_plot',
+        currentForm: productionOpsDraft.stagePlot || {},
+        title: 'Stage Plot AI Assistant',
+        description: 'Paste stage specs and I will map dimensions, stage notes, and plot metadata.',
+      };
+    }
+    if (productionOpsSubsection === 'power_view') {
+      return {
+        formType: 'power_distribution',
+        currentForm: productionOpsDraft.power || {},
+        title: 'Power View AI Assistant',
+        description: 'Paste electrical details and I will map service capacity, distro, and load notes.',
+      };
+    }
+    if (productionOpsSubsection === 'safety_egress') {
+      return {
+        formType: 'safety_egress',
+        currentForm: productionOpsDraft.safety || {},
+        title: 'Safety / Egress AI Assistant',
+        description: 'Paste safety notes and I will map exits, ADA routes, fire lanes, and occupancy details.',
+      };
+    }
+    if (productionOpsSubsection === 'lighting_lx') {
+      return {
+        formType: 'lighting_plot',
+        currentForm: productionOpsDraft.lighting || {},
+        title: 'Lighting (LX) AI Assistant',
+        description: 'Paste lighting paperwork and I will map channels, dimmers, patch, and cue references.',
+      };
+    }
+    if (productionOpsSubsection === 'audio_sound') {
+      return {
+        formType: 'audio_plot',
+        currentForm: productionOpsDraft.audio || {},
+        title: 'Audio / Sound AI Assistant',
+        description: 'Paste audio paperwork and I will map inputs, channel sheet, RF, and monitor details.',
+      };
+    }
+    if (productionOpsSubsection === 'projection_video') {
+      return {
+        formType: 'projection_plot',
+        currentForm: productionOpsDraft.projection || {},
+        title: 'Projection / Video AI Assistant',
+        description: 'Paste projection and media routing paperwork and I will map cues, outputs, and playback devices.',
+      };
+    }
+    if (productionOpsSubsection === 'comms') {
+      return {
+        formType: 'comms_chart',
+        currentForm: productionOpsDraft.comms || {},
+        title: 'Comms AI Assistant',
+        description: 'Paste comms notes and I will map Clear-Com, headset, walkie, and emergency channel details.',
+      };
+    }
+    if (productionOpsSubsection === 'run_of_show') {
+      return {
+        formType: 'cue_sheet',
+        currentForm: productionOpsDraft.runOfShow || {},
+        title: 'Run of Show AI Assistant',
+        description: 'Paste cueing notes and I will map cue IDs, cue types, standby/go calls, and trigger language.',
+      };
+    }
+    if (productionOpsSubsection === 'technical_riders') {
+      return {
+        formType: 'technical_rider',
+        currentForm: productionOpsDraft.technicalRiders || {},
+        title: 'Technical Rider AI Assistant',
+        description: 'Paste rider text and I will map technical rider links, load-in notes, and strike notes.',
+      };
+    }
+    if (productionOpsSubsection === 'department_checklists') {
+      return {
+        formType: 'department_checklist',
+        currentForm: checklistDraftItems[0] || {},
+        title: 'Department Checklist AI Assistant',
+        description: 'Paste department notes and I will map checklist items with assignee, due date, and status.',
+      };
+    }
+    return {
+      formType: 'production_checklist',
+      currentForm: checklistForm,
+      title: 'Production Ops AI Assistant',
+      description: 'Paste production notes and I will map them into the right production section.',
+    };
+  }, [checklistDraftItems, checklistForm, productionOpsDraft, productionOpsSubsection]);
+
+  const handleApplyProductionAssist = (fields = {}) => {
+    if (!fields || typeof fields !== 'object') return;
+    if (productionOpsSubsection === 'stage_plot') {
+      updateProductionOpsSection('stagePlot', fields);
+      return;
+    }
+    if (productionOpsSubsection === 'power_view') {
+      updateProductionOpsSection('power', fields);
+      return;
+    }
+    if (productionOpsSubsection === 'safety_egress') {
+      updateProductionOpsSection('safety', fields);
+      return;
+    }
+    if (productionOpsSubsection === 'lighting_lx') {
+      updateProductionOpsSection('lighting', fields);
+      return;
+    }
+    if (productionOpsSubsection === 'audio_sound') {
+      updateProductionOpsSection('audio', fields);
+      return;
+    }
+    if (productionOpsSubsection === 'projection_video') {
+      updateProductionOpsSection('projection', fields);
+      return;
+    }
+    if (productionOpsSubsection === 'comms') {
+      updateProductionOpsSection('comms', fields);
+      return;
+    }
+    if (productionOpsSubsection === 'run_of_show') {
+      updateProductionOpsSection('runOfShow', {
+        cuePrefixHint: fields.cueId ? `${fields.cueId}` : (productionOpsDraft.runOfShow?.cuePrefixHint || ''),
+        goCallFormat: fields.goCall || productionOpsDraft.runOfShow?.goCallFormat || '',
+        standbyNotes: fields.standbyCall || productionOpsDraft.runOfShow?.standbyNotes || '',
+        triggerNotes: fields.triggerSource || productionOpsDraft.runOfShow?.triggerNotes || '',
+        notes: fields.cueNotes || productionOpsDraft.runOfShow?.notes || '',
+      });
+      return;
+    }
+    if (productionOpsSubsection === 'technical_riders') {
+      updateProductionOpsSection('technicalRiders', fields);
+      return;
+    }
+    if (productionOpsSubsection === 'department_checklists') {
+      const normalized = mapChecklistDraftItem({ ...(checklistDraftItems[0] || {}), ...fields });
+      setChecklistDraftItems((prev) => {
+        if (!prev.length) return [normalized];
+        return prev.map((row, idx) => (idx === 0 ? normalized : row));
+      });
+      return;
+    }
+    setChecklistForm((prev) => ({ ...prev, ...fields }));
+  };
 
   const loadAll = async () => {
     if (!event?.id) return;
@@ -962,6 +1660,8 @@ export default function BookingOperationsWorkspace({ event, initialTab = '', pha
           cashlessOnly: !!concessionsPlanRow.cashless_only,
           onlineMenuUrl: concessionsMeta.onlineMenuUrl || '',
           specialsImageUrl: concessionsMeta.specialsImageUrl || '',
+          specialsCaption: concessionsMeta.specialsCaption || '',
+          promoNotes: concessionsMeta.promoNotes || '',
           notes: concessionsPlanRow.notes || '',
         });
       } else {
@@ -974,6 +1674,8 @@ export default function BookingOperationsWorkspace({ event, initialTab = '', pha
           cashlessOnly: false,
           onlineMenuUrl: '',
           specialsImageUrl: '',
+          specialsCaption: '',
+          promoNotes: '',
           notes: '',
         });
       }
@@ -1153,9 +1855,17 @@ export default function BookingOperationsWorkspace({ event, initialTab = '', pha
         if (!normalizedItem.label) continue;
         await saveProductionChecklistItem(checklist.id, {
           ...normalizedItem,
+          sortOrder: normalizedItem.sortOrder,
+          required: normalizedItem.required,
           category: resolveOtherSelection(normalizedItem.category, normalizedItem.categoryOther, 'general'),
           providerScope: resolveOtherSelection(normalizedItem.providerScope, normalizedItem.providerScopeOther, 'house'),
           status: resolveOtherSelection(normalizedItem.status, normalizedItem.statusOther, 'todo'),
+          assigneeName: normalizedItem.assigneeName,
+          assigneeRole: normalizedItem.assigneeRole,
+          dueAt: normalizedItem.dueAt,
+          checkedAt: normalizedItem.checkedAt,
+          notes: normalizedItem.notes,
+          metadata: (normalizedItem.metadata && typeof normalizedItem.metadata === 'object') ? normalizedItem.metadata : {},
         });
       }
       setChecklistDraftItems([blankChecklistItem()]);
@@ -1164,6 +1874,167 @@ export default function BookingOperationsWorkspace({ event, initialTab = '', pha
     } catch (err) {
       setStatus(`Checklist save failed: ${err.message}`);
     }
+  };
+
+  const handleCreateDoorsAndCloseoutChecklistPack = async () => {
+    if (!event?.id) return;
+    try {
+      setStatus('Creating Before Doors and After Show Closeout checklists...');
+      for (const templateKey of DOORS_CLOSEOUT_PACK_TEMPLATE_KEYS) {
+        const template = DEPARTMENT_CHECKLIST_TEMPLATES[templateKey];
+        if (!template) continue;
+        const checklist = await saveProductionChecklist(event.id, {
+          title: template.title || `${template.label || 'Checklist'} Checklist`,
+          phase: template.phase || templateKey,
+          status: 'draft',
+          metadata: {
+            templateKey,
+            templateLabel: template.label || '',
+            createdBy: 'doors_closeout_pack',
+          },
+        });
+        const seededItems = buildChecklistTemplateItems(templateKey, 0);
+        for (const seededItem of seededItems) {
+          const normalizedItem = mapChecklistDraftItem(seededItem);
+          await saveProductionChecklistItem(checklist.id, {
+            ...normalizedItem,
+            sortOrder: normalizedItem.sortOrder,
+            required: normalizedItem.required,
+            category: resolveOtherSelection(normalizedItem.category, normalizedItem.categoryOther, 'general'),
+            providerScope: resolveOtherSelection(normalizedItem.providerScope, normalizedItem.providerScopeOther, 'house'),
+            status: resolveOtherSelection(normalizedItem.status, normalizedItem.statusOther, 'todo'),
+            assigneeName: normalizedItem.assigneeName,
+            assigneeRole: normalizedItem.assigneeRole,
+            dueAt: normalizedItem.dueAt,
+            checkedAt: normalizedItem.checkedAt,
+            notes: normalizedItem.notes,
+            metadata: (normalizedItem.metadata && typeof normalizedItem.metadata === 'object') ? normalizedItem.metadata : {},
+          });
+        }
+      }
+      await loadAll();
+      setStatus('Created Before Doors and After Show Closeout checklist pack.');
+    } catch (err) {
+      setStatus(`Could not create checklist pack: ${err.message}`);
+    }
+  };
+
+  const handleChecklistItemStatusChange = async (checklist, item, nextStatus) => {
+    if (!checklist?.id || !item?.id) return;
+    const statusValue = normalizeOtherText(nextStatus || 'todo') || 'todo';
+    const checklistItems = Array.isArray(checklist.items) ? checklist.items : [];
+
+    if (statusValue === 'done' && isBeforeDoorsPhase(checklist.phase) && isDoorsOpenApprovalItem(item)) {
+      const pendingGateItems = checklistItems.filter((row) => {
+        if (!row || row.id === item.id || row.required === false) return false;
+        const category = normalizeTypeSlug(row.category || '');
+        const isGateCategory = DOORS_OPEN_GATE_CATEGORIES.includes(category);
+        const isDone = normalizeTypeSlug(row.status || 'todo') === 'done';
+        return isGateCategory && !isDone;
+      });
+      if (pendingGateItems.length) {
+        const labels = pendingGateItems
+          .slice(0, 3)
+          .map((row) => row.label)
+          .filter(Boolean)
+          .join('; ');
+        setStatus(`Finish required Safety/FOH checks before marking Doors Open done.${labels ? ` Remaining: ${labels}.` : ''}`);
+        return;
+      }
+    }
+
+    let feedback = 'Checklist item updated.';
+    try {
+      await saveProductionChecklistItem(checklist.id, {
+        id: item.id,
+        sortOrder: item.sort_order ?? 0,
+        category: item.category || 'general',
+        label: item.label || '',
+        required: item.required !== false,
+        status: statusValue,
+        providerScope: item.provider_scope || 'house',
+        assigneeName: item.assignee_name || '',
+        assigneeRole: item.assignee_role || '',
+        dueAt: item.due_at || '',
+        checkedAt: statusValue === 'done' ? new Date().toISOString() : '',
+        notes: item.notes || '',
+        metadata: item.metadata || {},
+      });
+
+      if (statusValue === 'done' && isAfterShowCloseoutPhase(checklist.phase)) {
+        const updatedItems = checklistItems.map((row) => (
+          row.id === item.id
+            ? { ...row, status: statusValue, checked_at: new Date().toISOString() }
+            : row
+        ));
+        const requiredItems = updatedItems.filter((row) => row?.required !== false);
+        const closeoutComplete = requiredItems.length > 0
+          && requiredItems.every((row) => normalizeTypeSlug(row.status || 'todo') === 'done');
+        const checklistMetadata = (checklist.metadata && typeof checklist.metadata === 'object') ? checklist.metadata : {};
+        const alreadyExported = !!checklistMetadata.autoCloseoutReportExportedAt;
+
+        if (closeoutComplete && !alreadyExported) {
+          const recipients = parseRecipientEmails(sectionExportForm.recipients);
+          const completedAt = new Date().toISOString();
+          const reportResult = await exportSectionStakeholderReport({
+            eventId: event.id,
+            sectionKey: 'production',
+            sectionTitle: `${checklist.title || 'After Show Closeout'} · Stakeholder Report`,
+            sectionDescription: 'Automatic stakeholder report generated when After Show Closeout checklist completion is reached.',
+            completion: {
+              isComplete: true,
+              completedBy: sectionExportForm.completedBy || user?.name || user?.email || 'Production team',
+              completedAt,
+              checklist: updatedItems.map((row) => ({
+                label: row?.label || '',
+                done: normalizeTypeSlug(row?.status || 'todo') === 'done',
+              })),
+              notes: sectionExportForm.notes || 'Auto-generated from After Show Closeout checklist completion.',
+            },
+            nextStep: sectionExportForm.nextStep || 'Move to post-production wrap report and stakeholder recap.',
+            content: {
+              checklist: {
+                id: checklist.id,
+                title: checklist.title,
+                phase: checklist.phase,
+                items: updatedItems,
+              },
+              event: {
+                id: event?.id,
+                title: event?.title,
+                date: event?.date,
+                venue: event?.venue || event?.venueName || '',
+              },
+            },
+            recipients,
+          });
+          if (reportResult?.downloadUrl) {
+            triggerDataUrlDownload(reportResult.downloadUrl, reportResult?.fileName || 'after-show-closeout-report.pdf');
+          }
+          await saveProductionChecklist(event.id, {
+            id: checklist.id,
+            title: checklist.title || 'After Show Closeout Checklist',
+            phase: checklist.phase || 'after_show_closeout',
+            status: checklist.status || 'draft',
+            metadata: {
+              ...checklistMetadata,
+              autoCloseoutReportExportedAt: completedAt,
+              autoCloseoutReportExportedBy: user?.id || user?.email || '',
+              autoCloseoutRecipients: recipients,
+            },
+          });
+          feedback = recipients.length
+            ? `After Show Closeout complete. Stakeholder report exported and emailed to ${recipients.length} recipient${recipients.length === 1 ? '' : 's'}.`
+            : 'After Show Closeout complete. Stakeholder report exported.';
+        }
+      }
+    } catch (err) {
+      setStatus(`Could not update checklist status: ${err.message}`);
+      return;
+    }
+
+    await loadAll();
+    setStatus(feedback);
   };
 
   const applyStaffProfilePatch = (patch = {}) => {
@@ -1755,6 +2626,8 @@ export default function BookingOperationsWorkspace({ event, initialTab = '', pha
         metadata: {
           onlineMenuUrl: concessionsForm.onlineMenuUrl || '',
           specialsImageUrl: concessionsForm.specialsImageUrl || '',
+          specialsCaption: concessionsForm.specialsCaption || '',
+          promoNotes: concessionsForm.promoNotes || '',
         },
       });
       await loadAll();
@@ -1772,6 +2645,19 @@ export default function BookingOperationsWorkspace({ event, initialTab = '', pha
       metadata: {
         itemUrl: item.itemUrl || '',
         imageUrl: item.imageUrl || '',
+        promoType: item.promoType || 'none',
+        promoTypeOther: item.promoType === OTHER_OPTION_VALUE ? (item.promoTypeOther || '') : '',
+        promoTitle: item.promoTitle || '',
+        promoDetails: item.promoDetails || '',
+        couponCode: item.couponCode || '',
+        couponTerms: item.couponTerms || '',
+        caption: item.caption || '',
+        shortDescription: item.imageDescription || '',
+        altText: item.altText || '',
+        tags: String(item.tags || '')
+          .split(/[\n,;|]+/)
+          .map((entry) => entry.trim())
+          .filter(Boolean),
       },
     });
 
@@ -1803,6 +2689,19 @@ export default function BookingOperationsWorkspace({ event, initialTab = '', pha
         metadata: {
           itemUrl: item.itemUrl || '',
           imageUrl: item.imageUrl || '',
+          promoType: item.promoType || 'none',
+          promoTypeOther: item.promoType === OTHER_OPTION_VALUE ? (item.promoTypeOther || '') : '',
+          promoTitle: item.promoTitle || '',
+          promoDetails: item.promoDetails || '',
+          couponCode: item.couponCode || '',
+          couponTerms: item.couponTerms || '',
+          caption: item.caption || '',
+          shortDescription: item.imageDescription || '',
+          altText: item.altText || '',
+          tags: String(item.tags || '')
+            .split(/[\n,;|]+/)
+            .map((entry) => entry.trim())
+            .filter(Boolean),
         },
         isPublic: true,
       }, {
@@ -1830,6 +2729,129 @@ export default function BookingOperationsWorkspace({ event, initialTab = '', pha
     } catch (err) {
       setStatus(`Could not add library item: ${err.message}`);
     }
+  };
+
+  const generateConcessionsCaptionPack = async (extracted = {}, extractedCount = 0) => {
+    setConcessionsPhotoCaptionLoading(true);
+    setConcessionsPhotoCaptionStatus('Drafting menu descriptions, captions, promos, and coupons...');
+    try {
+      const captionResult = await deepResearchImageCaptionPack({
+        domain: 'menu',
+        styleIntensity: concessionsPhotoCaptionStyle,
+        correctionPrompt: concessionsPhotoCaptionCorrections,
+        includeTerms: concessionsPhotoCaptionIncludeTerms,
+        avoidTerms: concessionsPhotoCaptionAvoidTerms,
+        extracted,
+        event: {
+          title: event?.title || '',
+          genre: event?.genre || '',
+          date: event?.date || '',
+          time: event?.time || '',
+          description: event?.description || '',
+        },
+        venue: {
+          name: event?.venue || '',
+          city: event?.venueCity || '',
+          state: event?.venueState || '',
+          website: concessionsForm.onlineMenuUrl || '',
+        },
+      });
+
+      const summary = String(captionResult?.summary || '').trim();
+      const captions = Array.isArray(captionResult?.captions) ? captionResult.captions : [];
+      setConcessionsPhotoCaptionPack({ summary, captions });
+
+      if (summary) {
+        setConcessionsForm((prev) => {
+          if (String(prev.promoNotes || '').trim()) return prev;
+          return { ...prev, promoNotes: summary };
+        });
+      }
+
+      if (captions.length > 0) {
+        setConcessionsDraftItems((prev) => prev.map((row, index) => {
+          const caption = captions[index];
+          if (!caption) return row;
+          const tagsText = Array.isArray(caption.tags) ? caption.tags.join(', ') : '';
+          return {
+            ...row,
+            caption: row.caption || caption.caption || '',
+            imageDescription: row.imageDescription || caption.shortDescription || '',
+            altText: row.altText || caption.altText || '',
+            promoTitle: row.promoTitle || caption.title || '',
+            tags: row.tags || tagsText,
+          };
+        }));
+      }
+
+      setConcessionsPhotoCaptionStatus(
+        extractedCount > 0
+          ? `Added ${extractedCount} draft item${extractedCount === 1 ? '' : 's'} from upload. Captions/promos are ready to review.`
+          : 'Captions and promo copy are ready to review.'
+      );
+    } catch (captionErr) {
+      setConcessionsPhotoCaptionStatus(`Menu details extracted, but caption drafting hit a snag: ${captionErr.message}`);
+    } finally {
+      setConcessionsPhotoCaptionLoading(false);
+    }
+  };
+
+  const handleConcessionsPhotoExtract = async (files = []) => {
+    if (!Array.isArray(files) || files.length === 0) return;
+    setConcessionsPhotoExtracting(true);
+    setConcessionsPhotoCaptionStatus('');
+    setConcessionsUploadPreviews((prev) => ([
+      ...prev,
+      ...files.map((file) => ({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        name: file.name,
+        url: URL.createObjectURL(file),
+      })),
+    ]));
+    try {
+      const extraction = await extractFromImages(files);
+      if (!extraction?.success) {
+        throw new Error(extraction?.error || 'Could not extract from those files.');
+      }
+      const extracted = extraction.data || {};
+      setConcessionsPhotoExtractionData(extracted);
+      const draftRows = buildConcessionsDraftsFromExtraction(extracted);
+      if (draftRows.length > 0) {
+        setConcessionsDraftItems((prev) => {
+          const hasExisting = prev.some((row) => (
+            String(row?.name || '').trim()
+            || String(row?.promoTitle || '').trim()
+            || String(row?.couponCode || '').trim()
+            || String(row?.notes || '').trim()
+          ));
+          if (!hasExisting && prev.length === 1) return draftRows;
+          return [...prev, ...draftRows];
+        });
+      }
+      await generateConcessionsCaptionPack(extracted, draftRows.length);
+    } catch (err) {
+      setConcessionsPhotoCaptionStatus(`I hit a snag processing those files: ${err.message}`);
+    } finally {
+      setConcessionsPhotoExtracting(false);
+    }
+  };
+
+  const applyConcessionsCaptionSummaryToPlan = () => {
+    const summary = String(concessionsPhotoCaptionPack.summary || '').trim();
+    if (!summary) return;
+    setConcessionsForm((prev) => ({ ...prev, promoNotes: summary }));
+    setConcessionsPhotoCaptionStatus('Applied generated summary to promo notes.');
+  };
+
+  const appendConcessionsCaptionToDraft = (caption = '', index = 0) => {
+    const text = String(caption || '').trim();
+    if (!text) return;
+    setConcessionsDraftItems((prev) => prev.map((row, rowIndex) => {
+      if (rowIndex !== index) return row;
+      const current = String(row.caption || '').trim();
+      return { ...row, caption: current ? `${current}\n\n${text}` : text };
+    }));
+    setConcessionsPhotoCaptionStatus('Added caption text to draft item.');
   };
 
   const handleSaveMerchPlan = async () => {
@@ -2308,6 +3330,8 @@ export default function BookingOperationsWorkspace({ event, initialTab = '', pha
         };
       case 'production':
         return {
+          productionOpsSubsection,
+          productionOpsDraft,
           checklistForm,
           checklistDraftItems,
           checklists,
@@ -2406,6 +3430,8 @@ export default function BookingOperationsWorkspace({ event, initialTab = '', pha
     poEmailDrafts,
     poForm,
     purchaseOrders,
+    productionOpsDraft,
+    productionOpsSubsection,
     riderDraftItems,
     riderForm,
     riders,
@@ -2437,22 +3463,44 @@ export default function BookingOperationsWorkspace({ event, initialTab = '', pha
     ).sort((a, b) => a.localeCompare(b))
   ), [concessionsMenuLibraryItems]);
 
+  const concessionsLibraryPromoTypeOptions = useMemo(() => (
+    Array.from(
+      new Set(
+        concessionsMenuLibraryItems
+          .map((item) => {
+            const metadata = (item?.metadata && typeof item.metadata === 'object') ? item.metadata : {};
+            return String(metadata.promoType || '').trim();
+          })
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b))
+  ), [concessionsMenuLibraryItems]);
+
   const filteredConcessionsLibraryItems = useMemo(() => {
     const query = concessionsLibraryQuery.trim().toLowerCase();
     return concessionsMenuLibraryItems.filter((item) => {
       if (concessionsLibraryCategory && item.category !== concessionsLibraryCategory) return false;
-      if (!query) return true;
       const metadata = (item?.metadata && typeof item.metadata === 'object') ? item.metadata : {};
+      if (concessionsLibraryPromoType && String(metadata.promoType || '').trim() !== concessionsLibraryPromoType) return false;
+      if (!query) return true;
       const haystack = [
         item?.name || '',
         item?.category || '',
         item?.notes || '',
+        metadata.promoType || '',
+        metadata.promoTitle || '',
+        metadata.promoDetails || '',
+        metadata.couponCode || '',
+        metadata.couponTerms || '',
+        metadata.caption || '',
+        metadata.shortDescription || '',
+        Array.isArray(metadata.tags) ? metadata.tags.join(' ') : (metadata.tags || ''),
         metadata.itemUrl || '',
         metadata.imageUrl || '',
       ].join(' ').toLowerCase();
       return haystack.includes(query);
     });
-  }, [concessionsMenuLibraryItems, concessionsLibraryCategory, concessionsLibraryQuery]);
+  }, [concessionsMenuLibraryItems, concessionsLibraryCategory, concessionsLibraryPromoType, concessionsLibraryQuery]);
 
   return (
     <div className="card mb-6" id="booking-operations-workspace">
@@ -2825,110 +3873,462 @@ export default function BookingOperationsWorkspace({ event, initialTab = '', pha
       )}
 
       {activeTab === 'production' && (
-        <div className="space-y-3">
+        <div className="space-y-4">
+          <div className="border border-gray-200 rounded p-3 bg-white space-y-3">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-500 m-0">Production Ops</p>
+                <h3 className="text-lg m-0">Broadway-Grade Planning Surface</h3>
+                <p className="text-xs text-gray-600 m-0 mt-1">
+                  Real theatrical terminology, department ownership, and cue-critical tracking for stage, LX, sound, comms, and run-of-show.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn-primary text-xs disabled:opacity-50"
+                onClick={handleSaveProductionOpsDraft}
+                disabled={savingProductionOps}
+              >
+                {savingProductionOps ? 'Saving...' : 'Save Production Ops'}
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {PRODUCTION_OPS_SUBSECTIONS.map((section) => (
+                <button
+                  key={section.key}
+                  type="button"
+                  className={`px-2 py-1 text-xs rounded border ${
+                    productionOpsSubsection === section.key
+                      ? 'bg-[#0d1b2a] text-white border-[#0d1b2a]'
+                      : 'bg-white text-gray-700 border-gray-300'
+                  }`}
+                  onClick={() => {
+                    setProductionOpsSubsection(section.key);
+                    setProductionOpsDraft((prev) => ({ ...prev, primarySubsection: section.key }));
+                  }}
+                >
+                  {section.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <FormAIAssist
-            formType="production_checklist"
-            currentForm={checklistForm}
-            onApply={(fields) => setChecklistForm(prev => ({ ...prev, ...fields }))}
-            title="Production Checklist AI Assistant"
-            description="Paste run sheets or production emails to prefill checklist title and phase."
-            sourceContext="booking_production_tab"
+            formType={productionAssistConfig.formType}
+            currentForm={productionAssistConfig.currentForm}
+            onApply={handleApplyProductionAssist}
+            title={productionAssistConfig.title}
+            description={productionAssistConfig.description}
+            sourceContext={`booking_production_${productionOpsSubsection}`}
             entityType="booking"
             entityId={event?.id || ''}
           />
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-            <input type="text" value={checklistForm.title} onChange={(e) => setChecklistForm(prev => ({ ...prev, title: e.target.value }))} className="px-3 py-2 border border-gray-200 rounded text-sm" placeholder="Checklist title" />
-            <input type="text" value={checklistForm.phase} onChange={(e) => setChecklistForm(prev => ({ ...prev, phase: e.target.value }))} className="px-3 py-2 border border-gray-200 rounded text-sm" placeholder="Phase (load-in, soundcheck, strike)" />
-            <button type="button" className="btn-primary text-sm" onClick={handleSaveChecklist}>Save Checklist</button>
-          </div>
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-xs text-gray-500 m-0">Checklist items track who provides what: house, tour, or promoter.</p>
-            <button type="button" className="btn-secondary text-xs" onClick={() => setChecklistDraftItems(prev => [...prev, blankChecklistItem()])}>+ Add Another Item</button>
-          </div>
-          <div className="space-y-2">
-            {checklistDraftItems.map((item, index) => (
-              <div key={`draft-check-item-${index}`} className="grid grid-cols-1 md:grid-cols-4 gap-2 border border-gray-200 rounded p-2">
-                <input type="text" value={item.label} onChange={(e) => setChecklistDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, label: e.target.value } : row)))} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Checklist item" />
-                <select
-                  value={item.category}
-                  onChange={(e) => setChecklistDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, category: e.target.value, categoryOther: e.target.value === OTHER_OPTION_VALUE ? row.categoryOther : '' } : row)))}
-                  className="px-2 py-1.5 border border-gray-200 rounded text-xs bg-white"
-                >
-                  {CHECKLIST_CATEGORY_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-                <select
-                  value={item.providerScope}
-                  onChange={(e) => setChecklistDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, providerScope: e.target.value, providerScopeOther: e.target.value === OTHER_OPTION_VALUE ? row.providerScopeOther : '' } : row)))}
-                  className="px-2 py-1.5 border border-gray-200 rounded text-xs bg-white"
-                >
-                  {CHECKLIST_PROVIDER_SCOPE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-                <select
-                  value={item.status}
-                  onChange={(e) => setChecklistDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, status: e.target.value, statusOther: e.target.value === OTHER_OPTION_VALUE ? row.statusOther : '' } : row)))}
-                  className="px-2 py-1.5 border border-gray-200 rounded text-xs bg-white"
-                >
-                  {CHECKLIST_STATUS_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-                {item.category === OTHER_OPTION_VALUE ? (
-                  <input
-                    type="text"
-                    value={item.categoryOther || ''}
-                    onChange={(e) => setChecklistDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, categoryOther: e.target.value } : row)))}
-                    className="px-2 py-1.5 border border-gray-200 rounded text-xs"
-                    placeholder="Other category"
-                  />
-                ) : null}
-                {item.providerScope === OTHER_OPTION_VALUE ? (
-                  <input
-                    type="text"
-                    value={item.providerScopeOther || ''}
-                    onChange={(e) => setChecklistDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, providerScopeOther: e.target.value } : row)))}
-                    className="px-2 py-1.5 border border-gray-200 rounded text-xs"
-                    placeholder="Other provider scope"
-                  />
-                ) : null}
-                {item.status === OTHER_OPTION_VALUE ? (
-                  <input
-                    type="text"
-                    value={item.statusOther || ''}
-                    onChange={(e) => setChecklistDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, statusOther: e.target.value } : row)))}
-                    className="px-2 py-1.5 border border-gray-200 rounded text-xs"
-                    placeholder="Other status"
-                  />
-                ) : null}
+
+          {productionOpsSubsection === 'overview' && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-xs">
+                <div className="p-2 rounded bg-gray-50"><strong>{checklists.length}</strong><br />Department Checklists</div>
+                <div className="p-2 rounded bg-gray-50"><strong>{(checklists || []).reduce((acc, row) => acc + ((row.items || []).length), 0)}</strong><br />Checklist Items</div>
+                <div className="p-2 rounded bg-gray-50"><strong>{(checklists || []).reduce((acc, row) => acc + ((row.items || []).filter((item) => item.status === 'done').length), 0)}</strong><br />Items Completed</div>
+                <div className="p-2 rounded bg-gray-50"><strong>{Math.round(((checklists || []).reduce((acc, row) => acc + ((row.items || []).filter((item) => item.status === 'done').length), 0) / Math.max((checklists || []).reduce((acc, row) => acc + ((row.items || []).length), 0), 1)) * 100)}%</strong><br />Completion</div>
               </div>
-            ))}
-          </div>
-          {checklists.length === 0 ? (
-            <p className="text-xs text-gray-500 m-0">No production checklists yet. Save one and I will keep it organized here.</p>
-          ) : (
-            <div className="space-y-2">
-              {checklists.map(checklist => (
-                <div key={checklist.id} className="border border-gray-200 rounded p-3 text-xs">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="m-0 font-semibold">{checklist.title}</p>
-                    <span className="text-gray-500">{checklist.phase}</span>
-                  </div>
-                  <div className="mt-2 space-y-1">
-                    {(checklist.items || []).map(item => (
-                      <div key={item.id} className="flex items-center justify-between gap-2">
-                        <span>{item.label} <span className="text-gray-400">({item.provider_scope || 'house'})</span></span>
-                        <div className="flex items-center gap-2">
-                          <span className="capitalize text-gray-500">{item.status || 'todo'}</span>
-                          <button type="button" className="text-[11px] px-2 py-0.5 border border-red-300 text-red-700 rounded bg-white" onClick={() => removeProductionChecklistItem(item.id)}>Remove</button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+              <div className="border border-gray-200 rounded p-3 bg-white">
+                <p className="text-xs font-semibold m-0 mb-2">Broadway terminology in this module</p>
+                <div className="flex flex-wrap gap-1">
+                  {PRODUCTION_BROADWAY_TERMS.map((term) => (
+                    <span key={term} className="text-[11px] px-2 py-0.5 rounded bg-gray-50 border border-gray-200">{term}</span>
+                  ))}
                 </div>
-              ))}
+              </div>
+            </div>
+          )}
+
+          {productionOpsSubsection === 'stage_plot' && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                <input type="number" min="0" step="0.1" value={productionOpsDraft.stagePlot.prosceniumWidthFeet} onChange={(e) => updateProductionOpsSection('stagePlot', { prosceniumWidthFeet: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Proscenium width (ft)" />
+                <input type="number" min="0" step="0.1" value={productionOpsDraft.stagePlot.playingSpaceWidthFeet} onChange={(e) => updateProductionOpsSection('stagePlot', { playingSpaceWidthFeet: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Playing space width (ft)" />
+                <input type="number" min="0" step="0.1" value={productionOpsDraft.stagePlot.playingSpaceDepthFeet} onChange={(e) => updateProductionOpsSection('stagePlot', { playingSpaceDepthFeet: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Playing space depth (ft)" />
+                <input type="number" min="0" step="0.1" value={productionOpsDraft.stagePlot.trimHeightFeet} onChange={(e) => updateProductionOpsSection('stagePlot', { trimHeightFeet: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Trim height (ft)" />
+                <input type="number" min="0" step="0.1" value={productionOpsDraft.stagePlot.gridHeightFeet} onChange={(e) => updateProductionOpsSection('stagePlot', { gridHeightFeet: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Grid height (ft)" />
+                <input type="text" value={productionOpsDraft.stagePlot.deckSurfaceType} onChange={(e) => updateProductionOpsSection('stagePlot', { deckSurfaceType: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Deck surface type" />
+                <input type="number" min="0" step="0.1" value={productionOpsDraft.stagePlot.wingSpaceDepthFeet} onChange={(e) => updateProductionOpsSection('stagePlot', { wingSpaceDepthFeet: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Wing space depth (ft)" />
+                <input type="number" min="0" step="1" value={productionOpsDraft.stagePlot.houseCapacity} onChange={(e) => updateProductionOpsSection('stagePlot', { houseCapacity: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="House capacity" />
+                <input type="url" value={productionOpsDraft.stagePlot.stagePlotUrl} onChange={(e) => updateProductionOpsSection('stagePlot', { stagePlotUrl: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-4" placeholder="Stage plot upload URL (PDF/image)" />
+                <textarea value={productionOpsDraft.stagePlot.stageNotes} onChange={(e) => updateProductionOpsSection('stagePlot', { stageNotes: e.target.value })} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-4" placeholder="Stage notes: House Left/Right, SR/SL, upstage/downstage notes, cyc/scrim/booms/apron info." />
+              </div>
+              <StagePlotEditor
+                layout={productionOpsDraft.stagePlot.layout}
+                onChange={(nextLayout) => updateProductionOpsSection('stagePlot', { layout: nextLayout })}
+                title="Stage Plot (Top-Down Grid)"
+                currentUser={{ name: user?.name || '', email: user?.email || '' }}
+                eventMembers={plotMemberDirectory}
+                organizationMembers={plotMemberDirectory}
+                venueMembers={plotMemberDirectory}
+                currentMembership={{ event: true, organization: true, venue: true, groups: [] }}
+              />
+            </div>
+          )}
+
+          {productionOpsSubsection === 'power_view' && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={productionOpsDraft.power.mainServiceCapacityAmps}
+                  onChange={(e) => updateProductionOpsSection('power', { mainServiceCapacityAmps: e.target.value })}
+                  className="px-2 py-1.5 border border-gray-200 rounded text-xs"
+                  placeholder="Main service capacity (A)"
+                />
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={productionOpsDraft.power.generatorCapacityAmps}
+                  onChange={(e) => updateProductionOpsSection('power', { generatorCapacityAmps: e.target.value })}
+                  className="px-2 py-1.5 border border-gray-200 rounded text-xs"
+                  placeholder="Generator capacity (A)"
+                />
+                <textarea
+                  value={productionOpsDraft.power.distributionNotes}
+                  onChange={(e) => updateProductionOpsSection('power', { distributionNotes: e.target.value })}
+                  rows={2}
+                  className="px-2 py-1.5 border border-gray-200 rounded text-xs"
+                  placeholder="Distribution notes (distro, company switch, panels)"
+                />
+                <textarea
+                  value={productionOpsDraft.power.cableRoutingNotes}
+                  onChange={(e) => updateProductionOpsSection('power', { cableRoutingNotes: e.target.value })}
+                  rows={2}
+                  className="px-2 py-1.5 border border-gray-200 rounded text-xs"
+                  placeholder="Cable routing notes"
+                />
+                <textarea
+                  value={productionOpsDraft.power.departmentOwnershipNotes}
+                  onChange={(e) => updateProductionOpsSection('power', { departmentOwnershipNotes: e.target.value })}
+                  rows={2}
+                  className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2"
+                  placeholder="Department ownership notes"
+                />
+              </div>
+              <StagePlotEditor
+                layout={productionOpsDraft.stagePlot.layout}
+                onChange={(nextLayout) => updateProductionOpsSection('stagePlot', { layout: nextLayout })}
+                title="Power Distribution Plot"
+                lockedViewMode="power"
+                currentUser={{ name: user?.name || '', email: user?.email || '' }}
+                eventMembers={plotMemberDirectory}
+                organizationMembers={plotMemberDirectory}
+                venueMembers={plotMemberDirectory}
+                currentMembership={{ event: true, organization: true, venue: true, groups: [] }}
+              />
+            </div>
+          )}
+
+          {productionOpsSubsection === 'safety_egress' && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <textarea
+                  value={productionOpsDraft.safety.fireLaneNotes}
+                  onChange={(e) => updateProductionOpsSection('safety', { fireLaneNotes: e.target.value })}
+                  rows={2}
+                  className="px-2 py-1.5 border border-gray-200 rounded text-xs"
+                  placeholder="Fire lane notes"
+                />
+                <textarea
+                  value={productionOpsDraft.safety.crowdFlowNotes}
+                  onChange={(e) => updateProductionOpsSection('safety', { crowdFlowNotes: e.target.value })}
+                  rows={2}
+                  className="px-2 py-1.5 border border-gray-200 rounded text-xs"
+                  placeholder="Crowd flow notes"
+                />
+                <textarea
+                  value={productionOpsDraft.safety.occupancyNotes}
+                  onChange={(e) => updateProductionOpsSection('safety', { occupancyNotes: e.target.value })}
+                  rows={2}
+                  className="px-2 py-1.5 border border-gray-200 rounded text-xs"
+                  placeholder="Occupancy notes"
+                />
+                <textarea
+                  value={productionOpsDraft.safety.adaRouteNotes}
+                  onChange={(e) => updateProductionOpsSection('safety', { adaRouteNotes: e.target.value })}
+                  rows={2}
+                  className="px-2 py-1.5 border border-gray-200 rounded text-xs"
+                  placeholder="ADA route notes"
+                />
+                <textarea
+                  value={productionOpsDraft.safety.emergencyNotes}
+                  onChange={(e) => updateProductionOpsSection('safety', { emergencyNotes: e.target.value })}
+                  rows={2}
+                  className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2"
+                  placeholder="Emergency procedure notes"
+                />
+              </div>
+              <StagePlotEditor
+                layout={productionOpsDraft.stagePlot.layout}
+                onChange={(nextLayout) => updateProductionOpsSection('stagePlot', { layout: nextLayout })}
+                title="Safety / Egress Plot"
+                lockedViewMode="safety"
+                currentUser={{ name: user?.name || '', email: user?.email || '' }}
+                eventMembers={plotMemberDirectory}
+                organizationMembers={plotMemberDirectory}
+                venueMembers={plotMemberDirectory}
+                currentMembership={{ event: true, organization: true, venue: true, groups: [] }}
+              />
+            </div>
+          )}
+
+          {productionOpsSubsection === 'lighting_lx' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <input type="url" value={productionOpsDraft.lighting.lightingPlotUrl} onChange={(e) => updateProductionOpsSection('lighting', { lightingPlotUrl: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2" placeholder="Lighting plot URL (PDF)" />
+              <textarea value={productionOpsDraft.lighting.instrumentSchedule} onChange={(e) => updateProductionOpsSection('lighting', { instrumentSchedule: e.target.value })} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Instrument schedule" />
+              <textarea value={productionOpsDraft.lighting.channelHookup} onChange={(e) => updateProductionOpsSection('lighting', { channelHookup: e.target.value })} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Channel hookup" />
+              <textarea value={productionOpsDraft.lighting.dimmerSchedule} onChange={(e) => updateProductionOpsSection('lighting', { dimmerSchedule: e.target.value })} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Dimmer schedule" />
+              <textarea value={productionOpsDraft.lighting.patchSheet} onChange={(e) => updateProductionOpsSection('lighting', { patchSheet: e.target.value })} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Patch sheet" />
+              <textarea value={productionOpsDraft.lighting.dmxUniverseMap} onChange={(e) => updateProductionOpsSection('lighting', { dmxUniverseMap: e.target.value })} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Universe / DMX mapping" />
+              <input type="text" value={productionOpsDraft.lighting.cueListReference} onChange={(e) => updateProductionOpsSection('lighting', { cueListReference: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Cue list reference" />
+              <textarea value={productionOpsDraft.lighting.notes} onChange={(e) => updateProductionOpsSection('lighting', { notes: e.target.value })} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2" placeholder="LX notes" />
+            </div>
+          )}
+
+          {productionOpsSubsection === 'audio_sound' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <input type="url" value={productionOpsDraft.audio.audioPlotUrl} onChange={(e) => updateProductionOpsSection('audio', { audioPlotUrl: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2" placeholder="Audio plot URL (PDF)" />
+              <textarea value={productionOpsDraft.audio.inputList} onChange={(e) => updateProductionOpsSection('audio', { inputList: e.target.value })} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Input list / patch list" />
+              <textarea value={productionOpsDraft.audio.channelList} onChange={(e) => updateProductionOpsSection('audio', { channelList: e.target.value })} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Channel sheet (source, phantom, insert, sends)" />
+              <textarea value={productionOpsDraft.audio.monitorMixes} onChange={(e) => updateProductionOpsSection('audio', { monitorMixes: e.target.value })} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Monitor / IEM requirements" />
+              <input type="text" value={productionOpsDraft.audio.fohConsole} onChange={(e) => updateProductionOpsSection('audio', { fohConsole: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="FOH console type" />
+              <textarea value={productionOpsDraft.audio.wirelessAssignments} onChange={(e) => updateProductionOpsSection('audio', { wirelessAssignments: e.target.value })} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Wireless mic tracking (#, actor, frequency, spare, battery)" />
+              <textarea value={productionOpsDraft.audio.rfNotes} onChange={(e) => updateProductionOpsSection('audio', { rfNotes: e.target.value })} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="RF notes" />
+              <textarea value={productionOpsDraft.audio.notes} onChange={(e) => updateProductionOpsSection('audio', { notes: e.target.value })} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2" placeholder="A1 / A2 notes" />
+            </div>
+          )}
+
+          {productionOpsSubsection === 'projection_video' && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <input
+                  type="url"
+                  value={productionOpsDraft.projection.projectionPlotUrl}
+                  onChange={(e) => updateProductionOpsSection('projection', { projectionPlotUrl: e.target.value })}
+                  className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2"
+                  placeholder="Projection/video plot URL (PDF)"
+                />
+                <textarea
+                  value={productionOpsDraft.projection.mediaCueList}
+                  onChange={(e) => updateProductionOpsSection('projection', { mediaCueList: e.target.value })}
+                  rows={2}
+                  className="px-2 py-1.5 border border-gray-200 rounded text-xs"
+                  placeholder="Media cue list (cue #, trigger, file, target output, timing)"
+                />
+                <textarea
+                  value={productionOpsDraft.projection.mediaAssetList}
+                  onChange={(e) => updateProductionOpsSection('projection', { mediaAssetList: e.target.value })}
+                  rows={2}
+                  className="px-2 py-1.5 border border-gray-200 rounded text-xs"
+                  placeholder="Media asset list (file, format, duration, resolution, audio Y/N)"
+                />
+                <textarea
+                  value={productionOpsDraft.projection.outputMap}
+                  onChange={(e) => updateProductionOpsSection('projection', { outputMap: e.target.value })}
+                  rows={2}
+                  className="px-2 py-1.5 border border-gray-200 rounded text-xs"
+                  placeholder="Output map (Output 1 → Projector SR, Output 2 → LED wall)"
+                />
+                <textarea
+                  value={productionOpsDraft.projection.playbackDevices}
+                  onChange={(e) => updateProductionOpsSection('projection', { playbackDevices: e.target.value })}
+                  rows={2}
+                  className="px-2 py-1.5 border border-gray-200 rounded text-xs"
+                  placeholder="Playback devices list (QLab, Resolume, media server)"
+                />
+                <textarea
+                  value={productionOpsDraft.projection.routingNotes}
+                  onChange={(e) => updateProductionOpsSection('projection', { routingNotes: e.target.value })}
+                  rows={2}
+                  className="px-2 py-1.5 border border-gray-200 rounded text-xs"
+                  placeholder="Signal routing notes (HDMI / SDI / NDI)"
+                />
+                <textarea
+                  value={productionOpsDraft.projection.notes}
+                  onChange={(e) => updateProductionOpsSection('projection', { notes: e.target.value })}
+                  rows={2}
+                  className="px-2 py-1.5 border border-gray-200 rounded text-xs"
+                  placeholder="Projection/video department notes"
+                />
+              </div>
+              <StagePlotEditor
+                layout={productionOpsDraft.stagePlot.layout}
+                onChange={(nextLayout) => updateProductionOpsSection('stagePlot', { layout: nextLayout })}
+                title="Projection / Video Plot"
+                lockedViewMode="projection_video"
+                currentUser={{ name: user?.name || '', email: user?.email || '' }}
+                eventMembers={plotMemberDirectory}
+                organizationMembers={plotMemberDirectory}
+                venueMembers={plotMemberDirectory}
+                currentMembership={{ event: true, organization: true, venue: true, groups: [] }}
+              />
+            </div>
+          )}
+
+          {productionOpsSubsection === 'comms' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <textarea value={productionOpsDraft.comms.clearComChannels} onChange={(e) => updateProductionOpsSection('comms', { clearComChannels: e.target.value })} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Clear-Com channel list" />
+              <textarea value={productionOpsDraft.comms.headsetAssignments} onChange={(e) => updateProductionOpsSection('comms', { headsetAssignments: e.target.value })} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Headset assignments" />
+              <textarea value={productionOpsDraft.comms.walkieChannels} onChange={(e) => updateProductionOpsSection('comms', { walkieChannels: e.target.value })} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Walkie channel assignments" />
+              <input type="text" value={productionOpsDraft.comms.callboardChannel} onChange={(e) => updateProductionOpsSection('comms', { callboardChannel: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Callboard channel" />
+              <input type="text" value={productionOpsDraft.comms.smDeskChannel} onChange={(e) => updateProductionOpsSection('comms', { smDeskChannel: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="SM desk channel" />
+              <input type="text" value={productionOpsDraft.comms.fohChannel} onChange={(e) => updateProductionOpsSection('comms', { fohChannel: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="FOH channel" />
+              <input type="text" value={productionOpsDraft.comms.emergencyChannel} onChange={(e) => updateProductionOpsSection('comms', { emergencyChannel: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Emergency backup channel" />
+              <textarea value={productionOpsDraft.comms.notes} onChange={(e) => updateProductionOpsSection('comms', { notes: e.target.value })} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2" placeholder="Comms notes (packs charged, channel isolation, testing log)" />
+            </div>
+          )}
+
+          {productionOpsSubsection === 'run_of_show' && (
+            <div className="space-y-2">
+              <p className="text-xs text-gray-600 m-0">
+                Cue structure: use tags like <strong>LX</strong>, <strong>SND</strong>, <strong>FLY</strong>, <strong>DECK</strong>, and <strong>PROJ</strong> with clear standby and GO call language.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <input type="text" value={productionOpsDraft.runOfShow.cuePrefixHint} onChange={(e) => updateProductionOpsSection('runOfShow', { cuePrefixHint: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Cue numbering pattern (LX 1, SND 1...)" />
+                <input type="text" value={productionOpsDraft.runOfShow.goCallFormat} onChange={(e) => updateProductionOpsSection('runOfShow', { goCallFormat: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Go-call format" />
+                <textarea value={productionOpsDraft.runOfShow.standbyNotes} onChange={(e) => updateProductionOpsSection('runOfShow', { standbyNotes: e.target.value })} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Standby call notes" />
+                <textarea value={productionOpsDraft.runOfShow.triggerNotes} onChange={(e) => updateProductionOpsSection('runOfShow', { triggerNotes: e.target.value })} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Trigger source notes (line, action, music, SM call)" />
+                <textarea value={productionOpsDraft.runOfShow.notes} onChange={(e) => updateProductionOpsSection('runOfShow', { notes: e.target.value })} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2" placeholder="Run-of-show cueing notes" />
+              </div>
+              <a href={`/run-of-show?eventId=${event?.id || ''}`} className="text-xs text-[#0d1b2a]">Open full Run of Show cue board →</a>
+            </div>
+          )}
+
+          {productionOpsSubsection === 'department_checklists' && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                <input type="text" value={checklistForm.title} onChange={(e) => setChecklistForm(prev => ({ ...prev, title: e.target.value }))} className="px-3 py-2 border border-gray-200 rounded text-sm" placeholder="Checklist title" />
+                <input type="text" value={checklistForm.phase} onChange={(e) => setChecklistForm(prev => ({ ...prev, phase: e.target.value }))} className="px-3 py-2 border border-gray-200 rounded text-sm" placeholder="Phase (paper tech, cue-to-cue, load-in, strike)" />
+                <button type="button" className="btn-primary text-sm" onClick={handleSaveChecklist}>Save Checklist</button>
+              </div>
+              <div className="border border-gray-200 rounded p-2 bg-gray-50">
+                <p className="text-xs font-semibold m-0 mb-2">Seed department template</p>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(DEPARTMENT_CHECKLIST_TEMPLATES).map(([key, template]) => (
+                    <button key={key} type="button" className="btn-secondary text-xs" onClick={() => handleSeedDepartmentChecklistTemplate(key)}>
+                      + {template.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-2">
+                  <button
+                    type="button"
+                    className="btn-primary text-xs"
+                    onClick={handleCreateDoorsAndCloseoutChecklistPack}
+                  >
+                    + Create Before Doors + After Show Closeout Pack
+                  </button>
+                </div>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-gray-500 m-0">Checklist items can assign department ownership, due date, and completion timestamps.</p>
+                <button
+                  type="button"
+                  className="btn-secondary text-xs"
+                  onClick={() => setChecklistDraftItems(prev => [...prev, { ...blankChecklistItem(), sortOrder: prev.length }])}
+                >
+                  + Add Another Item
+                </button>
+              </div>
+              <div className="space-y-2">
+                {checklistDraftItems.map((item, index) => (
+                  <div key={`draft-check-item-${index}`} className="grid grid-cols-1 md:grid-cols-6 gap-2 border border-gray-200 rounded p-2">
+                    <input type="text" value={item.label} onChange={(e) => setChecklistDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, label: e.target.value } : row)))} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2" placeholder="Checklist item" />
+                    <input type="text" value={item.assigneeRole || ''} onChange={(e) => setChecklistDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, assigneeRole: e.target.value } : row)))} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Assignee role" />
+                    <input type="text" value={item.assigneeName || ''} onChange={(e) => setChecklistDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, assigneeName: e.target.value } : row)))} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Assignee name" />
+                    <input type="datetime-local" value={item.dueAt || ''} onChange={(e) => setChecklistDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, dueAt: e.target.value } : row)))} className="px-2 py-1.5 border border-gray-200 rounded text-xs" />
+                    <select
+                      value={item.category}
+                      onChange={(e) => setChecklistDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, category: e.target.value, categoryOther: e.target.value === OTHER_OPTION_VALUE ? row.categoryOther : '' } : row)))}
+                      className="px-2 py-1.5 border border-gray-200 rounded text-xs bg-white"
+                    >
+                      {CHECKLIST_CATEGORY_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={item.providerScope}
+                      onChange={(e) => setChecklistDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, providerScope: e.target.value, providerScopeOther: e.target.value === OTHER_OPTION_VALUE ? row.providerScopeOther : '' } : row)))}
+                      className="px-2 py-1.5 border border-gray-200 rounded text-xs bg-white"
+                    >
+                      {CHECKLIST_PROVIDER_SCOPE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={item.status}
+                      onChange={(e) => setChecklistDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, status: e.target.value, statusOther: e.target.value === OTHER_OPTION_VALUE ? row.statusOther : '' } : row)))}
+                      className="px-2 py-1.5 border border-gray-200 rounded text-xs bg-white"
+                    >
+                      {CHECKLIST_STATUS_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                    <label className="text-xs flex items-center gap-2 px-2 py-1.5 border border-gray-200 rounded">
+                      <input type="checkbox" checked={item.required !== false} onChange={(e) => setChecklistDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, required: e.target.checked } : row)))} />
+                      Required
+                    </label>
+                    <textarea value={item.notes || ''} onChange={(e) => setChecklistDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, notes: e.target.value } : row)))} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-6" placeholder="Notes" />
+                  </div>
+                ))}
+              </div>
+              {checklists.length === 0 ? (
+                <p className="text-xs text-gray-500 m-0">No production checklists yet. Save one and I will keep it organized here.</p>
+              ) : (
+                <div className="space-y-2">
+                  {checklists.map((checklist) => (
+                    <div key={checklist.id} className="border border-gray-200 rounded p-3 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="m-0 font-semibold">{checklist.title}</p>
+                        <span className="text-gray-500">{checklist.phase}</span>
+                      </div>
+                      <div className="mt-2 space-y-1">
+                        {(checklist.items || []).map((item) => (
+                          <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 border border-gray-100 rounded px-2 py-1">
+                            <span>
+                              {item.label}
+                              <span className="text-gray-400"> ({item.provider_scope || 'house'})</span>
+                              {item.assignee_role ? <span className="text-gray-500"> · {item.assignee_role}</span> : null}
+                              {item.assignee_name ? <span className="text-gray-500"> · {item.assignee_name}</span> : null}
+                              {item.due_at ? <span className="text-gray-500"> · Due {new Date(item.due_at).toLocaleString()}</span> : null}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <select
+                                value={item.status || 'todo'}
+                                onChange={(e) => handleChecklistItemStatusChange(checklist, item, e.target.value)}
+                                className="px-2 py-1 border border-gray-200 rounded text-xs bg-white"
+                              >
+                                <option value="todo">Todo</option>
+                                <option value="in_progress">In Progress</option>
+                                <option value="done">Done</option>
+                                <option value="blocked">Blocked</option>
+                              </select>
+                              <button type="button" className="text-[11px] px-2 py-0.5 border border-red-300 text-red-700 rounded bg-white" onClick={() => removeProductionChecklistItem(item.id)}>Remove</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {productionOpsSubsection === 'technical_riders' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <input type="url" value={productionOpsDraft.technicalRiders.riderUrl} onChange={(e) => updateProductionOpsSection('technicalRiders', { riderUrl: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2" placeholder="Technical rider URL" />
+              <textarea value={productionOpsDraft.technicalRiders.attachmentsNotes} onChange={(e) => updateProductionOpsSection('technicalRiders', { attachmentsNotes: e.target.value })} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2" placeholder="Attachments notes (plot packets, channel charts, paperwork index)" />
+              <textarea value={productionOpsDraft.technicalRiders.loadInNotes} onChange={(e) => updateProductionOpsSection('technicalRiders', { loadInNotes: e.target.value })} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Load-in notes" />
+              <textarea value={productionOpsDraft.technicalRiders.strikeNotes} onChange={(e) => updateProductionOpsSection('technicalRiders', { strikeNotes: e.target.value })} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Strike / turnover notes" />
             </div>
           )}
         </div>
@@ -3593,6 +4993,16 @@ export default function BookingOperationsWorkspace({ event, initialTab = '', pha
 
       {activeTab === 'concessions' && (
         <div className="space-y-3">
+          <IntakePromptPanel
+            promptKey="offering"
+            formType="concessions_menu_item"
+            currentForm={concessionsDraftItems[0] || {}}
+            onApply={(fields) => setConcessionsDraftItems(prev => (
+              prev.length ? prev.map((row, idx) => (idx === 0 ? { ...row, ...fields } : row)) : [{ ...blankConcessionsMenuItem(), ...fields }]
+            ))}
+            titleOverride="Tell me what you're selling or teaching (and I will make it make sense)."
+          />
+
           <FormAIAssist
             formType="concessions_plan"
             currentForm={concessionsForm}
@@ -3603,6 +5013,114 @@ export default function BookingOperationsWorkspace({ event, initialTab = '', pha
             entityType="booking"
             entityId={event?.id || ''}
           />
+          <div className="border border-[#c8a45e] bg-[#faf8f3] rounded p-3 space-y-2">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold m-0">📸 Menu + Promo Photo Intelligence</p>
+                <p className="text-xs text-gray-600 m-0">Upload menu photos, drink boards, coupon posters, or handwritten specials. I will draft menu items, promo copy, and captions.</p>
+              </div>
+              {(concessionsPhotoExtracting || concessionsPhotoCaptionLoading) ? (
+                <span className="text-xs text-[#c8a45e] animate-pulse">Processing…</span>
+              ) : null}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="btn-primary text-xs"
+                disabled={concessionsPhotoExtracting}
+                onClick={async () => {
+                  try {
+                    const captured = await openCamera();
+                    await handleConcessionsPhotoExtract([captured]);
+                  } catch {}
+                }}
+              >
+                📷 Take Photo
+              </button>
+              <button
+                type="button"
+                className="btn-secondary text-xs"
+                disabled={concessionsPhotoExtracting}
+                onClick={async () => {
+                  try {
+                    const files = await openFileUpload(true);
+                    await handleConcessionsPhotoExtract(files);
+                  } catch {}
+                }}
+              >
+                📁 Upload Files
+              </button>
+            </div>
+            <DeepResearchPromptBox
+              title="Caption + Promo Style"
+              subtitle="Regenerate menu caption language with your terms, then apply to promo notes or draft items."
+              styleValue={concessionsPhotoCaptionStyle}
+              onStyleChange={setConcessionsPhotoCaptionStyle}
+              styleOptions={DEEP_STYLE_OPTIONS}
+              styleHelp={DEEP_STYLE_HELP}
+              correctionValue={concessionsPhotoCaptionCorrections}
+              onCorrectionChange={setConcessionsPhotoCaptionCorrections}
+              includeTermsValue={concessionsPhotoCaptionIncludeTerms}
+              onIncludeTermsChange={setConcessionsPhotoCaptionIncludeTerms}
+              includeTermsLabel="Use these promo words"
+              includeTermsPlaceholder="Example: happy hour, local favorite, chef feature"
+              avoidTermsValue={concessionsPhotoCaptionAvoidTerms}
+              onAvoidTermsChange={setConcessionsPhotoCaptionAvoidTerms}
+              avoidTermsLabel="Avoid these words"
+              avoidTermsPlaceholder="Example: cheap, generic, basic"
+              correctionLabel="Corrections for regenerate"
+              correctionPlaceholder="Example: emphasize non-alcoholic specials and family-friendly offers."
+              onGenerate={async () => {
+                if (!concessionsPhotoExtractionData) {
+                  setConcessionsPhotoCaptionStatus('Upload at least one image first, then regenerate from extracted menu data.');
+                  return;
+                }
+                await generateConcessionsCaptionPack(concessionsPhotoExtractionData, 0);
+              }}
+              onRegenerate={async () => {
+                if (!concessionsPhotoExtractionData) {
+                  setConcessionsPhotoCaptionStatus('Upload at least one image first, then regenerate from extracted menu data.');
+                  return;
+                }
+                await generateConcessionsCaptionPack(concessionsPhotoExtractionData, 0);
+              }}
+              generating={concessionsPhotoCaptionLoading}
+              canGenerate={!!concessionsPhotoExtractionData}
+              statusText={concessionsPhotoCaptionStatus}
+              compact
+            />
+            {concessionsUploadPreviews.length > 0 && (
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {concessionsUploadPreviews.slice(-10).map((item) => (
+                  <img key={item.id} src={item.url} alt={item.name || 'upload'} className="w-14 h-14 object-cover rounded border border-gray-200" />
+                ))}
+              </div>
+            )}
+            {(concessionsPhotoCaptionStatus || concessionsPhotoCaptionPack.summary || (concessionsPhotoCaptionPack.captions || []).length > 0) && (
+              <div className="border border-gray-200 rounded bg-white p-2 space-y-2">
+                {concessionsPhotoCaptionPack.summary ? (
+                  <div className="border border-gray-100 rounded p-2 bg-gray-50">
+                    <p className="text-xs font-medium text-gray-700 m-0">Summary</p>
+                    <p className="text-xs text-gray-600 mt-1 mb-2">{concessionsPhotoCaptionPack.summary}</p>
+                    <button type="button" className="btn-secondary text-xs" onClick={applyConcessionsCaptionSummaryToPlan}>
+                      Use Summary in Promo Notes
+                    </button>
+                  </div>
+                ) : null}
+                {(concessionsPhotoCaptionPack.captions || []).slice(0, 6).map((item, index) => (
+                  <div key={`${item.title || 'menu-caption'}-${index}`} className="border border-gray-100 rounded p-2">
+                    <p className="text-xs font-medium text-gray-700 m-0">{item.title || `Caption ${index + 1}`}</p>
+                    <p className="text-xs text-gray-500 mt-1 mb-1">{item.shortDescription || item.altText || ''}</p>
+                    <p className="text-xs text-gray-700 mt-0 mb-2">{item.caption || ''}</p>
+                    <button type="button" className="btn-secondary text-xs" onClick={() => appendConcessionsCaptionToDraft(item.caption, index)}>
+                      Add to Draft Item {index + 1}
+                    </button>
+                  </div>
+                ))}
+                <p className="text-[11px] text-gray-500 m-0">Uploaded assets stay untouched. This flow drafts text only.</p>
+              </div>
+            )}
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
             <label className="text-xs flex items-center gap-2 px-2 py-1.5 border border-gray-200 rounded">
               <input type="checkbox" checked={concessionsForm.isActive} onChange={(e) => setConcessionsForm(prev => ({ ...prev, isActive: e.target.checked }))} />
@@ -3621,6 +5139,8 @@ export default function BookingOperationsWorkspace({ event, initialTab = '', pha
             </label>
             <input type="url" value={concessionsForm.onlineMenuUrl} onChange={(e) => setConcessionsForm(prev => ({ ...prev, onlineMenuUrl: e.target.value }))} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2" placeholder="Online menu URL" />
             <input type="url" value={concessionsForm.specialsImageUrl} onChange={(e) => setConcessionsForm(prev => ({ ...prev, specialsImageUrl: e.target.value }))} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2" placeholder="Drink specials image URL" />
+            <input type="text" value={concessionsForm.specialsCaption} onChange={(e) => setConcessionsForm(prev => ({ ...prev, specialsCaption: e.target.value }))} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2" placeholder="Specials caption (from AI or manual)" />
+            <textarea value={concessionsForm.promoNotes} onChange={(e) => setConcessionsForm(prev => ({ ...prev, promoNotes: e.target.value }))} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2" placeholder="Promo notes, games, coupons, timing" />
             <button type="button" className="btn-primary text-xs md:col-span-2" onClick={handleSaveConcessionsPlan}>Save Concessions Plan</button>
             <textarea value={concessionsForm.notes} onChange={(e) => setConcessionsForm(prev => ({ ...prev, notes: e.target.value }))} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-4" placeholder="Concessions notes" />
           </div>
@@ -3638,13 +5158,17 @@ export default function BookingOperationsWorkspace({ event, initialTab = '', pha
             entityId={event?.id || ''}
           />
           <div className="flex items-center justify-between gap-2">
-            <p className="text-xs text-gray-500 m-0">Menu builder supports pricing, cost basis, inventory links, and alcohol flag.</p>
+            <p className="text-xs text-gray-500 m-0">Menu builder supports pricing, promos/coupons, AI captions, cost basis, inventory links, and alcohol flag.</p>
             <button type="button" className="btn-secondary text-xs" onClick={() => setConcessionsDraftItems(prev => [...prev, blankConcessionsMenuItem()])}>+ Add Another Item</button>
           </div>
           {concessionsDraftItems.map((item, index) => (
-            <div key={`concessions-item-${index}`} className="grid grid-cols-1 md:grid-cols-8 gap-2 border border-gray-200 rounded p-2">
+            <div key={`concessions-item-${index}`} className="grid grid-cols-1 md:grid-cols-12 gap-2 border border-gray-200 rounded p-2">
               <input type="text" value={item.name} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, name: e.target.value } : row)))} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2" placeholder="Menu item name" />
-              <input type="text" value={item.category} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, category: e.target.value } : row)))} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Category" />
+              <select value={item.category} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, category: e.target.value } : row)))} className="px-2 py-1.5 border border-gray-200 rounded text-xs bg-white md:col-span-2">
+                {CONCESSIONS_CATEGORY_OPTIONS.map((category) => (
+                  <option key={category} value={category}>{category}</option>
+                ))}
+              </select>
               <input type="number" min="0" step="0.01" value={item.price} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, price: e.target.value } : row)))} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Price" />
               <input type="number" min="0" step="0.01" value={item.costBasis} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, costBasis: e.target.value } : row)))} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Cost basis" />
               <input type="text" value={item.availabilityStatus} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, availabilityStatus: e.target.value } : row)))} className="px-2 py-1.5 border border-gray-200 rounded text-xs" placeholder="Availability" />
@@ -3656,12 +5180,28 @@ export default function BookingOperationsWorkspace({ event, initialTab = '', pha
                 <input type="checkbox" checked={item.isSignatureItem} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, isSignatureItem: e.target.checked } : row)))} />
                 Signature
               </label>
-              <input type="text" value={item.supplierReference} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, supplierReference: e.target.value } : row)))} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2" placeholder="Supplier reference" />
-              <input type="text" value={item.inventoryLink} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, inventoryLink: e.target.value } : row)))} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2" placeholder="Inventory link" />
+              <input type="text" value={item.supplierReference} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, supplierReference: e.target.value } : row)))} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-3" placeholder="Supplier reference" />
+              <input type="text" value={item.inventoryLink} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, inventoryLink: e.target.value } : row)))} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-3" placeholder="Inventory link" />
               <input type="url" value={item.itemUrl} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, itemUrl: e.target.value } : row)))} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2" placeholder="Item URL" />
               <input type="url" value={item.imageUrl} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, imageUrl: e.target.value } : row)))} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2" placeholder="Image URL" />
-              <textarea value={item.notes} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, notes: e.target.value } : row)))} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-8" placeholder="Item notes" />
-              <div className="md:col-span-8 flex flex-wrap items-center gap-2">
+              <select value={item.promoType} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, promoType: e.target.value, promoTypeOther: e.target.value === OTHER_OPTION_VALUE ? row.promoTypeOther : '' } : row)))} className="px-2 py-1.5 border border-gray-200 rounded text-xs bg-white md:col-span-2">
+                {CONCESSIONS_PROMO_TYPE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+              {item.promoType === OTHER_OPTION_VALUE ? (
+                <input type="text" value={item.promoTypeOther} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, promoTypeOther: e.target.value } : row)))} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2" placeholder="Other promo type" />
+              ) : <div className="md:col-span-2" />}
+              <input type="text" value={item.promoTitle} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, promoTitle: e.target.value } : row)))} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-3" placeholder="Promo title / offer headline" />
+              <input type="text" value={item.couponCode} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, couponCode: e.target.value } : row)))} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2" placeholder="Coupon code" />
+              <input type="text" value={item.tags} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, tags: e.target.value } : row)))} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-3" placeholder="Tags (comma-separated)" />
+              <textarea value={item.promoDetails} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, promoDetails: e.target.value } : row)))} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-6" placeholder="Promo details / game instructions / bundle description" />
+              <textarea value={item.couponTerms} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, couponTerms: e.target.value } : row)))} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-6" placeholder="Coupon terms / expiration / restrictions" />
+              <textarea value={item.imageDescription} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, imageDescription: e.target.value } : row)))} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-4" placeholder="Image description" />
+              <textarea value={item.caption} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, caption: e.target.value } : row)))} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-4" placeholder="Caption copy" />
+              <textarea value={item.altText} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, altText: e.target.value } : row)))} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-4" placeholder="Alt text" />
+              <textarea value={item.notes} onChange={(e) => setConcessionsDraftItems(prev => prev.map((row, i) => (i === index ? { ...row, notes: e.target.value } : row)))} rows={2} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-12" placeholder="Item notes" />
+              <div className="md:col-span-12 flex flex-wrap items-center gap-2">
                 <button type="button" className="btn-secondary text-xs" onClick={() => handleSaveConcessionsItemToLibrary(item)}>Save This to Shared Library</button>
                 {concessionsDraftItems.length > 1 ? (
                   <button type="button" className="text-[11px] px-2 py-1 border border-red-300 text-red-700 rounded bg-white" onClick={() => setConcessionsDraftItems(prev => prev.filter((_, i) => i !== index))}>Remove Draft Item</button>
@@ -3684,6 +5224,15 @@ export default function BookingOperationsWorkspace({ event, initialTab = '', pha
                       <button type="button" className="text-[11px] px-2 py-0.5 border border-red-300 text-red-700 rounded bg-white" onClick={() => removeConcessionsMenuItem(item.id).then(loadAll).catch((err) => setStatus(`Could not remove menu item: ${err.message}`))}>Remove</button>
                     </div>
                   </div>
+                  {(metadata.promoType || metadata.promoTitle || metadata.couponCode) ? (
+                    <p className="m-0 text-[11px] text-gray-700">
+                      Promo: {metadata.promoTitle || metadata.promoType || 'Offer'}
+                      {metadata.couponCode ? ` · Code: ${metadata.couponCode}` : ''}
+                    </p>
+                  ) : null}
+                  {metadata.couponTerms ? <p className="m-0 text-[11px] text-gray-600">Terms: {metadata.couponTerms}</p> : null}
+                  {metadata.caption ? <p className="m-0 text-[11px] text-gray-700">Caption: {metadata.caption}</p> : null}
+                  {metadata.shortDescription ? <p className="m-0 text-[11px] text-gray-600">Image: {metadata.shortDescription}</p> : null}
                   {(metadata.itemUrl || metadata.imageUrl) ? (
                     <p className="m-0 text-[11px] text-gray-600">
                       {metadata.itemUrl ? <a className="underline mr-3" href={metadata.itemUrl} target="_blank" rel="noreferrer">Item link</a> : null}
@@ -3704,24 +5253,46 @@ export default function BookingOperationsWorkspace({ event, initialTab = '', pha
               </div>
               <button type="button" className="btn-secondary text-xs" onClick={() => loadAll()}>Refresh Library</button>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-              <input type="text" value={concessionsLibraryQuery} onChange={(e) => setConcessionsLibraryQuery(e.target.value)} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2" placeholder="Search library by item name" />
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+              <input type="text" value={concessionsLibraryQuery} onChange={(e) => setConcessionsLibraryQuery(e.target.value)} className="px-2 py-1.5 border border-gray-200 rounded text-xs md:col-span-2" placeholder="Search library by item, promo, coupon, or caption" />
               <select value={concessionsLibraryCategory} onChange={(e) => setConcessionsLibraryCategory(e.target.value)} className="px-2 py-1.5 border border-gray-200 rounded text-xs bg-white">
                 <option value="">All categories</option>
                 {concessionsLibraryCategoryOptions.map((category) => (
                   <option key={category} value={category}>{category}</option>
                 ))}
               </select>
+              <select value={concessionsLibraryPromoType} onChange={(e) => setConcessionsLibraryPromoType(e.target.value)} className="px-2 py-1.5 border border-gray-200 rounded text-xs bg-white">
+                <option value="">All promo types</option>
+                {concessionsLibraryPromoTypeOptions.map((promoType) => (
+                  <option key={promoType} value={promoType}>{promoType}</option>
+                ))}
+              </select>
             </div>
             <div className="space-y-1 max-h-64 overflow-y-auto pr-1">
               {filteredConcessionsLibraryItems.slice(0, 160).map((item) => (
-                <div key={item.id} className="text-xs border border-gray-200 rounded p-2 flex flex-wrap items-center justify-between gap-2">
-                  <span>{item.name} · {item.category || 'other'} · ${Number(item.price || 0).toFixed(2)}</span>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button type="button" className="text-[11px] px-2 py-0.5 border border-gray-300 text-gray-700 rounded bg-white" onClick={() => handleAddLibraryItemToDraft(item)}>Add to Draft</button>
-                    <button type="button" className="text-[11px] px-2 py-0.5 border border-blue-300 text-blue-700 rounded bg-white" onClick={() => handleAddLibraryItemToEvent(item)}>Add to This Event</button>
-                    <button type="button" className="text-[11px] px-2 py-0.5 border border-red-300 text-red-700 rounded bg-white" onClick={() => removeConcessionsMenuLibraryItem(item.id).then(loadAll).catch((err) => setStatus(`Could not remove library item: ${err.message}`))}>Remove</button>
+                <div key={item.id} className="text-xs border border-gray-200 rounded p-2 space-y-1">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span>{item.name} · {item.category || 'other'} · ${Number(item.price || 0).toFixed(2)}</span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button type="button" className="text-[11px] px-2 py-0.5 border border-gray-300 text-gray-700 rounded bg-white" onClick={() => handleAddLibraryItemToDraft(item)}>Add to Draft</button>
+                      <button type="button" className="text-[11px] px-2 py-0.5 border border-blue-300 text-blue-700 rounded bg-white" onClick={() => handleAddLibraryItemToEvent(item)}>Add to This Event</button>
+                      <button type="button" className="text-[11px] px-2 py-0.5 border border-red-300 text-red-700 rounded bg-white" onClick={() => removeConcessionsMenuLibraryItem(item.id).then(loadAll).catch((err) => setStatus(`Could not remove library item: ${err.message}`))}>Remove</button>
+                    </div>
                   </div>
+                  {(() => {
+                    const metadata = (item?.metadata && typeof item.metadata === 'object') ? item.metadata : {};
+                    return (
+                      <>
+                        {(metadata.promoType || metadata.promoTitle || metadata.couponCode) ? (
+                          <p className="m-0 text-[11px] text-gray-700">
+                            Promo: {metadata.promoTitle || metadata.promoType || 'Offer'}
+                            {metadata.couponCode ? ` · Code: ${metadata.couponCode}` : ''}
+                          </p>
+                        ) : null}
+                        {metadata.caption ? <p className="m-0 text-[11px] text-gray-600">Caption: {metadata.caption}</p> : null}
+                      </>
+                    );
+                  })()}
                 </div>
               ))}
               {filteredConcessionsLibraryItems.length === 0 ? <p className="text-xs text-gray-500 m-0">Library is empty. Save any draft item to start the shared list.</p> : null}
@@ -3732,6 +5303,16 @@ export default function BookingOperationsWorkspace({ event, initialTab = '', pha
 
       {activeTab === 'merch' && (
         <div className="space-y-3">
+          <IntakePromptPanel
+            promptKey="offering"
+            formType="merch_participant"
+            currentForm={merchDraftParticipants[0] || {}}
+            onApply={(fields) => setMerchDraftParticipants(prev => (
+              prev.length ? prev.map((row, idx) => (idx === 0 ? { ...row, ...fields } : row)) : [{ ...blankMerchParticipant(), ...fields }]
+            ))}
+            titleOverride="Tell me what you're selling or teaching (and I will make it make sense)."
+          />
+
           <FormAIAssist
             formType="merch_plan"
             currentForm={merchPlanForm}

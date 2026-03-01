@@ -1,5 +1,5 @@
 import { parseLocalDate } from '../lib/dateUtils';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useVenue } from '../context/VenueContext';
 import { useAuth } from '../context/AuthContext';
 import { useSearchParams } from 'react-router-dom';
@@ -31,6 +31,26 @@ const DEFAULT_OPEN_MIC_QUEUE = [
 ];
 
 const CUE_DEPARTMENTS = ['STAGE', 'LX', 'AUDIO', 'VIDEO', 'DECK', 'FLY', 'FOH'];
+const TIMELINE_TRACKS = [
+  { key: 'run_of_show', label: 'Run of Show' },
+  { key: 'lx', label: 'Lighting (LX)' },
+  { key: 'sound', label: 'Sound (SND)' },
+  { key: 'deck', label: 'Deck' },
+  { key: 'projection', label: 'Projection / Video' },
+  { key: 'spot_house', label: 'Spot / House' },
+];
+const TIMELINE_MODES = [
+  { value: 'segment', label: 'Segment Mode' },
+  { value: 'timecode', label: 'Timecode Mode' },
+];
+const PAPERWORK_DEPARTMENTS = ['lighting', 'sound', 'projection', 'deck'];
+const PAPERWORK_BATCH_WINDOW_MS = 120000;
+const TIMELINE_BASE_SNAP_MS = 5000;
+const DEFAULT_TIMELINE_SNAP = {
+  segmentBoundaries: true,
+  markers: true,
+  cueEdges: true,
+};
 
 const CUE_STATUSES = [
   { value: 'planned', label: 'Planned', color: 'bg-gray-100 text-gray-700' },
@@ -368,6 +388,178 @@ function parseClockMinutes(value = '') {
   return (hours * 60) + minutes;
 }
 
+function parseDurationToMinutes(value = '') {
+  const raw = String(value || '').trim();
+  if (!raw) return 5;
+  const match = raw.match(/(-?\d+)/);
+  if (!match) return 5;
+  const next = Number(match[1]);
+  if (!Number.isFinite(next)) return 5;
+  return Math.max(0, next);
+}
+
+function inferTrackFromDepartment(department = '') {
+  const dep = String(department || '').toUpperCase();
+  if (dep === 'LX') return 'lx';
+  if (dep === 'AUDIO' || dep === 'SND') return 'sound';
+  if (dep === 'DECK' || dep === 'FLY') return 'deck';
+  if (dep === 'VIDEO' || dep === 'PROJ' || dep === 'VID' || dep === 'IMAG') return 'projection';
+  if (dep === 'FOH') return 'spot_house';
+  return 'run_of_show';
+}
+
+function inferDepartmentFromTrack(track = '') {
+  if (track === 'lx') return 'LX';
+  if (track === 'sound') return 'AUDIO';
+  if (track === 'deck') return 'DECK';
+  if (track === 'projection') return 'VIDEO';
+  if (track === 'spot_house') return 'FOH';
+  return 'STAGE';
+}
+
+function rowToTimelineCue(row = {}, index = 0) {
+  const minutes = parseClockMinutes(row.time);
+  const startMs = minutes === null ? index * 300000 : minutes * 60000;
+  const durationMs = parseDurationToMinutes(row.duration) * 60000;
+  return {
+    id: row.id || makeId('cue_track'),
+    sourceCueId: row.id || makeId('cue_row'),
+    cueId: row.cueId || `CUE-${index + 1}`,
+    label: row.item || 'Cue',
+    department: row.department || inferDepartmentFromTrack('run_of_show'),
+    track: inferTrackFromDepartment(row.department),
+    segmentId: row.cueId || `SEG-${index + 1}`,
+    startMs,
+    endMs: startMs + Math.max(durationMs, 1000),
+    durationMs: Math.max(durationMs, 1000),
+    cueType: inferTrackFromDepartment(row.department) === 'projection' ? 'PROJ' : (row.department || 'STAGE'),
+    triggerSource: row.scriptRef || row.environment || 'SM Call',
+    standbyMarker: false,
+    goMarker: false,
+    locked: false,
+    linkedGroupId: '',
+    notes: row.notes || '',
+  };
+}
+
+function normalizeTimelineCue(cue = {}, fallback = {}) {
+  const startMs = Number.isFinite(Number(cue.startMs)) ? Number(cue.startMs) : (Number(fallback.startMs) || 0);
+  const durationMsRaw = Number.isFinite(Number(cue.durationMs)) ? Number(cue.durationMs) : Number(fallback.durationMs || 60000);
+  const durationMs = Math.max(durationMsRaw, 1000);
+  const endMs = Number.isFinite(Number(cue.endMs)) ? Number(cue.endMs) : (startMs + durationMs);
+  return {
+    id: cue.id || fallback.id || makeId('timeline'),
+    sourceCueId: cue.sourceCueId || fallback.sourceCueId || '',
+    cueId: cue.cueId || fallback.cueId || '',
+    label: cue.label || fallback.label || '',
+    department: cue.department || fallback.department || 'STAGE',
+    track: cue.track || fallback.track || inferTrackFromDepartment(cue.department || fallback.department),
+    segmentId: cue.segmentId || fallback.segmentId || cue.cueId || fallback.cueId || '',
+    startMs,
+    endMs: Math.max(endMs, startMs + 1000),
+    durationMs,
+    cueType: cue.cueType || fallback.cueType || cue.department || 'STAGE',
+    triggerSource: cue.triggerSource || fallback.triggerSource || '',
+    standbyMarker: !!cue.standbyMarker,
+    goMarker: !!cue.goMarker,
+    locked: !!cue.locked,
+    linkedGroupId: cue.linkedGroupId || '',
+    notes: cue.notes || fallback.notes || '',
+  };
+}
+
+function syncTimelineCuesFromRows(rows = [], existingCues = []) {
+  const existingBySource = new Map((existingCues || []).map((cue) => [cue.sourceCueId, cue]));
+  return rows.map((row, index) => {
+    const base = rowToTimelineCue(row, index);
+    const existing = existingBySource.get(row.id) || {};
+    return normalizeTimelineCue({
+      ...base,
+      ...existing,
+      sourceCueId: row.id,
+      cueId: row.cueId || base.cueId,
+      label: row.item || base.label,
+      department: row.department || base.department,
+      track: existing.track || inferTrackFromDepartment(row.department),
+      triggerSource: row.scriptRef || row.environment || existing.triggerSource || base.triggerSource,
+      notes: row.notes || existing.notes || '',
+    }, base);
+  });
+}
+
+function toPaperworkDepartment(track = '', department = '') {
+  const normalizedTrack = String(track || '').toLowerCase();
+  if (normalizedTrack === 'lx') return 'lighting';
+  if (normalizedTrack === 'sound') return 'sound';
+  if (normalizedTrack === 'deck') return 'deck';
+  if (normalizedTrack === 'projection') return 'projection';
+  const dep = String(department || '').toUpperCase();
+  if (dep === 'LX') return 'lighting';
+  if (dep === 'AUDIO') return 'sound';
+  if (dep === 'DECK' || dep === 'FLY') return 'deck';
+  if (dep === 'VIDEO' || dep === 'PROJ' || dep === 'VID' || dep === 'IMAG') return 'projection';
+  return '';
+}
+
+function toDataUrlText(content = '') {
+  const encoded = encodeURIComponent(String(content || ''));
+  return `data:text/plain;charset=utf-8,${encoded}`;
+}
+
+function buildDepartmentPaperworkText(department = 'lighting', rows = [], timelineCues = []) {
+  const title = department.toUpperCase();
+  const relevant = (timelineCues || []).filter((cue) => toPaperworkDepartment(cue.track, cue.department) === department);
+  const ordered = relevant.slice().sort((a, b) => a.startMs - b.startMs);
+  const header = [
+    `${title} TIMELINE CUE SHEET`,
+    `Generated: ${new Date().toISOString()}`,
+    '',
+  ];
+  const lines = ordered.map((cue, index) => {
+    const startMin = Math.round(cue.startMs / 60000);
+    const durSec = Math.round((cue.durationMs || 0) / 1000);
+    return `${index + 1}. ${cue.cueId || `CUE-${index + 1}`} | ${cue.label || 'Cue'} | T+${startMin}m | ${durSec}s | ${cue.triggerSource || 'SM Call'} | ${cue.notes || ''}`.trim();
+  });
+  if (!lines.length) {
+    lines.push('No cues mapped yet for this department.');
+  }
+
+  if (department === 'sound') {
+    lines.push('', 'INPUT / PATCH CONTEXT');
+    rows
+      .filter((row) => String(row.department || '').toUpperCase() === 'AUDIO')
+      .forEach((row, index) => {
+        lines.push(`- ${index + 1}: ${row.cueId || 'SND'} ${row.item || ''} (${row.crewMember || 'Unassigned'})`);
+      });
+  }
+  if (department === 'lighting') {
+    lines.push('', 'LIGHTING CUE CONTEXT');
+    rows
+      .filter((row) => String(row.department || '').toUpperCase() === 'LX')
+      .forEach((row) => {
+        lines.push(`- ${row.cueId || 'LX'} ${row.item || ''} | ${row.status || 'planned'}`);
+      });
+  }
+  if (department === 'projection') {
+    lines.push('', 'PROJECTION / VIDEO CONTEXT');
+    rows
+      .filter((row) => ['VIDEO', 'PROJ', 'VID', 'IMAG'].includes(String(row.department || '').toUpperCase()))
+      .forEach((row) => {
+        lines.push(`- ${row.cueId || 'PROJ'} ${row.item || ''} | ${row.notes || ''}`);
+      });
+  }
+  if (department === 'deck') {
+    lines.push('', 'DECK SHIFT CONTEXT');
+    rows
+      .filter((row) => ['DECK', 'FLY'].includes(String(row.department || '').toUpperCase()))
+      .forEach((row) => {
+        lines.push(`- ${row.cueId || 'DECK'} ${row.item || ''} | ${row.environment || ''}`);
+      });
+  }
+
+  return [...header, ...lines].join('\n');
+}
+
 function formatClockMinutes(totalMinutes = 0) {
   const wrapped = ((totalMinutes % 1440) + 1440) % 1440;
   const hours = Math.floor(wrapped / 60);
@@ -388,6 +580,112 @@ function adjustDuration(value = '', deltaMinutes = 0) {
   if (!match) return raw;
   const next = Math.max(0, Number(match[1]) + deltaMinutes);
   return `${next} min`;
+}
+
+function formatTimecodeFromMs(ms = 0) {
+  const totalSeconds = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function formatClockFromMs(ms = 0) {
+  const totalMinutes = Math.max(0, Math.floor(Number(ms || 0) / 60000));
+  const hours = Math.floor(totalMinutes / 60) % 24;
+  const minutes = totalMinutes % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+}
+
+function parseTimecodeToMs(value = '') {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const parts = raw.split(':').map((token) => Number(token));
+  if (!parts.every((num) => Number.isFinite(num))) return null;
+  if (parts.length === 2) {
+    const [minutes, seconds] = parts;
+    return (Math.max(0, minutes) * 60 + Math.max(0, seconds)) * 1000;
+  }
+  if (parts.length === 3) {
+    const [hours, minutes, seconds] = parts;
+    return ((Math.max(0, hours) * 3600) + (Math.max(0, minutes) * 60) + Math.max(0, seconds)) * 1000;
+  }
+  return null;
+}
+
+function parseClockToMs(value = '') {
+  const minutes = parseClockMinutes(value);
+  if (minutes === null) return null;
+  return minutes * 60000;
+}
+
+function msToDurationLabel(ms = 0) {
+  const minutes = Math.round(Math.max(0, Number(ms || 0)) / 60000);
+  return minutes > 0 ? `${minutes} min` : '';
+}
+
+function normalizeTimelineMode(value = '') {
+  return value === 'timecode' ? 'timecode' : 'segment';
+}
+
+function normalizeTimelineSnap(value = {}) {
+  return {
+    segmentBoundaries: value.segmentBoundaries !== undefined ? !!value.segmentBoundaries : true,
+    markers: value.markers !== undefined ? !!value.markers : true,
+    cueEdges: value.cueEdges !== undefined ? !!value.cueEdges : true,
+  };
+}
+
+function normalizePaperworkStatus(value = '') {
+  const normalized = String(value || '').toLowerCase();
+  if (normalized === 'published') return 'published';
+  if (normalized === 'archived') return 'archived';
+  return 'draft';
+}
+
+function normalizePaperworkVersion(version = {}, index = 0) {
+  const department = PAPERWORK_DEPARTMENTS.includes(String(version.department || '').toLowerCase())
+    ? String(version.department || '').toLowerCase()
+    : 'lighting';
+  const links = version.artifactLinks && typeof version.artifactLinks === 'object'
+    ? version.artifactLinks
+    : version.artifact_links && typeof version.artifact_links === 'object'
+      ? version.artifact_links
+      : {};
+  return {
+    id: String(version.id || makeId(`paperwork_${department}_${index}`)),
+    eventId: version.eventId || version.event_id || '',
+    department,
+    versionNumber: Number(version.versionNumber || version.version_number || 1) || 1,
+    status: normalizePaperworkStatus(version.status),
+    createdBy: version.createdBy || version.created_by || '',
+    createdAt: version.createdAt || version.created_at || new Date().toISOString(),
+    sourceSnapshotId: version.sourceSnapshotId || version.source_snapshot_id || '',
+    changeSummary: version.changeSummary || version.change_summary || '',
+    artifactLinks: {
+      txt: links.txt || '',
+      pdf: links.pdf || '',
+    },
+  };
+}
+
+function cueSignature(cue = {}) {
+  return [
+    cue.id,
+    cue.track,
+    cue.startMs,
+    cue.endMs,
+    cue.durationMs,
+    cue.cueId,
+    cue.label,
+    cue.triggerSource,
+    cue.cueType,
+    cue.notes,
+    cue.locked ? '1' : '0',
+    cue.standbyMarker ? '1' : '0',
+    cue.goMarker ? '1' : '0',
+    cue.linkedGroupId || '',
+  ].join('|');
 }
 
 function normalizeRunOfShowExtractedCue(cue = {}, index = 0) {
@@ -582,6 +880,30 @@ export default function RunOfShow() {
   
   const [saving, setSaving] = useState(false);
   const [printView, setPrintView] = useState(false);
+  const [timelineMode, setTimelineMode] = useState('segment');
+  const [timelineCues, setTimelineCues] = useState([]);
+  const [timelineTrackFilter, setTimelineTrackFilter] = useState('all');
+  const [timelineSnap, setTimelineSnap] = useState(DEFAULT_TIMELINE_SNAP);
+  const [timelineSelectedCueIds, setTimelineSelectedCueIds] = useState([]);
+  const [paperworkDirty, setPaperworkDirty] = useState(() => (
+    PAPERWORK_DEPARTMENTS.reduce((acc, department) => ({ ...acc, [department]: false }), {})
+  ));
+  const [paperworkVersions, setPaperworkVersions] = useState([]);
+  const [paperworkStatus, setPaperworkStatus] = useState('');
+  const [paperworkPublishing, setPaperworkPublishing] = useState('');
+
+  const timelineCuesRef = useRef([]);
+  const rowsRef = useRef([]);
+  const paperworkDirtyRef = useRef({});
+  const paperworkVersionsRef = useRef([]);
+  const lastCueSignaturesRef = useRef(new Map());
+  const editSessionRef = useRef({
+    timer: null,
+    startedAt: null,
+    lastChangedAt: null,
+    changeCount: 0,
+    summary: '',
+  });
 
   const selectedEvent = events.find(e => e.id === selectedEventId);
   const normalizedClientType = String(user?.clientType || '').trim().toLowerCase();
@@ -636,6 +958,30 @@ export default function RunOfShow() {
   const activeCue = activeCueIndex >= 0 ? rows[activeCueIndex] : null;
   const previousCue = activeCueIndex > 0 ? rows[activeCueIndex - 1] : null;
   const nextCue = activeCueIndex >= 0 && activeCueIndex < rows.length - 1 ? rows[activeCueIndex + 1] : null;
+  const timelineCuesByTrack = useMemo(() => {
+    const grouped = TIMELINE_TRACKS.reduce((acc, track) => ({ ...acc, [track.key]: [] }), {});
+    (timelineCues || []).forEach((cue) => {
+      const trackKey = TIMELINE_TRACKS.some((track) => track.key === cue.track) ? cue.track : 'run_of_show';
+      if (!grouped[trackKey]) grouped[trackKey] = [];
+      grouped[trackKey].push(cue);
+    });
+    Object.keys(grouped).forEach((trackKey) => {
+      grouped[trackKey] = grouped[trackKey].slice().sort((a, b) => Number(a.startMs || 0) - Number(b.startMs || 0));
+    });
+    return grouped;
+  }, [timelineCues]);
+  const paperworkVersionsByDepartment = useMemo(() => {
+    return PAPERWORK_DEPARTMENTS.reduce((acc, department) => {
+      const versions = (paperworkVersions || [])
+        .filter((entry) => entry.department === department)
+        .slice()
+        .sort((a, b) => Number(b.versionNumber || 0) - Number(a.versionNumber || 0));
+      return {
+        ...acc,
+        [department]: versions,
+      };
+    }, {});
+  }, [paperworkVersions]);
 
   // Load existing run of show data when event is selected
   useEffect(() => {
@@ -648,6 +994,29 @@ export default function RunOfShow() {
       setSourceDocument(normalizeSourceDocument(runOfShow.sourceDocument || runOfShow.source_document));
       if (Array.isArray(runOfShow.cues)) setRows(normalizeCueRows(runOfShow.cues));
       else setRows(getDefaultRowsForEvent(selectedEvent));
+      setTimelineMode(normalizeTimelineMode(runOfShow.timelineMode || runOfShow.timeline_mode));
+      setTimelineTrackFilter(String(runOfShow.timelineTrackFilter || runOfShow.timeline_track_filter || 'all'));
+      setTimelineSnap(normalizeTimelineSnap(runOfShow.timelineSnap || runOfShow.timeline_snap || {}));
+      const restoredTimelineCues = Array.isArray(runOfShow.timelineCues || runOfShow.timeline_cues)
+        ? (runOfShow.timelineCues || runOfShow.timeline_cues)
+            .map((cue, index) => normalizeTimelineCue(cue, rowToTimelineCue((runOfShow.cues || [])[index] || {}, index)))
+        : [];
+      if (restoredTimelineCues.length) setTimelineCues(restoredTimelineCues);
+      else {
+        const baseRows = Array.isArray(runOfShow.cues) ? normalizeCueRows(runOfShow.cues) : getDefaultRowsForEvent(selectedEvent);
+        setTimelineCues(syncTimelineCuesFromRows(baseRows, []));
+      }
+      const incomingDirty = runOfShow.paperworkDirty || runOfShow.paperwork_dirty || {};
+      setPaperworkDirty(PAPERWORK_DEPARTMENTS.reduce((acc, department) => ({
+        ...acc,
+        [department]: !!incomingDirty[department],
+      }), {}));
+      const incomingVersions = Array.isArray(runOfShow.paperworkVersions || runOfShow.paperwork_versions)
+        ? (runOfShow.paperworkVersions || runOfShow.paperwork_versions).map((entry, index) => normalizePaperworkVersion(entry, index))
+        : [];
+      setPaperworkVersions(incomingVersions);
+      setTimelineSelectedCueIds([]);
+      setPaperworkStatus('');
       if (Array.isArray(runOfShow.openMicQueue)) setOpenMicQueue(runOfShow.openMicQueue);
       else setOpenMicQueue(theaterEvent ? [] : getDefaultOpenMicQueue());
       if (runOfShow.schedulingMode) setSchedulingMode(runOfShow.schedulingMode);
@@ -682,12 +1051,29 @@ export default function RunOfShow() {
       setSourceDocumentStatus('');
       setPendingSourceDraftRows([]);
       setPendingSourceRawText('');
+      lastCueSignaturesRef.current = new Map();
+      if (editSessionRef.current.timer) clearTimeout(editSessionRef.current.timer);
+      editSessionRef.current = {
+        timer: null,
+        startedAt: null,
+        lastChangedAt: null,
+        changeCount: 0,
+        summary: '',
+      };
       return;
     }
 
     setPrimaryView('clean_editable');
     setSourceDocument(null);
     setRows(getDefaultRowsForEvent(selectedEvent));
+    setTimelineMode('segment');
+    setTimelineTrackFilter('all');
+    setTimelineSnap(DEFAULT_TIMELINE_SNAP);
+    setTimelineCues(syncTimelineCuesFromRows(getDefaultRowsForEvent(selectedEvent), []));
+    setPaperworkDirty(PAPERWORK_DEPARTMENTS.reduce((acc, department) => ({ ...acc, [department]: false }), {}));
+    setPaperworkVersions([]);
+    setTimelineSelectedCueIds([]);
+    setPaperworkStatus('');
     setOpenMicQueue(selectedEvent.genre === THEATER_GENRE_KEY ? [] : getDefaultOpenMicQueue());
     setSchedulingMode('clock');
     setWorkflowSteps(getDefaultWorkflow(selectedEvent.genre === THEATER_GENRE_KEY));
@@ -701,6 +1087,15 @@ export default function RunOfShow() {
     setSourceDocumentStatus('');
     setPendingSourceDraftRows([]);
     setPendingSourceRawText('');
+    lastCueSignaturesRef.current = new Map();
+    if (editSessionRef.current.timer) clearTimeout(editSessionRef.current.timer);
+    editSessionRef.current = {
+      timer: null,
+      startedAt: null,
+      lastChangedAt: null,
+      changeCount: 0,
+      summary: '',
+    };
   }, [selectedEvent]);
 
   useEffect(() => {
@@ -760,6 +1155,289 @@ export default function RunOfShow() {
     load();
     return () => { cancelled = true; };
   }, [selectedEventId, user?.id]);
+
+  useEffect(() => {
+    timelineCuesRef.current = timelineCues;
+  }, [timelineCues]);
+
+  useEffect(() => {
+    rowsRef.current = rows;
+  }, [rows]);
+
+  useEffect(() => {
+    paperworkDirtyRef.current = paperworkDirty;
+  }, [paperworkDirty]);
+
+  useEffect(() => {
+    paperworkVersionsRef.current = paperworkVersions;
+  }, [paperworkVersions]);
+
+  useEffect(() => {
+    return () => {
+      if (editSessionRef.current.timer) {
+        clearTimeout(editSessionRef.current.timer);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    setTimelineCues(prev => syncTimelineCuesFromRows(rows, prev));
+  }, [rows]);
+
+  const syncRowsFromTimelineCues = (nextTimelineCues = []) => {
+    const bySource = new Map(nextTimelineCues.map(cue => [cue.sourceCueId, cue]));
+    setRows(prev => normalizeCueRows(prev.map((row) => {
+      const linked = bySource.get(row.id);
+      if (!linked) return row;
+      const nextDepartment = inferDepartmentFromTrack(linked.track || inferTrackFromDepartment(row.department));
+      return {
+        ...row,
+        cueId: linked.cueId || row.cueId,
+        department: nextDepartment,
+        scriptRef: linked.triggerSource || row.scriptRef,
+        time: formatClockFromMs(linked.startMs),
+        duration: msToDurationLabel(linked.durationMs),
+        item: linked.label || row.item,
+        notes: linked.notes || row.notes,
+      };
+    })));
+  };
+
+  const getNextPaperworkVersionNumber = (versions = [], department = '') => {
+    const currentMax = versions
+      .filter((entry) => entry.department === department)
+      .reduce((max, entry) => Math.max(max, Number(entry.versionNumber || 0)), 0);
+    return currentMax + 1;
+  };
+
+  const finalizePaperworkSession = ({ reason = 'Timeline edit', force = false } = {}) => {
+    const dirtyMap = paperworkDirtyRef.current || {};
+    const dirtyDepartments = PAPERWORK_DEPARTMENTS.filter((department) => !!dirtyMap[department]);
+    if (!dirtyDepartments.length) return null;
+
+    if (!force && !selectedEvent) return null;
+
+    const existing = paperworkVersionsRef.current || [];
+    const generatedAt = new Date().toISOString();
+    const generated = dirtyDepartments.map((department) => {
+      const content = buildDepartmentPaperworkText(department, rowsRef.current || [], timelineCuesRef.current || []);
+      const versionNumber = getNextPaperworkVersionNumber(existing, department);
+      return normalizePaperworkVersion({
+        id: makeId(`paperwork_${department}`),
+        eventId: selectedEvent?.id || '',
+        department,
+        versionNumber,
+        status: 'draft',
+        createdBy: user?.email || user?.id || 'system',
+        createdAt: generatedAt,
+        sourceSnapshotId: makeId('snapshot'),
+        changeSummary: reason,
+        artifactLinks: {
+          txt: toDataUrlText(content),
+          pdf: '',
+        },
+      });
+    });
+
+    const nextDirty = PAPERWORK_DEPARTMENTS.reduce((acc, department) => ({ ...acc, [department]: false }), {});
+    const nextVersions = [...existing, ...generated];
+
+    setPaperworkDirty(nextDirty);
+    setPaperworkVersions(nextVersions);
+    paperworkDirtyRef.current = nextDirty;
+    paperworkVersionsRef.current = nextVersions;
+    setPaperworkStatus(`Generated ${generated.length} updated paperwork draft${generated.length === 1 ? '' : 's'} (${reason}).`);
+
+    if (editSessionRef.current.timer) {
+      clearTimeout(editSessionRef.current.timer);
+    }
+    editSessionRef.current = {
+      timer: null,
+      startedAt: null,
+      lastChangedAt: null,
+      changeCount: 0,
+      summary: '',
+    };
+
+    return {
+      paperworkVersions: nextVersions,
+      paperworkDirty: nextDirty,
+    };
+  };
+
+  const queuePaperworkSession = (summary = 'Timeline edited') => {
+    const now = Date.now();
+    const nextSession = { ...(editSessionRef.current || {}) };
+    if (!nextSession.startedAt) nextSession.startedAt = now;
+    nextSession.lastChangedAt = now;
+    nextSession.changeCount = Number(nextSession.changeCount || 0) + 1;
+    nextSession.summary = summary;
+    if (nextSession.timer) clearTimeout(nextSession.timer);
+    nextSession.timer = setTimeout(() => {
+      finalizePaperworkSession({ reason: nextSession.summary || 'Timeline edit session' });
+    }, PAPERWORK_BATCH_WINDOW_MS);
+    editSessionRef.current = nextSession;
+  };
+
+  useEffect(() => {
+    const signatureById = new Map((timelineCues || []).map((cue) => [cue.id, cueSignature(cue)]));
+    if (lastCueSignaturesRef.current.size === 0) {
+      lastCueSignaturesRef.current = signatureById;
+      return;
+    }
+
+    const touchedDepartments = new Set();
+    for (const cue of (timelineCues || [])) {
+      const previous = lastCueSignaturesRef.current.get(cue.id);
+      const current = signatureById.get(cue.id);
+      if (previous !== current) {
+        const dep = toPaperworkDepartment(cue.track, cue.department);
+        if (dep) touchedDepartments.add(dep);
+      }
+    }
+    for (const [id] of lastCueSignaturesRef.current.entries()) {
+      if (!signatureById.has(id)) {
+        const prevCue = (timelineCuesRef.current || []).find((cue) => cue.id === id);
+        const dep = toPaperworkDepartment(prevCue?.track, prevCue?.department);
+        if (dep) touchedDepartments.add(dep);
+      }
+    }
+
+    if (touchedDepartments.size) {
+      setPaperworkDirty(prev => {
+        const next = { ...prev };
+        touchedDepartments.forEach((department) => {
+          next[department] = true;
+        });
+        paperworkDirtyRef.current = next;
+        return next;
+      });
+      queuePaperworkSession(`Timeline edits (${Array.from(touchedDepartments).join(', ')})`);
+    }
+    lastCueSignaturesRef.current = signatureById;
+  }, [timelineCues]);
+
+  const applyTimelineSnap = (valueMs = 0) => {
+    const shouldSnap = !!(timelineSnap.segmentBoundaries || timelineSnap.markers || timelineSnap.cueEdges);
+    if (!shouldSnap) return Math.max(0, Math.round(valueMs));
+    return Math.max(0, Math.round(valueMs / TIMELINE_BASE_SNAP_MS) * TIMELINE_BASE_SNAP_MS);
+  };
+
+  const updateTimelineCue = (cueId, updates = {}, { synchronizeRows = true, sessionSummary = 'Timeline cue updated' } = {}) => {
+    setTimelineCues(prev => {
+      const next = prev.map((cue) => {
+        if (cue.id !== cueId) return cue;
+        const raw = {
+          ...cue,
+          ...updates,
+        };
+        const startMs = updates.startMs !== undefined ? applyTimelineSnap(Number(updates.startMs) || 0) : Number(raw.startMs || 0);
+        const durationMs = updates.durationMs !== undefined
+          ? Math.max(1000, Number(updates.durationMs) || 1000)
+          : Math.max(1000, Number(raw.durationMs || 1000));
+        const normalized = normalizeTimelineCue({
+          ...raw,
+          startMs,
+          durationMs,
+          endMs: startMs + durationMs,
+        }, cue);
+        return normalized;
+      });
+      if (synchronizeRows) syncRowsFromTimelineCues(next);
+      queuePaperworkSession(sessionSummary);
+      return next;
+    });
+  };
+
+  const duplicateTimelineCue = (cueId) => {
+    setTimelineCues(prev => {
+      const source = prev.find(cue => cue.id === cueId);
+      if (!source) return prev;
+      const duplicate = normalizeTimelineCue({
+        ...source,
+        id: makeId('timeline'),
+        sourceCueId: '',
+        cueId: `${source.cueId || 'CUE'}-COPY`,
+        startMs: applyTimelineSnap((Number(source.startMs) || 0) + 5000),
+        endMs: (Number(source.endMs) || 0) + 5000,
+      }, source);
+      const next = [...prev, duplicate];
+      queuePaperworkSession('Timeline cue duplicated');
+      return next;
+    });
+  };
+
+  const deleteTimelineCue = (cueId) => {
+    setTimelineCues(prev => {
+      const next = prev.filter(cue => cue.id !== cueId);
+      queuePaperworkSession('Timeline cue removed');
+      return next;
+    });
+    setTimelineSelectedCueIds(prev => prev.filter(id => id !== cueId));
+  };
+
+  const shiftTimelineCue = (cueId, deltaMs = 0) => {
+    const cue = (timelineCuesRef.current || []).find(entry => entry.id === cueId);
+    if (!cue || cue.locked) return;
+    updateTimelineCue(
+      cueId,
+      { startMs: Math.max(0, Number(cue.startMs || 0) + deltaMs) },
+      { sessionSummary: 'Timeline cue moved' }
+    );
+  };
+
+  const trimTimelineCue = (cueId, deltaMs = 0) => {
+    const cue = (timelineCuesRef.current || []).find(entry => entry.id === cueId);
+    if (!cue || cue.locked) return;
+    updateTimelineCue(
+      cueId,
+      { durationMs: Math.max(1000, Number(cue.durationMs || 1000) + deltaMs) },
+      { sessionSummary: 'Timeline cue trimmed' }
+    );
+  };
+
+  const bulkShiftSelectedTimelineCues = (deltaMs = 0) => {
+    if (!timelineSelectedCueIds.length) return;
+    setTimelineCues(prev => {
+      const selected = new Set(timelineSelectedCueIds);
+      const next = prev.map((cue) => {
+        if (!selected.has(cue.id) || cue.locked) return cue;
+        const startMs = applyTimelineSnap(Math.max(0, Number(cue.startMs || 0) + deltaMs));
+        return normalizeTimelineCue({
+          ...cue,
+          startMs,
+          endMs: startMs + Math.max(1000, Number(cue.durationMs || 1000)),
+        }, cue);
+      });
+      syncRowsFromTimelineCues(next);
+      queuePaperworkSession('Bulk timeline move');
+      return next;
+    });
+  };
+
+  const linkSelectedTimelineCues = () => {
+    if (timelineSelectedCueIds.length < 2) return;
+    const linkId = makeId('link_group');
+    setTimelineCues(prev => prev.map(cue => (
+      timelineSelectedCueIds.includes(cue.id) ? { ...cue, linkedGroupId: linkId } : cue
+    )));
+    queuePaperworkSession('Linked timeline cues');
+  };
+
+  const unlinkSelectedTimelineCues = () => {
+    if (!timelineSelectedCueIds.length) return;
+    setTimelineCues(prev => prev.map(cue => (
+      timelineSelectedCueIds.includes(cue.id) ? { ...cue, linkedGroupId: '' } : cue
+    )));
+    queuePaperworkSession('Unlinked timeline cues');
+  };
+
+  const setTimelineCueSelection = (cueId, isSelected) => {
+    setTimelineSelectedCueIds(prev => {
+      if (isSelected) return Array.from(new Set([...prev, cueId]));
+      return prev.filter(id => id !== cueId);
+    });
+  };
 
   const addRow = () => {
     setRows([...rows, { 
@@ -1198,6 +1876,12 @@ ${unresolvedIssues}
 
   const buildRunOfShowPayload = (overrides = {}) => ({
     cues: rows,
+    timelineMode,
+    timelineCues,
+    timelineTrackFilter,
+    timelineSnap,
+    paperworkDirty,
+    paperworkVersions,
     openMicQueue,
     schedulingMode,
     workflowSteps,
@@ -1389,12 +2073,56 @@ Rules:
     setPendingSourceDraftRows([]);
   };
 
+  const handleRegeneratePaperworkNow = () => {
+    const generated = finalizePaperworkSession({ reason: 'Manual paperwork regenerate', force: true });
+    if (!generated) {
+      setPaperworkStatus('No department paperwork is currently marked out-of-date.');
+      return;
+    }
+    persistRunOfShowPatch({
+      paperworkDirty: generated.paperworkDirty,
+      paperworkVersions: generated.paperworkVersions,
+    }, { silent: true }).catch(() => {});
+  };
+
+  const handlePublishPaperworkVersion = (versionId) => {
+    if (!versionId) return;
+    setPaperworkPublishing(versionId);
+    let nextVersions = null;
+    setPaperworkVersions(prev => {
+      const target = prev.find(entry => entry.id === versionId);
+      if (!target) return prev;
+      const next = prev.map((entry) => {
+        if (entry.department !== target.department) return entry;
+        if (entry.id === target.id) return { ...entry, status: 'published' };
+        if (entry.status === 'published') return { ...entry, status: 'archived' };
+        return entry;
+      });
+      paperworkVersionsRef.current = next;
+      nextVersions = next;
+      return next;
+    });
+    setPaperworkStatus('Published paperwork version updated.');
+    if (nextVersions) {
+      persistRunOfShowPatch({ paperworkVersions: nextVersions }, { silent: true }).catch(() => {});
+    }
+    setPaperworkPublishing('');
+  };
+
   const saveToSupabase = async () => {
     if (!selectedEvent) return;
 
     setSaving(true);
     try {
-      await persistRunOfShowPatch({}, { silent: true });
+      const generated = finalizePaperworkSession({ reason: 'Manual save', force: true }) || {};
+      await persistRunOfShowPatch({
+        timelineMode,
+        timelineCues: timelineCuesRef.current || timelineCues,
+        timelineTrackFilter,
+        timelineSnap,
+        paperworkDirty: generated.paperworkDirty || paperworkDirtyRef.current || paperworkDirty,
+        paperworkVersions: generated.paperworkVersions || paperworkVersionsRef.current || paperworkVersions,
+      }, { silent: true });
       alert('Perfect. Run of show is saved.');
     } catch (err) {
       console.error('Failed to save:', err);
@@ -2381,10 +3109,319 @@ Lighting Designer: Dana Hall dana@example.com 210-555-0144 Call time 5:30 PM"
             </div>
           )}
 
-          {/* Timeline */}
+          {/* Timeline Editor */}
+          <div className="card mb-6">
+            <div className="flex items-start justify-between mb-3 flex-wrap gap-3">
+              <div>
+                <h3 className="text-lg m-0">🧱 Timeline (Show Control)</h3>
+                <p className="text-xs text-gray-500 mt-1 mb-0">
+                  Multi-track cue timeline for LX, sound, deck, projection, and show control.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <select
+                  value={timelineMode}
+                  onChange={(e) => setTimelineMode(normalizeTimelineMode(e.target.value))}
+                  className="px-2 py-1.5 border border-gray-200 rounded text-xs bg-white"
+                >
+                  {TIMELINE_MODES.map((mode) => (
+                    <option key={mode.value} value={mode.value}>{mode.label}</option>
+                  ))}
+                </select>
+                <select
+                  value={timelineTrackFilter}
+                  onChange={(e) => setTimelineTrackFilter(e.target.value)}
+                  className="px-2 py-1.5 border border-gray-200 rounded text-xs bg-white"
+                >
+                  <option value="all">All Tracks</option>
+                  {TIMELINE_TRACKS.map((track) => (
+                    <option key={track.key} value={track.key}>{track.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+              <label className="flex items-center gap-2 text-xs text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={!!timelineSnap.segmentBoundaries}
+                  onChange={(e) => setTimelineSnap(prev => ({ ...prev, segmentBoundaries: e.target.checked }))}
+                />
+                Snap to Segment Boundaries
+              </label>
+              <label className="flex items-center gap-2 text-xs text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={!!timelineSnap.markers}
+                  onChange={(e) => setTimelineSnap(prev => ({ ...prev, markers: e.target.checked }))}
+                />
+                Snap to Markers
+              </label>
+              <label className="flex items-center gap-2 text-xs text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={!!timelineSnap.cueEdges}
+                  onChange={(e) => setTimelineSnap(prev => ({ ...prev, cueEdges: e.target.checked }))}
+                />
+                Snap to Cue Edges
+              </label>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap mb-3">
+              <button type="button" className="btn-secondary text-xs" onClick={() => bulkShiftSelectedTimelineCues(-5000)} disabled={!timelineSelectedCueIds.length}>
+                Selected -5s
+              </button>
+              <button type="button" className="btn-secondary text-xs" onClick={() => bulkShiftSelectedTimelineCues(5000)} disabled={!timelineSelectedCueIds.length}>
+                Selected +5s
+              </button>
+              <button type="button" className="btn-secondary text-xs" onClick={linkSelectedTimelineCues} disabled={timelineSelectedCueIds.length < 2}>
+                Link Selected
+              </button>
+              <button type="button" className="btn-secondary text-xs" onClick={unlinkSelectedTimelineCues} disabled={!timelineSelectedCueIds.length}>
+                Unlink Selected
+              </button>
+              <button type="button" className="btn-secondary text-xs" onClick={handleRegeneratePaperworkNow}>
+                Regenerate Paperwork Drafts
+              </button>
+              {!!paperworkStatus && <span className="text-xs text-gray-600">{paperworkStatus}</span>}
+            </div>
+
+            <div className="space-y-3">
+              {TIMELINE_TRACKS
+                .filter((track) => timelineTrackFilter === 'all' || track.key === timelineTrackFilter)
+                .map((track) => {
+                  const cues = timelineCuesByTrack[track.key] || [];
+                  return (
+                    <div key={track.key} className="border border-gray-200 rounded-lg p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-sm font-semibold m-0">{track.label}</h4>
+                        <span className="text-[11px] text-gray-500">{cues.length} cue{cues.length === 1 ? '' : 's'}</span>
+                      </div>
+                      {!cues.length ? (
+                        <p className="text-xs text-gray-500 m-0">No cues on this track yet.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {cues.map((cue) => (
+                            <div key={cue.id} className={`p-2 rounded border ${timelineSelectedCueIds.includes(cue.id) ? 'border-[#c8a45e] bg-[#f8f2e4]' : 'border-gray-200 bg-white'}`}>
+                              <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-start">
+                                <div className="md:col-span-1">
+                                  <label className="flex items-center gap-1 text-[11px] text-gray-600">
+                                    <input
+                                      type="checkbox"
+                                      checked={timelineSelectedCueIds.includes(cue.id)}
+                                      onChange={(e) => setTimelineCueSelection(cue.id, e.target.checked)}
+                                    />
+                                    Pick
+                                  </label>
+                                </div>
+                                <div className="md:col-span-2">
+                                  <input
+                                    type="text"
+                                    value={cue.cueId || ''}
+                                    onChange={(e) => updateTimelineCue(cue.id, { cueId: e.target.value }, { sessionSummary: 'Cue ID updated' })}
+                                    className="w-full px-2 py-1 border border-gray-200 rounded text-xs"
+                                    placeholder="LX 12"
+                                  />
+                                </div>
+                                <div className="md:col-span-3">
+                                  <input
+                                    type="text"
+                                    value={cue.label || ''}
+                                    onChange={(e) => updateTimelineCue(cue.id, { label: e.target.value }, { sessionSummary: 'Cue label updated' })}
+                                    className="w-full px-2 py-1 border border-gray-200 rounded text-xs"
+                                    placeholder="Cue label"
+                                  />
+                                </div>
+                                <div className="md:col-span-2">
+                                  {timelineMode === 'timecode' ? (
+                                    <input
+                                      type="text"
+                                      value={formatTimecodeFromMs(cue.startMs)}
+                                      onChange={(e) => {
+                                        const parsed = parseTimecodeToMs(e.target.value);
+                                        if (parsed !== null) updateTimelineCue(cue.id, { startMs: parsed }, { sessionSummary: 'Cue timecode updated' });
+                                      }}
+                                      className="w-full px-2 py-1 border border-gray-200 rounded text-xs"
+                                      placeholder="HH:MM:SS"
+                                    />
+                                  ) : (
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[11px] text-gray-500">T+</span>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        value={Math.round(Number(cue.startMs || 0) / 1000)}
+                                        onChange={(e) => updateTimelineCue(cue.id, { startMs: Number(e.target.value || 0) * 1000 }, { sessionSummary: 'Cue offset updated' })}
+                                        className="w-full px-2 py-1 border border-gray-200 rounded text-xs"
+                                      />
+                                      <span className="text-[11px] text-gray-500">s</span>
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="md:col-span-1">
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    value={Math.max(1, Math.round(Number(cue.durationMs || 1000) / 1000))}
+                                    onChange={(e) => updateTimelineCue(cue.id, { durationMs: Number(e.target.value || 1) * 1000 }, { sessionSummary: 'Cue duration updated' })}
+                                    className="w-full px-2 py-1 border border-gray-200 rounded text-xs"
+                                  />
+                                </div>
+                                <div className="md:col-span-3 flex items-center gap-1 flex-wrap">
+                                  <button type="button" className="btn-secondary text-[11px] px-2 py-1" onClick={() => shiftTimelineCue(cue.id, -5000)} disabled={cue.locked}>-5s</button>
+                                  <button type="button" className="btn-secondary text-[11px] px-2 py-1" onClick={() => shiftTimelineCue(cue.id, 5000)} disabled={cue.locked}>+5s</button>
+                                  <button type="button" className="btn-secondary text-[11px] px-2 py-1" onClick={() => trimTimelineCue(cue.id, -1000)} disabled={cue.locked}>Trim -1s</button>
+                                  <button type="button" className="btn-secondary text-[11px] px-2 py-1" onClick={() => trimTimelineCue(cue.id, 1000)} disabled={cue.locked}>Trim +1s</button>
+                                  <button type="button" className="btn-secondary text-[11px] px-2 py-1" onClick={() => duplicateTimelineCue(cue.id)}>Duplicate</button>
+                                  <button type="button" className="text-red-600 text-[11px] px-2 py-1 border border-red-200 rounded" onClick={() => deleteTimelineCue(cue.id)}>Delete</button>
+                                </div>
+                                <div className="md:col-span-12 grid grid-cols-1 md:grid-cols-6 gap-2">
+                                  <select
+                                    value={cue.track || track.key}
+                                    onChange={(e) => updateTimelineCue(cue.id, { track: e.target.value, department: inferDepartmentFromTrack(e.target.value) }, { sessionSummary: 'Cue track updated' })}
+                                    className="px-2 py-1 border border-gray-200 rounded text-xs bg-white"
+                                  >
+                                    {TIMELINE_TRACKS.map((opt) => (
+                                      <option key={opt.key} value={opt.key}>{opt.label}</option>
+                                    ))}
+                                  </select>
+                                  <input
+                                    type="text"
+                                    value={cue.segmentId || ''}
+                                    onChange={(e) => updateTimelineCue(cue.id, { segmentId: e.target.value }, { sessionSummary: 'Cue segment updated' })}
+                                    className="px-2 py-1 border border-gray-200 rounded text-xs"
+                                    placeholder="Segment ID"
+                                  />
+                                  <input
+                                    type="text"
+                                    value={cue.triggerSource || ''}
+                                    onChange={(e) => updateTimelineCue(cue.id, { triggerSource: e.target.value }, { sessionSummary: 'Cue trigger updated' })}
+                                    className="px-2 py-1 border border-gray-200 rounded text-xs"
+                                    placeholder="Trigger source"
+                                  />
+                                  <input
+                                    type="text"
+                                    value={cue.linkedGroupId || ''}
+                                    onChange={(e) => updateTimelineCue(cue.id, { linkedGroupId: e.target.value }, { sessionSummary: 'Cue linking updated' })}
+                                    className="px-2 py-1 border border-gray-200 rounded text-xs"
+                                    placeholder="Linked group ID"
+                                  />
+                                  <label className="flex items-center gap-1 text-[11px] text-gray-700">
+                                    <input
+                                      type="checkbox"
+                                      checked={!!cue.standbyMarker}
+                                      onChange={(e) => updateTimelineCue(cue.id, { standbyMarker: e.target.checked }, { sessionSummary: 'Standby marker updated' })}
+                                    />
+                                    Standby
+                                  </label>
+                                  <div className="flex items-center gap-2">
+                                    <label className="flex items-center gap-1 text-[11px] text-gray-700">
+                                      <input
+                                        type="checkbox"
+                                        checked={!!cue.goMarker}
+                                        onChange={(e) => updateTimelineCue(cue.id, { goMarker: e.target.checked }, { sessionSummary: 'Go marker updated' })}
+                                      />
+                                      Go
+                                    </label>
+                                    <label className="flex items-center gap-1 text-[11px] text-gray-700">
+                                      <input
+                                        type="checkbox"
+                                        checked={!!cue.locked}
+                                        onChange={(e) => updateTimelineCue(cue.id, { locked: e.target.checked }, { sessionSummary: 'Cue lock updated' })}
+                                      />
+                                      Lock
+                                    </label>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+
+          {/* Auto-Versioned Department Paperwork */}
+          <div className="card mb-6">
+            <div className="flex items-start justify-between mb-3 flex-wrap gap-3">
+              <div>
+                <h3 className="text-lg m-0">📚 Department Paperwork Versions</h3>
+                <p className="text-xs text-gray-500 mt-1 mb-0">
+                  Timeline edits mark paperwork out-of-date. Draft versions regenerate in batched edit sessions.
+                </p>
+              </div>
+              <button type="button" className="btn-secondary text-xs" onClick={handleRegeneratePaperworkNow}>
+                Regenerate Drafts Now
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {PAPERWORK_DEPARTMENTS.map((department) => {
+                const versions = paperworkVersionsByDepartment[department] || [];
+                const published = versions.find((entry) => entry.status === 'published');
+                const dirty = !!paperworkDirty[department];
+                return (
+                  <div key={department} className="border border-gray-200 rounded p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-sm font-semibold capitalize">{department}</div>
+                      <span className={`text-[11px] px-2 py-0.5 rounded ${dirty ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
+                        {dirty ? 'Out of Date' : 'Current'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-gray-500 mt-0 mb-2">
+                      {published
+                        ? `Published v${published.versionNumber} · ${new Date(published.createdAt).toLocaleString()}`
+                        : 'No published version yet'}
+                    </p>
+                    {!versions.length ? (
+                      <p className="text-xs text-gray-500 m-0">No generated versions yet.</p>
+                    ) : (
+                      <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
+                        {versions.slice(0, 10).map((version) => (
+                          <div key={version.id} className="border border-gray-200 rounded px-2 py-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs">
+                                v{version.versionNumber} · {version.status}
+                              </span>
+                              <div className="flex items-center gap-1">
+                                {version.artifactLinks?.txt ? (
+                                  <a href={version.artifactLinks.txt} download={`${selectedEvent?.title || 'event'}-${department}-v${version.versionNumber}.txt`} className="text-[11px] text-[#7f5f2b] underline">
+                                    Download
+                                  </a>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  className="text-[11px] px-1.5 py-0.5 border border-gray-200 rounded"
+                                  onClick={() => handlePublishPaperworkVersion(version.id)}
+                                  disabled={paperworkPublishing === version.id || version.status === 'published'}
+                                >
+                                  Publish
+                                </button>
+                              </div>
+                            </div>
+                            <div className="text-[11px] text-gray-500">
+                              {new Date(version.createdAt).toLocaleString()} · {version.createdBy || 'system'}
+                            </div>
+                            {version.changeSummary ? (
+                              <div className="text-[11px] text-gray-600">{version.changeSummary}</div>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Cue Table */}
           <div id="clean-run-of-show-editor" className="card mb-6 overflow-x-auto">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg m-0">Event Timeline</h3>
+              <h3 className="text-lg m-0">Cue Table (Detailed)</h3>
               <div className="flex gap-2">
                 <button onClick={addRow} className="btn-primary text-sm">+ Add Cue</button>
                 <button 

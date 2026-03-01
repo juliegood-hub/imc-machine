@@ -93,6 +93,15 @@ const ACTION_COPY_BY_PAGE = {
     },
     actionIntro: 'Use this hub to move between execution teams without losing context.',
   },
+  safety_risk: {
+    actionLabels: {
+      complete: 'Mark Safety Plan Ready',
+      save: 'Save Safety Draft',
+      skip: 'Skip Safety Pass',
+      next: 'Open Production Calendar →',
+    },
+    actionIntro: 'Lock safety, compliance, and emergency planning before doors open.',
+  },
   production_ops_event: {
     actionLabels: {
       complete: 'Lock Event Ops Modules',
@@ -194,21 +203,48 @@ const ACTION_COPY_BY_PAGE = {
   },
   chat: {
     actionLabels: {
-      complete: 'Mark Chat Follow-Ups Done',
-      save: 'Save Chat Follow-Ups',
-      skip: 'Skip Chat Review',
-      next: 'Start Event →',
+      complete: 'Mark Chat Dashboard Reviewed',
+      save: 'Save Chat Filters',
+      skip: 'Skip Chat Dashboard',
+      next: 'Open Buddy →',
     },
-    actionIntro: 'Use chat for speed, then convert key details into tracked actions.',
+    actionIntro: 'Use modern chat sorting and favorites to find people fast, then jump to the right thread.',
+  },
+  buddy: {
+    actionLabels: {
+      complete: 'Mark Buddy Session Done',
+      save: 'Save Buddy Thread',
+      skip: 'Skip Buddy Session',
+      next: 'Open Chat Dashboard →',
+    },
+    actionIntro: 'Use Buddy for decisions and routing, then move into team chat threads for execution.',
   },
   workflow: {
     actionLabels: {
       complete: 'Mark Workflow Reviewed',
       save: 'Save My Workflow Lens',
       skip: 'Skip Workflow Review',
-      next: 'Start Building Event →',
+      next: 'Open User Guide →',
     },
     actionIntro: 'Pick the right lens, then jump directly into that section.',
+  },
+  white_papers: {
+    actionLabels: {
+      complete: 'Mark White Papers Reviewed',
+      save: 'Save White Paper Notes',
+      skip: 'Skip White Papers',
+      next: 'Open User Guide →',
+    },
+    actionIntro: 'Use white papers for strategy and stakeholder alignment, then move into implementation guidance.',
+  },
+  user_guide: {
+    actionLabels: {
+      complete: 'Mark Guide Section Complete',
+      save: 'Save Guide Progress',
+      skip: 'Skip Guide Section',
+      next: 'Open How It Works →',
+    },
+    actionIntro: 'Use this guide for execution detail, then jump straight into the module you need.',
   },
   podcast: {
     actionLabels: {
@@ -284,6 +320,11 @@ const VARIANT_PAGE_COPY = {
     podcast: {
       subtitle: 'Capture rehearsals, interviews, and show documentation with a production-safe media workflow.',
     },
+    safety_risk: {
+      subtitle: 'Run safety command for exits, screening, incidents, and EAP in one theater-ready control lane.',
+      nextDescription: 'Use this locked safety plan to support rehearsal, before-doors, and performance calls.',
+      actionLabels: { complete: 'Lock Theater Safety Plan' },
+    },
   },
   music: {
     event_create: {
@@ -304,6 +345,11 @@ const VARIANT_PAGE_COPY = {
     },
     campaigns: {
       actionLabels: { next: 'Next: Launch Next Show →' },
+    },
+    safety_risk: {
+      subtitle: 'Coordinate show security, venue compliance, weather contingencies, and emergency response.',
+      nextDescription: 'Use this safety pass to protect artists, staff, and audience through show closeout.',
+      actionLabels: { complete: 'Lock Show Safety Plan' },
     },
   },
   legal: {
@@ -326,6 +372,11 @@ const VARIANT_PAGE_COPY = {
     },
     production_ops_staffing: {
       subtitle: 'Assign moderators, check-in staff, A/V support, and compliance coverage for legal programs.',
+    },
+    safety_risk: {
+      subtitle: 'Coordinate legal-event safety, emergency readiness, permits, and incident controls.',
+      nextDescription: 'Use this compliance-safe plan to support legal program execution and reporting.',
+      actionLabels: { complete: 'Lock Legal Safety Plan' },
     },
   },
 };
@@ -479,6 +530,16 @@ const PAGE_FLOW = [
     nextDescription: 'Review all dates, conflicts, and readiness across the production timeline.',
   },
   {
+    key: 'safety_risk',
+    match: (pathname) => pathname.startsWith('/safety-risk'),
+    title: 'Safety + Risk Management Features',
+    subtitle: 'Run permits, insurance, screening, surveillance, incidents, and emergency action planning.',
+    features: 'Includes dynamic risk scoring, compliance status, fire/egress planning, medical readiness, and auto-generated EAP documents.',
+    nextPath: '/production-calendar',
+    nextTitle: 'Production Calendar',
+    nextDescription: 'Apply safety readiness to date-level execution and day-of-show coordination.',
+  },
+  {
     key: 'production_calendar',
     match: (pathname) => pathname.startsWith('/production-calendar'),
     title: 'Production Calendar Features',
@@ -541,12 +602,32 @@ const PAGE_FLOW = [
   {
     key: 'chat',
     match: (pathname) => pathname.startsWith('/chat'),
-    title: 'Event Chat Features',
-    subtitle: 'Open event conversations fast for production and operations coordination.',
-    features: 'Includes event-thread access for real-time team updates and role-specific collaboration.',
-    nextPath: '/events/create',
-    nextTitle: 'Start Event',
-    nextDescription: 'Create or select the next event to open a new operations thread.',
+    title: 'Chat Dashboard Features',
+    subtitle: 'See user-to-user conversations in one place with modern chat sorting and filters.',
+    features: 'Includes Most Recent, A–Z, Z–A, Favorites, Group Chats, search, and one-click jump to event threads.',
+    nextPath: '/buddy',
+    nextTitle: 'Buddy the CatBot',
+    nextDescription: 'Use Buddy for routing and next-step guidance after reviewing your team threads.',
+  },
+  {
+    key: 'search',
+    match: (pathname) => pathname.startsWith('/search'),
+    title: 'Global Search Features',
+    subtitle: 'Find pages first, then event content, then people by role or name.',
+    features: 'Includes feature-first ranking, scoped org/venue/event filters, people directory lookup, and fast typeahead.',
+    nextPath: '/workflow',
+    nextTitle: 'How It Works',
+    nextDescription: 'Return to the guide to continue section-by-section execution.',
+  },
+  {
+    key: 'buddy',
+    match: (pathname) => pathname.startsWith('/buddy'),
+    title: 'Buddy the CatBot Features',
+    subtitle: 'Use the assistant for practical next steps and one-click routing.',
+    features: 'Includes context-aware prompts, event context selection, and direct links to the exact page you need next.',
+    nextPath: '/chat',
+    nextTitle: 'Chat Dashboard',
+    nextDescription: 'Return to user-to-user threads to execute and coordinate with the team.',
   },
   {
     key: 'workflow',
@@ -554,9 +635,29 @@ const PAGE_FLOW = [
     title: 'Workflow Guide Features',
     subtitle: 'See the full color-coded process from intake to distribution and reporting.',
     features: 'Includes guided mode, AI Intake section, section focus filters, role ownership, four-zone alignment, and ordered execution steps.',
-    nextPath: '/events/create',
-    nextTitle: 'Start Event',
-    nextDescription: 'Begin the workflow in live data by creating your next event.',
+    nextPath: '/user-guide',
+    nextTitle: 'User Guide',
+    nextDescription: 'Open detailed module instructions with role-specific execution steps.',
+  },
+  {
+    key: 'white_papers',
+    match: (pathname) => pathname.startsWith('/white-papers'),
+    title: 'White Papers Features',
+    subtitle: 'Review long-form strategy and architecture papers for stakeholders and partners.',
+    features: 'Includes executive summaries, architecture notes, risk/compliance framing, and version-tracked publication history.',
+    nextPath: '/user-guide',
+    nextTitle: 'User Guide',
+    nextDescription: 'Move from strategy context into practical step-by-step execution.',
+  },
+  {
+    key: 'user_guide',
+    match: (pathname) => pathname.startsWith('/user-guide'),
+    title: 'User Guide Features',
+    subtitle: 'Follow section-by-section instructions for setup, production, safety, and distribution.',
+    features: 'Includes what/why/how instructions, pro tips, common mistakes, and direct links to live modules.',
+    nextPath: '/workflow',
+    nextTitle: 'How It Works',
+    nextDescription: 'Return to the visual workflow map and jump directly into your next section.',
   },
   {
     key: 'podcast',

@@ -13,11 +13,15 @@ export default function Sidebar() {
       links: [
         { to: '/', label: 'Dashboard', icon: '📊' },
         { to: '/workflow', label: 'How It Works', icon: '📖' },
+        { to: '/white-papers', label: 'White Papers', icon: '📄' },
+        { to: '/user-guide', label: 'User Guide', icon: '🧭' },
         { to: '/events/create', label: 'Start Event', icon: '🎪' },
+        { to: '/search', label: 'Global Search', icon: '🔎' },
         { to: '/events/create?ai=intake&input=email', label: 'AI Intake (Voice + Email)', icon: '📥' },
         { to: '/imc-composer', label: 'IMC Composer', icon: '✨' },
         { to: '/campaigns', label: 'Campaign Tracker', icon: '📈' },
-        { to: '/chat', label: 'Chat Hub', icon: '💬' },
+        { to: '/chat', label: 'Chat Dashboard', icon: '💬' },
+        { to: '/buddy', label: 'CatBot Buddy', icon: '🐈‍⬛' },
       ],
     },
     {
@@ -25,13 +29,16 @@ export default function Sidebar() {
       links: [
         { to: '/production-ops', label: 'Production Ops Hub', icon: '🎬' },
         { to: '/production-ops/event-ops?focus=event_ops', label: 'Event Ops Modules', icon: '🧵' },
+        { to: '/production-ops/event-ops?focus=event_ops', label: 'Plots + Layouts', icon: '🗺️' },
+        { to: '/safety-risk', label: 'Safety + Risk', icon: '🛡️' },
         { to: '/production-ops?focus=role_map', label: 'Role Responsibility Map', icon: '🧭' },
         { to: '/production-ops/event-ops?focus=event_ops&opsTab=concessions', label: 'Menus + Bev Specials', icon: '🍔' },
         { to: '/production-ops/event-ops?focus=event_ops&opsTab=merch', label: 'Merch + Vendors', icon: '🛍️' },
         { to: '/production-ops/staffing?focus=staffing', label: 'Staff Scheduler', icon: '🧑‍💼' },
         { to: '/production-ops/training?focus=training', label: 'Training + Certs', icon: '🎓' },
         { to: '/production-ops/inventory?focus=inventory', label: 'Inventory + Ordering', icon: '📦' },
-        { to: '/podcast', label: 'Capture + Podcast', icon: '🎥' },
+        { to: '/podcast', label: 'Capture Hub', icon: '🎥' },
+        { to: '/format-images', label: 'Image + Video Format', icon: '🖼️' },
         { to: '/production-calendar', label: 'Production Calendar', icon: '🗓️' },
         { to: '/run-of-show', label: 'Run of Show', icon: '📋' },
       ],
@@ -57,7 +64,10 @@ export default function Sidebar() {
   ];
 
   return (
-    <aside className="hidden lg:flex flex-col w-60 bg-white border-r border-gray-200 fixed left-0 top-[52px] h-[calc(100vh-52px)] overflow-y-auto py-4 z-30">
+    <aside
+      className="hidden lg:flex flex-col w-60 bg-white border-r border-gray-200 fixed left-0 overflow-y-auto py-4 z-30"
+      style={{ top: 'var(--imc-nav-height, 52px)', height: 'calc(100vh - var(--imc-nav-height, 52px))' }}
+    >
       {linkGroups.map((group) => (
         <div key={group.title} className="mb-2">
           <p className="px-5 pt-2 pb-1 m-0 text-[10px] uppercase tracking-wide text-gray-400">{group.title}</p>

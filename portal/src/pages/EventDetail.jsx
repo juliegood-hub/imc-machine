@@ -5,6 +5,7 @@ import { getEventCampaigns, deleteEvent } from '../lib/supabase';
 import { parseLocalDate } from '../lib/dateUtils';
 import BookingOperationsWorkspace from '../components/BookingOperationsWorkspace';
 import TaylorZoneReferenceStrip from '../components/TaylorZoneReferenceStrip';
+import CircleAvatar from '../components/CircleAvatar';
 import {
   computePhaseGateStatus,
   computeProductionPhaseProgress,
@@ -1338,7 +1339,10 @@ export default function EventDetail() {
       <div className="card mb-6">
         <div className="flex items-start justify-between flex-wrap gap-4">
           <div className="flex-1">
-            <h1 className="text-3xl mb-2">{event.title}</h1>
+            <div className="flex items-center gap-3 mb-2">
+              <CircleAvatar entity={event} type="event" name={event.title} size="w-12 h-12" textSize="text-sm" />
+              <h1 className="text-3xl m-0">{event.title}</h1>
+            </div>
             <div className="flex flex-wrap gap-2 mb-3">
               {event.genre && (
                 <span className="inline-block text-xs font-semibold text-[#c8a45e] bg-[#c8a45e1a] px-3 py-1 rounded-full">

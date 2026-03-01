@@ -29,9 +29,13 @@ const SERIES_STORAGE_KEY = 'imc_event_series';
 const ZONES_STORAGE_KEY = 'imc_performance_zones';
 const SHOW_CONFIGS_STORAGE_KEY = 'imc_show_configurations';
 const STAGE_DOCS_STORAGE_KEY = 'imc_stage_plot_documents';
+const DEFAULT_CITY = 'San Antonio';
+const DEFAULT_STATE = 'TX';
+const DEFAULT_POSTAL_CODE = '78205';
 
 const defaultVenue = {
-  name: '', logo: null, address: '', city: '', state: '', zip: '',
+  name: '', logo: null, address: '', city: DEFAULT_CITY, state: DEFAULT_STATE, zip: DEFAULT_POSTAL_CODE,
+  avatarUrl: '',
   brandPrimary: '#c8a45e', brandSecondary: '#0d1b2a',
   website: '', facebook: '', instagram: '', twitter: '',
   tiktok: '', youtube: '', spotify: '', linkedin: '',
@@ -279,6 +283,20 @@ function mapDbEvent(e, fallback = {}) {
   const participantIds = Array.isArray(e.participant_profile_ids)
     ? e.participant_profile_ids
     : (fallback.participantProfileIds || []);
+  const productionDetails = (e.production_details && typeof e.production_details === 'object')
+    ? e.production_details
+    : {};
+  const detailUploads = Array.isArray(productionDetails.uploadedImages)
+    ? productionDetails.uploadedImages
+    : [];
+  const firstUploaded = detailUploads.find((item) => item && typeof item === 'object' && (item.url || item.original_url));
+  const mainPosterUrl = e.main_poster_url
+    || e.image_url
+    || e.poster_url
+    || productionDetails.mainPosterUrl
+    || (firstUploaded?.url || firstUploaded?.original_url || '')
+    || fallback.mainPosterUrl
+    || '';
 
   return {
     id: e.id,
@@ -292,9 +310,9 @@ function mapDbEvent(e, fallback = {}) {
     venueStreetNumber: e.venue_street_number || '',
     venueStreetName: e.venue_street_name || '',
     venueSuite: e.venue_suite || '',
-    venueCity: e.venue_city || 'San Antonio',
-    venueState: e.venue_state || 'TX',
-    venueZip: e.venue_zip || '',
+    venueCity: e.venue_city || DEFAULT_CITY,
+    venueState: e.venue_state || DEFAULT_STATE,
+    venueZip: e.venue_zip || DEFAULT_POSTAL_CODE,
     venueAddress: e.venue_address || '',
     venuePhone: e.venue_phone || '',
     venueWebsite: e.venue_website || '',
@@ -306,7 +324,8 @@ function mapDbEvent(e, fallback = {}) {
     writingTone: e.writing_tone || '',
     specialInstructions: e.special_instructions || '',
     detectedFonts: e.detected_fonts || '',
-    productionDetails: e.production_details || {},
+    productionDetails,
+    mainPosterUrl,
     run_of_show: e.run_of_show || null,
     crew: e.crew || [],
     channels: e.channels || {},
@@ -428,15 +447,16 @@ export function VenueProvider({ children }) {
             streetNumber: profile.street_number || '',
             streetName: profile.street_name || '',
             suiteNumber: profile.suite_number || '',
-            city: profile.city || '',
-            state: profile.state || '',
-            zipCode: profile.zip_code || profile.postal_code || '',
+            city: profile.city || DEFAULT_CITY,
+            state: profile.state || DEFAULT_STATE,
+            zipCode: profile.zip_code || profile.postal_code || DEFAULT_POSTAL_CODE,
             country: profile.country || 'US',
 
             address: profile.address || '',
-            zip: profile.postal_code || profile.zip_code || '',
+            zip: profile.postal_code || profile.zip_code || DEFAULT_POSTAL_CODE,
 
             logo: profile.logo || null,
+            avatarUrl: profile.avatar_url || profile.headshot || profile.headshot_url || profile.logo || '',
             brandPrimary: profile.brand_primary || '#c8a45e',
             brandSecondary: profile.brand_secondary || '#0d1b2a',
 
@@ -627,15 +647,16 @@ export function VenueProvider({ children }) {
         street_number: updated.streetNumber || '',
         street_name: updated.streetName || '',
         suite_number: updated.suiteNumber || '',
-        city: updated.city || '',
-        state: updated.state || '',
-        zip_code: updated.zipCode || '',
+        city: updated.city || DEFAULT_CITY,
+        state: updated.state || DEFAULT_STATE,
+        zip_code: updated.zipCode || DEFAULT_POSTAL_CODE,
         country: updated.country || 'US',
 
         address: updated.address || '',
-        postal_code: updated.zipCode || updated.zip || '',
+        postal_code: updated.zipCode || updated.zip || DEFAULT_POSTAL_CODE,
 
         logo: updated.logo || null,
+        avatar_url: updated.avatarUrl || updated.headshot || updated.logo || null,
         brand_primary: updated.brandPrimary || '#c8a45e',
         brand_secondary: updated.brandSecondary || '#0d1b2a',
 
@@ -792,9 +813,9 @@ export function VenueProvider({ children }) {
       street_number: profileData.street_number || '',
       street_name: profileData.street_name || '',
       suite: profileData.suite || '',
-      city: profileData.city || 'San Antonio',
-      state: profileData.state || 'TX',
-      postal_code: profileData.postal_code || '',
+      city: profileData.city || DEFAULT_CITY,
+      state: profileData.state || DEFAULT_STATE,
+      postal_code: profileData.postal_code || DEFAULT_POSTAL_CODE,
       phone: profileData.phone || '',
       website: profileData.website || '',
       metadata: profileData.metadata || {},
@@ -1167,9 +1188,9 @@ export function VenueProvider({ children }) {
           venue_street_number: eventData.venueStreetNumber || '',
           venue_street_name: eventData.venueStreetName || '',
           venue_suite: eventData.venueSuite || '',
-          venue_city: eventData.venueCity || 'San Antonio',
-          venue_state: eventData.venueState || 'TX',
-          venue_zip: eventData.venueZip || '',
+          venue_city: eventData.venueCity || DEFAULT_CITY,
+          venue_state: eventData.venueState || DEFAULT_STATE,
+          venue_zip: eventData.venueZip || DEFAULT_POSTAL_CODE,
           venue_address: eventData.venueAddress || '',
           venue_phone: eventData.venuePhone || '',
           venue_website: eventData.venueWebsite || '',
@@ -1251,6 +1272,11 @@ export function VenueProvider({ children }) {
       }
 
       setEvents(prev => [...prev.filter(e => !tempIds.has(e.id)), ...createdEvents]);
+      await callProductionAction('sync-all-dated-items', {
+        userId: user.id,
+        source: 'event_create',
+        eventIds: createdEvents.map(item => item.id),
+      }).catch(() => ({}));
       return createdEvents[0];
     } catch (err) {
       console.error('[VenueContext] Failed to create event:', err);
@@ -1259,7 +1285,7 @@ export function VenueProvider({ children }) {
       setEvents(prev => prev.filter(e => !tempIds.has(e.id)));
       throw err;
     }
-  }, [events, user?.id, user?.email, venue.driveRootFolderId]);
+  }, [callProductionAction, events, user?.id, user?.email, venue.driveRootFolderId]);
 
   const updateEvent = useCallback(async (id, data) => {
     const previousEvents = events;
@@ -1360,6 +1386,11 @@ export function VenueProvider({ children }) {
           sort_order: index + 1,
         })));
       }
+      await callProductionAction('sync-all-dated-items', {
+        userId: user.id,
+        source: 'event_update',
+        eventId: id,
+      }).catch(() => ({}));
     } catch (err) {
       console.error('[VenueContext] Failed to update event:', err);
       setEvents(previousEvents);
@@ -1712,6 +1743,148 @@ export function VenueProvider({ children }) {
     });
     return response?.removed === true;
   }, [callProductionAction]);
+
+  const listCalendarEventTypes = useCallback(async (options = {}) => {
+    const response = await callProductionAction('get-calendar-event-types', {
+      userId: user?.id,
+      orgId: options.orgId || options.venueProfileId || undefined,
+    });
+    return response?.eventTypes || [];
+  }, [callProductionAction, user?.id]);
+
+  const saveCalendarEventType = useCallback(async (eventType = {}, options = {}) => {
+    const response = await callProductionAction('upsert-calendar-event-type', {
+      userId: user?.id,
+      orgId: options.orgId || options.venueProfileId || eventType.orgId || undefined,
+      typeId: options.typeId || eventType.id || undefined,
+      eventType,
+    });
+    return response?.eventType || null;
+  }, [callProductionAction, user?.id]);
+
+  const removeCalendarEventType = useCallback(async (typeId) => {
+    if (!typeId) throw new Error('typeId is required');
+    const response = await callProductionAction('delete-calendar-event-type', {
+      userId: user?.id,
+      typeId,
+    });
+    return response?.removed === true;
+  }, [callProductionAction, user?.id]);
+
+  const listRehearsalCalendarEntries = useCallback(async (options = {}) => {
+    const response = await callProductionAction('get-rehearsal-calendar-entries', {
+      userId: user?.id,
+      eventId: options.eventId || options.bookingId || undefined,
+      orgId: options.orgId || options.venueProfileId || undefined,
+      status: options.status || undefined,
+      typeKey: options.typeKey || undefined,
+      startFrom: options.startFrom || undefined,
+      startTo: options.startTo || undefined,
+    });
+    return response?.entries || [];
+  }, [callProductionAction, user?.id]);
+
+  const saveRehearsalCalendarEntry = useCallback(async (entry = {}, options = {}) => {
+    const response = await callProductionAction('upsert-rehearsal-calendar-entry', {
+      userId: user?.id,
+      calendarEntryId: options.entryId || entry.id || undefined,
+      eventId: options.eventId || entry.eventId || undefined,
+      orgId: options.orgId || entry.orgId || undefined,
+      calendarId: options.calendarId || undefined,
+      syncToGoogle: options.syncToGoogle !== false,
+      entry,
+    });
+    return {
+      entry: response?.entry || null,
+      sync: response?.sync || null,
+      warning: response?.warning || '',
+    };
+  }, [callProductionAction, user?.id]);
+
+  const removeRehearsalCalendarEntry = useCallback(async (entryId) => {
+    if (!entryId) throw new Error('entryId is required');
+    const response = await callProductionAction('delete-rehearsal-calendar-entry', {
+      userId: user?.id,
+      calendarEntryId: entryId,
+    });
+    return response?.removed === true;
+  }, [callProductionAction, user?.id]);
+
+  const saveCalendarEntryAssignment = useCallback(async (calendarEntryId, assignment = {}, options = {}) => {
+    if (!calendarEntryId) throw new Error('calendarEntryId is required');
+    const response = await callProductionAction('upsert-calendar-entry-assignment', {
+      userId: user?.id,
+      calendarEntryId,
+      assignmentId: options.assignmentId || assignment.id || undefined,
+      assignment,
+    });
+    return response?.assignment || null;
+  }, [callProductionAction, user?.id]);
+
+  const removeCalendarEntryAssignment = useCallback(async (assignmentId) => {
+    if (!assignmentId) throw new Error('assignmentId is required');
+    const response = await callProductionAction('delete-calendar-entry-assignment', {
+      userId: user?.id,
+      assignmentId,
+    });
+    return response?.removed === true;
+  }, [callProductionAction, user?.id]);
+
+  const getGoogleCalendarConnectionStatus = useCallback(async (options = {}) => {
+    const response = await callProductionAction('get-google-calendar-connection', {
+      userId: user?.id,
+      orgId: options.orgId || options.venueProfileId || undefined,
+    });
+    return response?.connection || null;
+  }, [callProductionAction, user?.id]);
+
+  const getGoogleCalendarAuthUrl = useCallback(async (options = {}) => {
+    return callProductionAction('get-google-calendar-auth-url', {
+      userId: user?.id,
+      orgId: options.orgId || options.venueProfileId || undefined,
+      redirectUri: options.redirectUri || undefined,
+    });
+  }, [callProductionAction, user?.id]);
+
+  const connectGoogleCalendarAccount = useCallback(async (payload = {}) => {
+    return callProductionAction('connect-google-calendar', {
+      userId: user?.id,
+      ...payload,
+    });
+  }, [callProductionAction, user?.id]);
+
+  const listGoogleCalendarsForOrg = useCallback(async (options = {}) => {
+    const response = await callProductionAction('list-google-calendars', {
+      userId: user?.id,
+      orgId: options.orgId || options.venueProfileId || undefined,
+    });
+    return response?.calendars || [];
+  }, [callProductionAction, user?.id]);
+
+  const createGoogleCalendarForOrg = useCallback(async (calendar = {}, options = {}) => {
+    return callProductionAction('create-google-calendar', {
+      userId: user?.id,
+      orgId: options.orgId || options.venueProfileId || calendar.orgId || undefined,
+      ...calendar,
+    });
+  }, [callProductionAction, user?.id]);
+
+  const syncCalendarEntryRecord = useCallback(async (calendarEntryId, options = {}) => {
+    if (!calendarEntryId) throw new Error('calendarEntryId is required');
+    return callProductionAction('sync-calendar-entry', {
+      userId: user?.id,
+      calendarEntryId,
+      orgId: options.orgId || options.venueProfileId || undefined,
+      calendarId: options.calendarId || undefined,
+    });
+  }, [callProductionAction, user?.id]);
+
+  const syncAllDatedItemsToCalendar = useCallback(async (options = {}) => {
+    return callProductionAction('sync-all-dated-items', {
+      userId: user?.id,
+      ...options,
+    });
+  }, [callProductionAction, user?.id]);
 
   const listTrainingCourses = useCallback(async (options = {}) => {
     const response = await callProductionAction('get-training-courses', {
@@ -2149,6 +2322,266 @@ export function VenueProvider({ children }) {
     if (!itemId) throw new Error('itemId is required');
     const response = await callProductionAction('delete-production-checklist-item', { itemId });
     return response?.removed === true;
+  }, [callProductionAction]);
+
+  const getEventSafetyProfile = useCallback(async (eventId) => {
+    if (!eventId) return null;
+    const response = await callProductionAction('get-event-safety-profile', { eventId });
+    return response?.profile || null;
+  }, [callProductionAction]);
+
+  const saveEventSafetyProfile = useCallback(async (eventId, profile = {}) => {
+    if (!eventId) throw new Error('eventId is required');
+    const response = await callProductionAction('upsert-event-safety-profile', {
+      userId: user?.id,
+      eventId,
+      profile,
+    });
+    return response?.profile || null;
+  }, [callProductionAction, user?.id]);
+
+  const listEventPermits = useCallback(async (eventId) => {
+    if (!eventId) return [];
+    const response = await callProductionAction('get-event-permits', { eventId });
+    return response?.permits || [];
+  }, [callProductionAction]);
+
+  const saveEventPermit = useCallback(async (eventId, permit = {}) => {
+    if (!eventId) throw new Error('eventId is required');
+    const response = await callProductionAction('upsert-event-permit', {
+      userId: user?.id,
+      eventId,
+      permit,
+    });
+    return response?.permit || null;
+  }, [callProductionAction, user?.id]);
+
+  const removeEventPermit = useCallback(async (permitId) => {
+    if (!permitId) throw new Error('permitId is required');
+    const response = await callProductionAction('delete-event-permit', { permitId });
+    return response?.removed === true;
+  }, [callProductionAction]);
+
+  const listEventInsurancePolicies = useCallback(async (eventId) => {
+    if (!eventId) return [];
+    const response = await callProductionAction('get-event-insurance-policies', { eventId });
+    return response?.policies || [];
+  }, [callProductionAction]);
+
+  const saveEventInsurancePolicy = useCallback(async (eventId, policy = {}) => {
+    if (!eventId) throw new Error('eventId is required');
+    const response = await callProductionAction('upsert-event-insurance-policy', {
+      userId: user?.id,
+      eventId,
+      policy,
+    });
+    return response?.policy || null;
+  }, [callProductionAction, user?.id]);
+
+  const removeEventInsurancePolicy = useCallback(async (policyId) => {
+    if (!policyId) throw new Error('policyId is required');
+    const response = await callProductionAction('delete-event-insurance-policy', { policyId });
+    return response?.removed === true;
+  }, [callProductionAction]);
+
+  const listEventSurveillanceAssets = useCallback(async (eventId) => {
+    if (!eventId) return [];
+    const response = await callProductionAction('get-event-surveillance-assets', { eventId });
+    return response?.assets || [];
+  }, [callProductionAction]);
+
+  const saveEventSurveillanceAsset = useCallback(async (eventId, asset = {}) => {
+    if (!eventId) throw new Error('eventId is required');
+    const response = await callProductionAction('upsert-event-surveillance-asset', {
+      userId: user?.id,
+      eventId,
+      asset,
+    });
+    return response?.asset || null;
+  }, [callProductionAction, user?.id]);
+
+  const removeEventSurveillanceAsset = useCallback(async (assetId) => {
+    if (!assetId) throw new Error('assetId is required');
+    const response = await callProductionAction('delete-event-surveillance-asset', { assetId });
+    return response?.removed === true;
+  }, [callProductionAction]);
+
+  const listEventAccessControlPoints = useCallback(async (eventId) => {
+    if (!eventId) return [];
+    const response = await callProductionAction('get-event-access-control-points', { eventId });
+    return response?.points || [];
+  }, [callProductionAction]);
+
+  const saveEventAccessControlPoint = useCallback(async (eventId, point = {}) => {
+    if (!eventId) throw new Error('eventId is required');
+    const response = await callProductionAction('upsert-event-access-control-point', {
+      userId: user?.id,
+      eventId,
+      point,
+    });
+    return response?.point || null;
+  }, [callProductionAction, user?.id]);
+
+  const removeEventAccessControlPoint = useCallback(async (pointId) => {
+    if (!pointId) throw new Error('pointId is required');
+    const response = await callProductionAction('delete-event-access-control-point', { pointId });
+    return response?.removed === true;
+  }, [callProductionAction]);
+
+  const getEventCrowdPlan = useCallback(async (eventId) => {
+    if (!eventId) return null;
+    const response = await callProductionAction('get-event-crowd-plan', { eventId });
+    return response?.plan || null;
+  }, [callProductionAction]);
+
+  const saveEventCrowdPlan = useCallback(async (eventId, plan = {}) => {
+    if (!eventId) throw new Error('eventId is required');
+    const response = await callProductionAction('upsert-event-crowd-plan', {
+      userId: user?.id,
+      eventId,
+      plan,
+    });
+    return response?.plan || null;
+  }, [callProductionAction, user?.id]);
+
+  const getEventMedicalPlan = useCallback(async (eventId) => {
+    if (!eventId) return null;
+    const response = await callProductionAction('get-event-medical-plan', { eventId });
+    return response?.plan || null;
+  }, [callProductionAction]);
+
+  const saveEventMedicalPlan = useCallback(async (eventId, plan = {}) => {
+    if (!eventId) throw new Error('eventId is required');
+    const response = await callProductionAction('upsert-event-medical-plan', {
+      userId: user?.id,
+      eventId,
+      plan,
+    });
+    return response?.plan || null;
+  }, [callProductionAction, user?.id]);
+
+  const getEventSanitationPlan = useCallback(async (eventId) => {
+    if (!eventId) return null;
+    const response = await callProductionAction('get-event-sanitation-plan', { eventId });
+    return response?.plan || null;
+  }, [callProductionAction]);
+
+  const saveEventSanitationPlan = useCallback(async (eventId, plan = {}) => {
+    if (!eventId) throw new Error('eventId is required');
+    const response = await callProductionAction('upsert-event-sanitation-plan', {
+      userId: user?.id,
+      eventId,
+      plan,
+    });
+    return response?.plan || null;
+  }, [callProductionAction, user?.id]);
+
+  const getEventWeatherPlan = useCallback(async (eventId) => {
+    if (!eventId) return null;
+    const response = await callProductionAction('get-event-weather-plan', { eventId });
+    return response?.plan || null;
+  }, [callProductionAction]);
+
+  const saveEventWeatherPlan = useCallback(async (eventId, plan = {}) => {
+    if (!eventId) throw new Error('eventId is required');
+    const response = await callProductionAction('upsert-event-weather-plan', {
+      userId: user?.id,
+      eventId,
+      plan,
+    });
+    return response?.plan || null;
+  }, [callProductionAction, user?.id]);
+
+  const getEventCityCoordination = useCallback(async (eventId) => {
+    if (!eventId) return null;
+    const response = await callProductionAction('get-event-city-coordination', { eventId });
+    return response?.plan || null;
+  }, [callProductionAction]);
+
+  const saveEventCityCoordination = useCallback(async (eventId, plan = {}) => {
+    if (!eventId) throw new Error('eventId is required');
+    const response = await callProductionAction('upsert-event-city-coordination', {
+      userId: user?.id,
+      eventId,
+      plan,
+    });
+    return response?.plan || null;
+  }, [callProductionAction, user?.id]);
+
+  const listEventIncidents = useCallback(async (eventId) => {
+    if (!eventId) return [];
+    const response = await callProductionAction('get-event-incidents', { eventId });
+    return response?.incidents || [];
+  }, [callProductionAction]);
+
+  const saveEventIncident = useCallback(async (eventId, incident = {}) => {
+    if (!eventId) throw new Error('eventId is required');
+    const response = await callProductionAction('upsert-event-incident', {
+      userId: user?.id,
+      eventId,
+      incident,
+    });
+    return response?.incident || null;
+  }, [callProductionAction, user?.id]);
+
+  const removeEventIncident = useCallback(async (incidentId) => {
+    if (!incidentId) throw new Error('incidentId is required');
+    const response = await callProductionAction('delete-event-incident', { incidentId });
+    return response?.removed === true;
+  }, [callProductionAction]);
+
+  const listEventSafetyChecklists = useCallback(async (eventId) => {
+    if (!eventId) return [];
+    const response = await callProductionAction('get-event-safety-checklists', { eventId });
+    return response?.checklists || [];
+  }, [callProductionAction]);
+
+  const saveEventSafetyChecklist = useCallback(async (eventId, checklist = {}) => {
+    if (!eventId) throw new Error('eventId is required');
+    const response = await callProductionAction('upsert-event-safety-checklist', {
+      userId: user?.id,
+      eventId,
+      checklist,
+    });
+    return response?.checklist || null;
+  }, [callProductionAction, user?.id]);
+
+  const saveEventSafetyChecklistItem = useCallback(async (eventId, checklistId, item = {}) => {
+    if (!eventId) throw new Error('eventId is required');
+    if (!checklistId) throw new Error('checklistId is required');
+    const response = await callProductionAction('upsert-event-safety-checklist-item', {
+      eventId,
+      checklistId,
+      item,
+    });
+    return response?.item || null;
+  }, [callProductionAction]);
+
+  const removeEventSafetyChecklistItem = useCallback(async (itemId) => {
+    if (!itemId) throw new Error('itemId is required');
+    const response = await callProductionAction('delete-event-safety-checklist-item', { itemId });
+    return response?.removed === true;
+  }, [callProductionAction]);
+
+  const generateEventEap = useCallback(async (eventId, options = {}) => {
+    if (!eventId) throw new Error('eventId is required');
+    return callProductionAction('generate-event-eap', {
+      userId: user?.id,
+      eventId,
+      ...options,
+    });
+  }, [callProductionAction, user?.id]);
+
+  const listEventEaps = useCallback(async (eventId) => {
+    if (!eventId) return [];
+    const response = await callProductionAction('get-event-eap-docs', { eventId });
+    return response?.eaps || [];
+  }, [callProductionAction]);
+
+  const getEventSafetyDashboard = useCallback(async (eventId) => {
+    if (!eventId) return null;
+    const response = await callProductionAction('get-event-safety-dashboard', { eventId });
+    return response?.dashboard || null;
   }, [callProductionAction]);
 
   const listVenueInventory = useCallback(async (venueProfileId) => {
@@ -3038,6 +3471,21 @@ export function VenueProvider({ children }) {
       listEmergencyContacts,
       saveEmergencyContact,
       removeEmergencyContact,
+      listCalendarEventTypes,
+      saveCalendarEventType,
+      removeCalendarEventType,
+      listRehearsalCalendarEntries,
+      saveRehearsalCalendarEntry,
+      removeRehearsalCalendarEntry,
+      saveCalendarEntryAssignment,
+      removeCalendarEntryAssignment,
+      getGoogleCalendarConnectionStatus,
+      getGoogleCalendarAuthUrl,
+      connectGoogleCalendarAccount,
+      listGoogleCalendarsForOrg,
+      createGoogleCalendarForOrg,
+      syncCalendarEntryRecord,
+      syncAllDatedItemsToCalendar,
       listTrainingCourses,
       saveTrainingCourse,
       removeTrainingCourse,
@@ -3082,6 +3530,40 @@ export function VenueProvider({ children }) {
       saveProductionChecklist,
       saveProductionChecklistItem,
       removeProductionChecklistItem,
+      getEventSafetyProfile,
+      saveEventSafetyProfile,
+      listEventPermits,
+      saveEventPermit,
+      removeEventPermit,
+      listEventInsurancePolicies,
+      saveEventInsurancePolicy,
+      removeEventInsurancePolicy,
+      listEventSurveillanceAssets,
+      saveEventSurveillanceAsset,
+      removeEventSurveillanceAsset,
+      listEventAccessControlPoints,
+      saveEventAccessControlPoint,
+      removeEventAccessControlPoint,
+      getEventCrowdPlan,
+      saveEventCrowdPlan,
+      getEventMedicalPlan,
+      saveEventMedicalPlan,
+      getEventSanitationPlan,
+      saveEventSanitationPlan,
+      getEventWeatherPlan,
+      saveEventWeatherPlan,
+      getEventCityCoordination,
+      saveEventCityCoordination,
+      listEventIncidents,
+      saveEventIncident,
+      removeEventIncident,
+      listEventSafetyChecklists,
+      saveEventSafetyChecklist,
+      saveEventSafetyChecklistItem,
+      removeEventSafetyChecklistItem,
+      generateEventEap,
+      listEventEaps,
+      getEventSafetyDashboard,
       listVenueInventory,
       saveVenueInventoryItem,
       searchSupplierSuggestions,

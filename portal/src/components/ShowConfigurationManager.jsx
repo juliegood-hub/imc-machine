@@ -117,6 +117,13 @@ export default function ShowConfigurationManager() {
     ))
   ), [showConfigurations]);
 
+  const plotMembers = useMemo(() => (
+    (participantProfiles || []).map((profile) => ({
+      name: profile?.name || profile?.display_name || '',
+      email: profile?.email || profile?.contact_email || profile?.contactEmail || '',
+    })).filter((row) => row.name || row.email)
+  ), [participantProfiles]);
+
   const availableTemplates = SHOW_TEMPLATE_OPTIONS[form.show_type] || [];
 
   const resetForm = () => {
@@ -428,6 +435,11 @@ export default function ShowConfigurationManager() {
             onChange={(next) => setForm(prev => ({ ...prev, stage_plot_layout: next }))}
             editable={canEdit}
             title="Stage Plot Layout"
+            currentUser={{ name: user?.name || '', email: user?.email || '' }}
+            eventMembers={plotMembers}
+            organizationMembers={plotMembers}
+            venueMembers={plotMembers}
+            currentMembership={{ event: true, organization: true, venue: true, groups: [] }}
           />
 
           <div className="card space-y-3">

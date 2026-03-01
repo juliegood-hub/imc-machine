@@ -13,6 +13,7 @@ const GENRES = [
   'Live Music | Contemporary | Jazz | Electronic | Indie',
   'Orchestral | Classical | Choral',
   'Comedy | Speaking | Lectures | Workshops',
+  'Yoga | Wellness | Mindfulness Classes',
   'Dance | Performance Art | Experimental',
   'Literary | Poetry | Book Signings',
   'Politics | Civic | Campaign Events',
@@ -48,6 +49,11 @@ const GENRE_ROLES = {
     'Workshop Facilitator', 'Improv Player', 'Sketch Writer', 'Opening Act',
     'Headliner', 'Guest Lecturer', 'Q&A Moderator', 'Sign Language Interpreter',
     'AV Technician',
+  ],
+  'Yoga | Wellness | Mindfulness Classes': [
+    'Yoga Instructor', 'Breathwork Facilitator', 'Meditation Guide', 'Wellness Coach',
+    'Sound Bath Practitioner', 'Workshop Facilitator', 'Host/Emcee', 'Studio Manager',
+    'Check-In Coordinator', 'AV Technician',
   ],
   'Dance | Performance Art | Experimental': [
     'Choreographer', 'Lead Dancer', 'Corps de Ballet', 'Dance Captain',

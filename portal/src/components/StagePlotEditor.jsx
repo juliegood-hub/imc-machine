@@ -1,3 +1,5 @@
+export { default } from './StagePlotEditorV2';
+/*
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { STAGE_PLOT_ITEM_LIBRARY } from '../constants/productionLibrary';
 
@@ -261,3 +263,4 @@ export default function StagePlotEditor({
     </div>
   );
 }
+*/

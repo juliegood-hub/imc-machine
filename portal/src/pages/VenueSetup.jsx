@@ -4,11 +4,14 @@ import { useVenue } from '../context/VenueContext';
 import { useAuth } from '../context/AuthContext';
 import CompletionBar from '../components/CompletionBar';
 import FormAIAssist from '../components/FormAIAssist';
+import IntakePromptPanel from '../components/IntakePromptPanel';
 import DeepResearchPromptBox from '../components/DeepResearchPromptBox';
 import PerformanceZonesManager from '../components/PerformanceZonesManager';
 import VenueOperationsManager from '../components/VenueOperationsManager';
+import CircleAvatar from '../components/CircleAvatar';
 import { extractFromImages, extractionToVenueForm, openCamera, openFileUpload } from '../services/photo-to-form';
-import { deepResearchDraft } from '../services/research';
+import { uploadImageAsset } from '../services/mediaUpload';
+import { deepResearchDraft, deepResearchImageCaptionPack } from '../services/research';
 import { isVenueRole } from '../constants/clientTypes';
 
 const REQUIRED_FIELDS = ['firstName', 'lastName', 'businessName', 'email', 'city', 'state'];
@@ -67,6 +70,9 @@ const VENUE_CREW_OPTIONS = [
   { value: 'nine_to_twenty', label: 'Typical day-of-show crew is 9-20 people' },
   { value: 'over_20', label: 'Typical day-of-show crew is over 20 people' },
 ];
+const DEFAULT_CITY = 'San Antonio';
+const DEFAULT_STATE = 'TX';
+const DEFAULT_POSTAL_CODE = '78205';
 
 function recommendVenueFootprint(answers = {}) {
   const zones = Number(answers.zoneCount || '1');
@@ -117,9 +123,9 @@ export default function VenueSetup() {
     streetNumber: venue.streetNumber || '',
     streetName: venue.streetName || '',
     suiteNumber: venue.suiteNumber || '',
-    city: venue.city || 'San Antonio',
-    state: venue.state || 'TX',
-    zipCode: venue.zipCode || '',
+    city: venue.city || DEFAULT_CITY,
+    state: venue.state || DEFAULT_STATE,
+    zipCode: venue.zipCode || DEFAULT_POSTAL_CODE,
     country: venue.country || 'US',
     
     // Social & Web
@@ -147,6 +153,7 @@ export default function VenueSetup() {
     
     // Brand
     logo: venue.logo || null,
+    avatarUrl: venue.avatarUrl || venue.logo || null,
     brandPrimary: venue.brandPrimary || '#c8a45e',
     brandSecondary: venue.brandSecondary || '#0d1b2a',
   });
@@ -170,6 +177,10 @@ export default function VenueSetup() {
   const [venueResearchCorrections, setVenueResearchCorrections] = useState('');
   const [venueResearchIncludeTerms, setVenueResearchIncludeTerms] = useState('');
   const [venueResearchAvoidTerms, setVenueResearchAvoidTerms] = useState('');
+  const [photoCaptionPack, setPhotoCaptionPack] = useState({ summary: '', captions: [] });
+  const [photoCaptionLoading, setPhotoCaptionLoading] = useState(false);
+  const [photoCaptionStatus, setPhotoCaptionStatus] = useState('');
+  const [avatarUploadStatus, setAvatarUploadStatus] = useState('');
   const [footprintAnswers, setFootprintAnswers] = useState({
     zoneCount: String(venue?.metadata?.venueFootprint?.qna?.zoneCount || '1'),
     audienceBand: String(venue?.metadata?.venueFootprint?.qna?.audienceBand || 'up_to_250'),
@@ -198,6 +209,7 @@ export default function VenueSetup() {
     if (!files?.length) return;
     setExtracting(true);
     setUploadedImages(prev => [...prev, ...files.map(f => URL.createObjectURL(f))]);
+    setPhotoCaptionStatus('');
     try {
       const result = await extractFromImages(files);
       if (result.success) {
@@ -229,6 +241,41 @@ export default function VenueSetup() {
           if (venueData.brandColors?.[1] && !prev.brandSecondary) updated.brandSecondary = venueData.brandColors[1];
           return updated;
         });
+        setPhotoCaptionLoading(true);
+        setPhotoCaptionStatus('Writing venue photo descriptions and captions...');
+        try {
+          const captionResult = await deepResearchImageCaptionPack({
+            domain: Array.isArray(venueData?.menuItems) && venueData.menuItems.length > 0 ? 'menu' : 'venue',
+            styleIntensity: venueStyleIntensity,
+            extracted: result.data || {},
+            venue: {
+              businessName: form.businessName,
+              city: form.city,
+              state: form.state,
+              website: form.website,
+              bio: form.bio,
+            },
+          });
+          const summary = String(captionResult?.summary || '').trim();
+          const captions = Array.isArray(captionResult?.captions) ? captionResult.captions : [];
+          setPhotoCaptionPack({ summary, captions });
+          const hadBio = !!String(form.bio || '').trim();
+          if (summary) {
+            setForm(prev => {
+              if (String(prev.bio || '').trim()) return prev;
+              return { ...prev, bio: summary };
+            });
+          }
+          setPhotoCaptionStatus(
+            summary && !hadBio
+              ? 'Photo summary added to venue description. Review it before you save.'
+              : 'Photo descriptions and captions are ready below.'
+          );
+        } catch (captionErr) {
+          setPhotoCaptionStatus(`I extracted the venue details, but caption drafting hit a snag: ${captionErr.message}`);
+        } finally {
+          setPhotoCaptionLoading(false);
+        }
       } else {
         alert('I hit a snag extracting details from those images: ' + result.error);
       }
@@ -237,6 +284,65 @@ export default function VenueSetup() {
     } finally {
       setExtracting(false);
     }
+  };
+
+  const handleAvatarUpload = async () => {
+    try {
+      const files = await openFileUpload(false);
+      const file = files?.[0];
+      if (!file) return;
+      if (!user?.id) throw new Error('User session is required before upload');
+      setAvatarUploadStatus('Uploading venue profile image...');
+      const url = await uploadImageAsset({
+        file,
+        userId: user.id,
+        category: 'profile',
+        label: `${form.businessName || 'venue'}-avatar`,
+      });
+      setForm(prev => ({ ...prev, avatarUrl: url, logo: prev.logo || url }));
+      setAvatarUploadStatus('Venue profile image ready.');
+    } catch (err) {
+      if (String(err?.message || '').toLowerCase().includes('cancel')) return;
+      setAvatarUploadStatus(`Venue image upload hit a snag: ${err.message}`);
+    }
+  };
+
+  const handleLogoUpload = async () => {
+    try {
+      const files = await openFileUpload(false);
+      const file = files?.[0];
+      if (!file) return;
+      if (!user?.id) throw new Error('User session is required before upload');
+      setAvatarUploadStatus('Uploading logo...');
+      const url = await uploadImageAsset({
+        file,
+        userId: user.id,
+        category: 'profile',
+        label: `${form.businessName || 'venue'}-logo`,
+      });
+      setForm(prev => ({ ...prev, logo: url, avatarUrl: prev.avatarUrl || url }));
+      setAvatarUploadStatus('Logo uploaded.');
+    } catch (err) {
+      if (String(err?.message || '').toLowerCase().includes('cancel')) return;
+      setAvatarUploadStatus(`Logo upload hit a snag: ${err.message}`);
+    }
+  };
+
+  const applyCaptionSummaryToBio = () => {
+    if (!String(photoCaptionPack.summary || '').trim()) return;
+    setForm(prev => ({ ...prev, bio: photoCaptionPack.summary }));
+    setPhotoCaptionStatus('Venue description replaced with the generated photo summary.');
+  };
+
+  const appendCaptionToBio = (caption = '') => {
+    const next = String(caption || '').trim();
+    if (!next) return;
+    setForm(prev => {
+      const current = String(prev.bio || '').trim();
+      const combined = current ? `${current}\n\n${next}` : next;
+      return { ...prev, bio: combined };
+    });
+    setPhotoCaptionStatus('Caption appended to venue description.');
   };
 
   const runVenueDeepResearch = async ({
@@ -492,6 +598,14 @@ export default function VenueSetup() {
 
       {activeTab === 'profile' && (
         <>
+          <IntakePromptPanel
+            promptKey="venue"
+            formType="venue"
+            currentForm={form}
+            onApply={applyVenuePatch}
+            titleOverride="Tell me about your venue (and I will turn it into a solid listing)."
+          />
+
           <FormAIAssist
             formType="venue"
             currentForm={form}
@@ -615,6 +729,32 @@ export default function VenueSetup() {
                 ))}
               </div>
             )}
+            {(photoCaptionLoading || photoCaptionStatus || photoCaptionPack.summary || (photoCaptionPack.captions || []).length > 0) && (
+              <div className="mt-3 p-3 border border-gray-200 rounded-lg bg-white space-y-2">
+                <p className="text-xs font-semibold text-gray-700 m-0">📝 Photo Intelligence: Venue Descriptions & Captions</p>
+                {photoCaptionStatus && <p className="text-xs text-gray-600 m-0">{photoCaptionStatus}</p>}
+                {photoCaptionPack.summary && (
+                  <div className="border border-gray-100 rounded p-2 bg-gray-50">
+                    <p className="text-xs font-medium text-gray-700 m-0">Summary</p>
+                    <p className="text-xs text-gray-600 mt-1 mb-2">{photoCaptionPack.summary}</p>
+                    <button type="button" className="btn-secondary text-xs" onClick={applyCaptionSummaryToBio}>
+                      Use Summary in Venue Description
+                    </button>
+                  </div>
+                )}
+                {(photoCaptionPack.captions || []).slice(0, 6).map((item, index) => (
+                  <div key={`${item.title || 'caption'}-${index}`} className="border border-gray-100 rounded p-2">
+                    <p className="text-xs font-medium text-gray-700 m-0">{item.title || `Image ${index + 1}`}</p>
+                    <p className="text-xs text-gray-500 mt-1 mb-1">{item.shortDescription || item.altText || ''}</p>
+                    <p className="text-xs text-gray-700 mt-0 mb-2">{item.caption || ''}</p>
+                    <button type="button" className="btn-secondary text-xs" onClick={() => appendCaptionToBio(item.caption)}>
+                      Add Caption to Venue Description
+                    </button>
+                  </div>
+                ))}
+                <p className="text-[11px] text-gray-500 m-0">Uploaded images stay unchanged. This only drafts text descriptions and captions.</p>
+              </div>
+            )}
           </div>
 
           <CompletionBar completed={completed} total={total} label="Venue Profile" />
@@ -662,6 +802,24 @@ export default function VenueSetup() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="md:col-span-2">
                   {fieldInput("Business/Organization Name", "businessName", "text", "The Rialto Theater", true)}
+                </div>
+                <div className="md:col-span-2 border border-gray-200 rounded-lg p-3 bg-[#faf8f3]">
+                  <p className="text-xs font-semibold text-gray-700 m-0 mb-2">Circle Profile Picture (left of name)</p>
+                  <div className="flex items-center gap-3">
+                    <CircleAvatar
+                      entity={{ ...form, name: form.businessName || form.dbaName || 'Venue' }}
+                      type="venue"
+                      name={form.businessName || form.dbaName || 'Venue'}
+                      src={form.avatarUrl || form.logo || ''}
+                      size="w-12 h-12"
+                      textSize="text-xs"
+                    />
+                    <div className="space-y-1">
+                      <button type="button" className="btn-secondary text-xs" onClick={handleAvatarUpload}>Upload Circle Profile Image</button>
+                      <p className="text-[11px] text-gray-500 m-0">This appears to the left of venue names across booking and operations lists.</p>
+                      {avatarUploadStatus && <p className="text-[11px] text-gray-600 m-0">{avatarUploadStatus}</p>}
+                    </div>
+                  </div>
                 </div>
                 <div className="md:col-span-2">
                   {fieldInput("DBA / Display Name", "dbaName", "text", "How you want to appear publicly")}
@@ -835,7 +993,7 @@ export default function VenueSetup() {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Logo</label>
                   <div className="border-2 border-dashed border-gray-200 rounded-lg p-6 text-center text-sm text-gray-400 cursor-pointer hover:border-[#c8a45e]"
-                    onClick={() => alert('Logo upload from cloud storage is almost ready. For now, keep going and I will save the rest.')}>
+                    onClick={handleLogoUpload}>
                     {form.logo ? '✓ Logo uploaded' : 'Click to upload logo (PNG, JPG)'}
                   </div>
                 </div>

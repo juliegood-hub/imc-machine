@@ -56,6 +56,17 @@ Extract into this JSON:
     {"name": "person name", "role": "their role", "email": "email", "phone": "phone", "social": "@handle"}
   ],
   "sponsors": ["sponsor names if any"],
+  "imageInsights": [
+    {
+      "title": "short title",
+      "subjectType": "event|artist|artwork|merch|venue|menu|generic",
+      "shortDescription": "one-sentence factual visual description",
+      "caption": "social-ready caption grounded in visible details",
+      "altText": "accessibility alt text",
+      "tags": ["array", "of", "tags"],
+      "confidence": 0.0-1.0
+    }
+  ],
   "rawText": "all text extracted verbatim from the image"
 }
 
@@ -86,8 +97,41 @@ Extract into this JSON:
     "brandColors": ["dominant colors you see in hex"],
     "vibe": "describe the aesthetic/atmosphere"
   },
+  "menuItems": [
+    {
+      "name": "item name",
+      "category": "beer|wine|cocktail|soda|snack|meal|dessert|other",
+      "price": "price text if visible",
+      "description": "short item description from visible text",
+      "promoType": "special|coupon|game|bundle|happy_hour|none",
+      "promoTitle": "offer headline if visible",
+      "couponCode": "coupon code if visible",
+      "couponTerms": "coupon terms if visible"
+    }
+  ],
+  "promoOffers": [
+    {
+      "title": "promo title",
+      "promoType": "special|coupon|game|bundle|happy_hour|other",
+      "description": "offer details",
+      "couponCode": "code if visible",
+      "terms": "terms if visible",
+      "validUntil": "date text if visible"
+    }
+  ],
   "contacts": [
     {"name": "person name", "title": "their title", "email": "email", "phone": "phone"}
+  ],
+  "imageInsights": [
+    {
+      "title": "short title",
+      "subjectType": "venue|menu|artist|artwork|merch|generic",
+      "shortDescription": "one-sentence factual visual description",
+      "caption": "social-ready caption grounded in visible details",
+      "altText": "accessibility alt text",
+      "tags": ["array", "of", "tags"],
+      "confidence": 0.0-1.0
+    }
   ],
   "rawText": "all text extracted verbatim"
 }
@@ -318,6 +362,7 @@ export function extractionToEventForm(extracted) {
     venueAddress: v.address || '',
     venuePhone: v.phone || '',
     venueWebsite: v.website || '',
+    imageInsights: Array.isArray(d.imageInsights) ? d.imageInsights : [],
   };
 }
 
@@ -345,5 +390,8 @@ export function extractionToVenueForm(extracted) {
     brandColors: v.brandColors || [],
     vibe: v.vibe || '',
     contacts,
+    menuItems: Array.isArray(extracted.data.menuItems) ? extracted.data.menuItems : [],
+    promoOffers: Array.isArray(extracted.data.promoOffers) ? extracted.data.promoOffers : [],
+    imageInsights: Array.isArray(extracted.data.imageInsights) ? extracted.data.imageInsights : [],
   };
 }

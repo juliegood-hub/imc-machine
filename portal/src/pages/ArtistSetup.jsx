@@ -4,10 +4,13 @@ import { useVenue } from '../context/VenueContext';
 import { useAuth } from '../context/AuthContext';
 import CompletionBar from '../components/CompletionBar';
 import FormAIAssist from '../components/FormAIAssist';
+import IntakePromptPanel from '../components/IntakePromptPanel';
 import DeepResearchPromptBox from '../components/DeepResearchPromptBox';
 import ShowConfigurationManager from '../components/ShowConfigurationManager';
+import CircleAvatar from '../components/CircleAvatar';
 import { extractFromImages, openCamera, openFileUpload } from '../services/photo-to-form';
-import { deepResearchDraft } from '../services/research';
+import { uploadImageAsset } from '../services/mediaUpload';
+import { deepResearchDraft, deepResearchImageCaptionPack } from '../services/research';
 import { isArtistRole, normalizeClientType } from '../constants/clientTypes';
 
 const PERFORMANCE_GENRES = [
@@ -17,6 +20,7 @@ const PERFORMANCE_GENRES = [
   'Orchestral | Classical | Choral',
   'Visual Art | Artisan | Gallery | Craft Shows',
   'Comedy | Speaking | Lectures | Workshops',
+  'Yoga | Wellness | Mindfulness Classes',
   'Legal CLE | Law Panels | Bar Association Events',
   'Dance | Performance Art | Experimental',
 ];
@@ -308,6 +312,9 @@ const DEEP_STYLE_HELP = {
   feature: 'Feature adds voice and richer scene context while staying grounded.',
   punchy: 'Punchy sharpens the same facts with faster, high-energy phrasing.',
 };
+const DEFAULT_CITY = 'San Antonio';
+const DEFAULT_STATE = 'TX';
+const DEFAULT_POSTAL_CODE = '78205';
 
 export default function ArtistSetup() {
   const { venue, saveVenue } = useVenue();
@@ -337,9 +344,9 @@ export default function ArtistSetup() {
     streetNumber: venue.streetNumber || '',
     streetName: venue.streetName || '',
     suiteNumber: venue.suiteNumber || '',
-    city: venue.city || 'San Antonio',
-    state: venue.state || 'TX',
-    zipCode: venue.zipCode || '',
+    city: venue.city || DEFAULT_CITY,
+    state: venue.state || DEFAULT_STATE,
+    zipCode: venue.zipCode || DEFAULT_POSTAL_CODE,
     country: venue.country || 'US',
     hometown: venue.hometown || 'San Antonio, TX',
     
@@ -380,6 +387,7 @@ export default function ArtistSetup() {
     
     // Visual
     headshot: venue.headshot || null,
+    avatarUrl: venue.avatarUrl || venue.headshot || null,
     brandPrimary: venue.brandPrimary || '#c8a45e',
     brandSecondary: venue.brandSecondary || '#0d1b2a',
     defaultOfficialAssetsOnly: !!venue.defaultOfficialAssetsOnly,
@@ -389,6 +397,7 @@ export default function ArtistSetup() {
   });
   const [saved, setSaved] = useState(false);
   const [extracting, setExtracting] = useState(false);
+  const [uploadedImages, setUploadedImages] = useState([]);
   const [activeTab, setActiveTab] = useState('profile');
   const [memberName, setMemberName] = useState('');
   const [memberRole, setMemberRole] = useState('');
@@ -408,6 +417,10 @@ export default function ArtistSetup() {
   const [bioResearchCorrections, setBioResearchCorrections] = useState('');
   const [bioResearchIncludeTerms, setBioResearchIncludeTerms] = useState('');
   const [bioResearchAvoidTerms, setBioResearchAvoidTerms] = useState('');
+  const [photoCaptionPack, setPhotoCaptionPack] = useState({ summary: '', captions: [] });
+  const [photoCaptionLoading, setPhotoCaptionLoading] = useState(false);
+  const [photoCaptionStatus, setPhotoCaptionStatus] = useState('');
+  const [avatarUploadStatus, setAvatarUploadStatus] = useState('');
 
   const update = (field) => (e) => setForm({ ...form, [field]: e.target.value });
   const updateCheckbox = (field) => (e) => setForm({ ...form, [field]: e.target.checked });
@@ -445,6 +458,8 @@ export default function ArtistSetup() {
   const handlePhotoExtract = async (files) => {
     if (!files?.length) return;
     setExtracting(true);
+    setUploadedImages(prev => [...prev, ...files.map(f => URL.createObjectURL(f))]);
+    setPhotoCaptionStatus('');
     try {
       const result = await extractFromImages(files);
       if (result.success) {
@@ -460,12 +475,107 @@ export default function ArtistSetup() {
           facebook: prev.facebook || v.socialMedia?.facebook || '',
           bookingEmail: prev.bookingEmail || contacts[0]?.email || '',
         }));
+        setPhotoCaptionLoading(true);
+        setPhotoCaptionStatus('Drafting image descriptions and captions...');
+        try {
+          const captionResult = await deepResearchImageCaptionPack({
+            domain: isArtisanUser ? 'artwork' : 'artist',
+            styleIntensity: bioStyleIntensity,
+            extracted: d || {},
+            artist: {
+              stageName: form.stageName,
+              genre: form.genre,
+              city: form.city,
+              state: form.state,
+              bio: form.bio,
+              website: form.website,
+            },
+          });
+          const summary = String(captionResult?.summary || '').trim();
+          const captions = Array.isArray(captionResult?.captions) ? captionResult.captions : [];
+          setPhotoCaptionPack({ summary, captions });
+          const hadBio = !!String(form.bio || '').trim();
+          if (summary) {
+            setForm(prev => {
+              if (String(prev.bio || '').trim()) return prev;
+              return { ...prev, bio: summary };
+            });
+          }
+          setPhotoCaptionStatus(
+            summary && !hadBio
+              ? 'Photo summary added to bio. Review and tune it before saving.'
+              : 'Image descriptions and captions are ready below.'
+          );
+        } catch (captionErr) {
+          setPhotoCaptionStatus(`I extracted the fields, but caption drafting hit a snag: ${captionErr.message}`);
+        } finally {
+          setPhotoCaptionLoading(false);
+        }
       }
     } catch (err) {
       console.error(err);
     } finally {
       setExtracting(false);
     }
+  };
+
+  const handleAvatarUpload = async () => {
+    try {
+      const files = await openFileUpload(false);
+      const file = files?.[0];
+      if (!file) return;
+      if (!user?.id) throw new Error('User session is required before upload');
+      setAvatarUploadStatus('Uploading profile picture...');
+      const url = await uploadImageAsset({
+        file,
+        userId: user.id,
+        category: 'profile',
+        label: `${form.stageName || form.firstName || 'profile'}-avatar`,
+      });
+      setForm(prev => ({ ...prev, avatarUrl: url, headshot: prev.headshot || url }));
+      setAvatarUploadStatus('Profile picture ready.');
+    } catch (err) {
+      if (String(err?.message || '').toLowerCase().includes('cancel')) return;
+      setAvatarUploadStatus(`Profile upload hit a snag: ${err.message}`);
+    }
+  };
+
+  const handleHeadshotUpload = async () => {
+    try {
+      const files = await openFileUpload(false);
+      const file = files?.[0];
+      if (!file) return;
+      if (!user?.id) throw new Error('User session is required before upload');
+      setAvatarUploadStatus('Uploading headshot...');
+      const url = await uploadImageAsset({
+        file,
+        userId: user.id,
+        category: 'profile',
+        label: `${form.stageName || form.firstName || 'profile'}-headshot`,
+      });
+      setForm(prev => ({ ...prev, headshot: url, avatarUrl: prev.avatarUrl || url }));
+      setAvatarUploadStatus('Headshot uploaded.');
+    } catch (err) {
+      if (String(err?.message || '').toLowerCase().includes('cancel')) return;
+      setAvatarUploadStatus(`Headshot upload hit a snag: ${err.message}`);
+    }
+  };
+
+  const applyCaptionSummaryToBio = () => {
+    if (!String(photoCaptionPack.summary || '').trim()) return;
+    setForm(prev => ({ ...prev, bio: photoCaptionPack.summary }));
+    setPhotoCaptionStatus('Bio replaced with generated image summary.');
+  };
+
+  const appendCaptionToBio = (caption = '') => {
+    const next = String(caption || '').trim();
+    if (!next) return;
+    setForm(prev => {
+      const current = String(prev.bio || '').trim();
+      const combined = current ? `${current}\n\n${next}` : next;
+      return { ...prev, bio: combined };
+    });
+    setPhotoCaptionStatus('Caption appended to bio.');
   };
 
   const runBioDeepResearch = async ({
@@ -659,6 +769,14 @@ export default function ArtistSetup() {
 
       {activeTab === 'profile' && (
         <>
+          <IntakePromptPanel
+            promptKey="artist"
+            formType="artist"
+            currentForm={form}
+            onApply={applyArtistPatch}
+            titleOverride="Tell me who you are (so I can write this for you)."
+          />
+
           <FormAIAssist
             formType="artist"
             currentForm={form}
@@ -685,6 +803,39 @@ export default function ArtistSetup() {
               <button type="button" onClick={async () => { try { const files = await openFileUpload(true); handlePhotoExtract(files); } catch {} }}
                 className="btn-secondary text-sm" disabled={extracting}>📁 Upload</button>
             </div>
+            {uploadedImages.length > 0 && (
+              <div className="flex gap-2 mt-3 overflow-x-auto">
+                {uploadedImages.map((url, i) => (
+                  <img key={i} src={url} alt={`Upload ${i + 1}`} className="w-16 h-16 object-cover rounded-lg border border-gray-200" />
+                ))}
+              </div>
+            )}
+            {(photoCaptionLoading || photoCaptionStatus || photoCaptionPack.summary || (photoCaptionPack.captions || []).length > 0) && (
+              <div className="mt-3 p-3 border border-gray-200 rounded-lg bg-white space-y-2">
+                <p className="text-xs font-semibold text-gray-700 m-0">📝 Photo Intelligence: Descriptions & Captions</p>
+                {photoCaptionStatus && <p className="text-xs text-gray-600 m-0">{photoCaptionStatus}</p>}
+                {photoCaptionPack.summary && (
+                  <div className="border border-gray-100 rounded p-2 bg-gray-50">
+                    <p className="text-xs font-medium text-gray-700 m-0">Summary</p>
+                    <p className="text-xs text-gray-600 mt-1 mb-2">{photoCaptionPack.summary}</p>
+                    <button type="button" className="btn-secondary text-xs" onClick={applyCaptionSummaryToBio}>
+                      Use Summary in Bio
+                    </button>
+                  </div>
+                )}
+                {(photoCaptionPack.captions || []).slice(0, 6).map((item, index) => (
+                  <div key={`${item.title || 'caption'}-${index}`} className="border border-gray-100 rounded p-2">
+                    <p className="text-xs font-medium text-gray-700 m-0">{item.title || `Image ${index + 1}`}</p>
+                    <p className="text-xs text-gray-500 mt-1 mb-1">{item.shortDescription || item.altText || ''}</p>
+                    <p className="text-xs text-gray-700 mt-0 mb-2">{item.caption || ''}</p>
+                    <button type="button" className="btn-secondary text-xs" onClick={() => appendCaptionToBio(item.caption)}>
+                      Add Caption to Bio
+                    </button>
+                  </div>
+                ))}
+                <p className="text-[11px] text-gray-500 m-0">Official uploaded images remain untouched. This drafts text only.</p>
+              </div>
+            )}
           </div>
 
           <CompletionBar completed={completed} total={total} label={isArtisanUser ? 'Artisan Profile' : isKnowledgeCreatorUser ? 'Professional Profile' : 'Artist Profile'} />
@@ -712,6 +863,24 @@ export default function ArtistSetup() {
                     isArtisanUser ? "Blue Heron Ceramics Studio" : isKnowledgeCreatorUser ? "Julie Good Media" : "Julie Good and A Dog Named Mike",
                     true
                   )}
+                </div>
+                <div className="md:col-span-2 border border-gray-200 rounded-lg p-3 bg-[#faf8f3]">
+                  <p className="text-xs font-semibold text-gray-700 m-0 mb-2">Circle Profile Picture (left of name)</p>
+                  <div className="flex items-center gap-3">
+                    <CircleAvatar
+                      entity={{ ...form, name: form.stageName || `${form.firstName || ''} ${form.lastName || ''}`.trim() }}
+                      type="user"
+                      name={form.stageName || `${form.firstName || ''} ${form.lastName || ''}`.trim()}
+                      src={form.avatarUrl || form.headshot || ''}
+                      size="w-12 h-12"
+                      textSize="text-xs"
+                    />
+                    <div className="space-y-1">
+                      <button type="button" className="btn-secondary text-xs" onClick={handleAvatarUpload}>Upload Circle Profile Photo</button>
+                      <p className="text-[11px] text-gray-500 m-0">This shows to the left of names across event lists and staffing views.</p>
+                      {avatarUploadStatus && <p className="text-[11px] text-gray-600 m-0">{avatarUploadStatus}</p>}
+                    </div>
+                  </div>
                 </div>
                 {fieldInput("Manager Name", "managerName", "text", "Jane Smith")}
                 {fieldInput("Manager Email", "managerEmail", "email", "manager@email.com")}
@@ -1020,7 +1189,7 @@ export default function ArtistSetup() {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Headshot / Press Photo</label>
                   <div className="border-2 border-dashed border-gray-200 rounded-lg p-6 text-center text-sm text-gray-400 cursor-pointer hover:border-[#c8a45e]"
-                    onClick={async () => { try { const files = await openFileUpload(false); handlePhotoExtract(files); } catch {} }}>
+                    onClick={handleHeadshotUpload}>
                     {form.headshot ? '✓ Photo uploaded' : 'Click to upload headshot / press photo (PNG, JPG)'}
                   </div>
                 </div>

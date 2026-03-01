@@ -89,6 +89,28 @@ export async function deepResearchDraft(payload = {}) {
   }
 }
 
+export async function deepResearchImageCaptionPack(payload = {}) {
+  try {
+    const res = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'deep-research-draft',
+        target: 'image_caption_pack',
+        ...payload,
+      }),
+    });
+    const data = await res.json();
+    if (!data?.success) {
+      throw new Error(data?.error || 'Image caption research failed');
+    }
+    return data;
+  } catch (err) {
+    console.error('[Research] Image caption pack error:', err.message);
+    throw err;
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════
 // MASTER RESEARCH FUNCTION
 // ═══════════════════════════════════════════════════════════════

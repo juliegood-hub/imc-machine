@@ -5,9 +5,13 @@ import { useAuth } from '../context/AuthContext';
 import CompletionBar from '../components/CompletionBar';
 import SponsorEditor from '../components/SponsorEditor';
 import FormAIAssist from '../components/FormAIAssist';
+import IntakePromptPanel from '../components/IntakePromptPanel';
 import DeepResearchPromptBox from '../components/DeepResearchPromptBox';
+import CircleAvatar from '../components/CircleAvatar';
 import { extractFromImages, extractionToEventForm, openCamera, openFileUpload } from '../services/photo-to-form';
-import { deepResearchDraft } from '../services/research';
+import { uploadImageAssetsBatch } from '../services/mediaUpload';
+import { deepResearchDraft, deepResearchImageCaptionPack } from '../services/research';
+import { resolveMainPosterUrl } from '../lib/entityAvatar';
 import {
   THEATER_GENRE_KEY,
   THEATER_DEPARTMENTS,
@@ -31,6 +35,7 @@ import {
 
 const LEGAL_CLE_GENRE_KEY = 'Legal CLE | Law Panels | Bar Association Events';
 const ARTISAN_GENRE_KEY = 'Visual Art | Artisan | Gallery | Craft Shows';
+const YOGA_WELLNESS_GENRE_KEY = 'Yoga | Wellness | Mindfulness Classes';
 
 const GENRES = [
   { key: THEATER_GENRE_KEY, icon: '🎭', color: '#8B5CF6', desc: 'Plays, musicals, theatrical performances' },
@@ -41,7 +46,8 @@ const GENRES = [
   { key: 'Literary | Poetry | Book Signings', icon: '📚', color: '#7C3AED', desc: 'Book signings, poetry readings, author talks, literary events' },
   { key: LEGAL_CLE_GENRE_KEY, icon: '⚖️', color: '#1E40AF', desc: 'CLE seminars, legal panels, bar events, law-focused speaking events' },
   { key: 'Politics | Civic | Campaign Events', icon: '🗳️', color: '#2563EB', desc: 'Campaign launches, civic forums, policy events, candidate meet-and-greets' },
-  { key: 'Comedy | Speaking | Lectures | Workshops', icon: '🎤', color: '#F59E0B', desc: 'Comedy, talks, workshops, panels' },
+  { key: 'Comedy | Speaking | Lectures | Workshops', icon: '🎤', color: '#F59E0B', desc: 'Comedy, talks, workshops, panels, classes' },
+  { key: YOGA_WELLNESS_GENRE_KEY, icon: '🧘', color: '#14B8A6', desc: 'Yoga classes, mindfulness sessions, breathwork, and wellness gatherings' },
   { key: 'Dance | Performance Art | Experimental', icon: '💃', color: '#10B981', desc: 'Dance, movement theater, and live performance art' },
 ];
 
@@ -55,6 +61,7 @@ const GENRE_ROLES = {
   [LEGAL_CLE_GENRE_KEY]: ['Attorney', 'Trial Lawyer', 'General Counsel', 'District Attorney Candidate', 'Assistant District Attorney', 'Judge', 'Law Professor', 'CLE Presenter', 'CLE Moderator', 'Panelist', 'Bar Association Host', 'MCLE Coordinator', 'Legal Aid Director', 'Policy Counsel', 'Compliance Officer'],
   'Politics | Civic | Campaign Events': ['Candidate for Office', 'Incumbent Officeholder', 'Campaign Manager', 'Field Director', 'Policy Director', 'Press Secretary', 'Volunteer Coordinator', 'Fundraising Chair', 'District Attorney Candidate', 'Judge Candidate', 'County Clerk Candidate', 'City Council Candidate', 'County Commissioner Candidate', 'State House Candidate', 'State Senate Candidate', 'Congressional Candidate', 'Moderator', 'Host/Emcee'],
   'Comedy | Speaking | Lectures | Workshops': ['Comedian/Comic', 'Host/Emcee', 'Keynote Speaker', 'Panelist', 'Moderator', 'Workshop Facilitator', 'Opening Act', 'Headliner', 'Candidate for Office', 'Campaign Manager', 'District Attorney Candidate', 'Judge Candidate', 'County Clerk Candidate'],
+  [YOGA_WELLNESS_GENRE_KEY]: ['Yoga Instructor', 'Breathwork Facilitator', 'Meditation Guide', 'Wellness Coach', 'Sound Bath Practitioner', 'Host/Emcee', 'Workshop Facilitator', 'Studio Manager', 'Check-In Coordinator'],
   'Dance | Performance Art | Experimental': ['Choreographer', 'Lead Dancer', 'Performance Artist', 'Movement Director', 'Aerialist', 'Puppeteer'],
 };
 
@@ -197,6 +204,28 @@ const DESCRIPTION_STYLE_HELP = {
   feature: 'Feature adds atmosphere and scene-setting so the draft reads like an entertainment feature intro.',
   punchy: 'Punchy keeps the same facts but drives a sharper, faster, high-energy lead.',
 };
+const DEFAULT_CITY = 'San Antonio';
+const DEFAULT_STATE = 'TX';
+const DEFAULT_POSTAL_CODE = '78205';
+
+const WORKSHOP_VENUE_PRESETS = [
+  {
+    key: 'ten_bit_works',
+    name: '10 Bit Works',
+    city: 'San Antonio',
+    state: 'TX',
+    profileType: 'Community Workshop Hub',
+    notes: 'Maker/hacker space workshop host',
+  },
+  {
+    key: 'launch_sa',
+    name: 'Launch SA',
+    city: 'San Antonio',
+    state: 'TX',
+    profileType: 'City Small-Business Program',
+    notes: 'City-supported entrepreneurship and workshop venue',
+  },
+];
 
 const KNOWN_TICKETING_PROVIDERS = ['manual', 'eventbrite', 'ticketmaster', 'universe', 'square', 'etix', 'other'];
 
@@ -771,7 +800,7 @@ function detectGenreLens(genreLabel = '') {
   if (g.includes('literary') || g.includes('poetry') || g.includes('book')) return 'literary';
   if (g.includes('legal') || g.includes('cle')) return 'legal';
   if (g.includes('politic') || g.includes('civic') || g.includes('campaign')) return 'politics';
-  if (g.includes('comedy') || g.includes('lecture') || g.includes('workshop') || g.includes('speaking')) return 'speaking';
+  if (g.includes('comedy') || g.includes('lecture') || g.includes('workshop') || g.includes('speaking') || g.includes('yoga') || g.includes('mindfulness') || g.includes('wellness')) return 'speaking';
   return 'default';
 }
 
@@ -1032,7 +1061,7 @@ export default function EventCreate() {
     ticketProviderOther: '',
     ticketProviderEventId: '',
     venueStreetNumber: '', venueStreetName: '', venueSuite: '',
-    venueCity: 'San Antonio', venueState: 'TX', venueZip: '',
+    venueCity: DEFAULT_CITY, venueState: DEFAULT_STATE, venueZip: DEFAULT_POSTAL_CODE,
     venuePhone: '', venueWebsite: '',
     venueGooglePlaceId: '',
     venueGoogleMapsUrl: '',
@@ -1125,6 +1154,9 @@ export default function EventCreate() {
   const [channels, setChannels] = useState(CHANNELS.reduce((a, c) => ({ ...a, [c.key]: true }), {}));
   const [uploadedImages, setUploadedImages] = useState([]);
   const [extracting, setExtracting] = useState({});
+  const [mediaCaptionPack, setMediaCaptionPack] = useState({ summary: '', captions: [] });
+  const [mediaCaptionLoading, setMediaCaptionLoading] = useState(false);
+  const [mediaCaptionStatus, setMediaCaptionStatus] = useState('');
   const [participantSearch, setParticipantSearch] = useState('');
   const [participantStatus, setParticipantStatus] = useState('');
   const [venueLibraryStatus, setVenueLibraryStatus] = useState('');
@@ -1135,6 +1167,7 @@ export default function EventCreate() {
   const [venueSuggestions, setVenueSuggestions] = useState([]);
   const [venueLookupLoading, setVenueLookupLoading] = useState(false);
   const [venueLookupStatus, setVenueLookupStatus] = useState('');
+  const [workshopPresetStatus, setWorkshopPresetStatus] = useState('');
   const [venueLookupSessionToken] = useState(() => `imc-venue-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   const [descriptionResearchStatus, setDescriptionResearchStatus] = useState('');
   const [descriptionResearching, setDescriptionResearching] = useState(false);
@@ -1153,6 +1186,11 @@ export default function EventCreate() {
     nextStep: '',
   });
   const autoDescriptionTriggeredRef = useRef(false);
+  const genreLabelLower = String(form.genre || '').toLowerCase();
+  const isWorkshopFlow = genreLabelLower.includes('workshop')
+    || genreLabelLower.includes('yoga')
+    || genreLabelLower.includes('wellness')
+    || genreLabelLower.includes('mindfulness');
 
   useEffect(() => {
     setEventAssistDefaultTab(resolveAiIntakeTab(aiIntakeInputMode));
@@ -1708,9 +1746,9 @@ export default function EventCreate() {
         venueStreetNumber: details?.streetNumber || prev.venueStreetNumber,
         venueStreetName: details?.streetName || prev.venueStreetName,
         venueSuite: details?.suite || prev.venueSuite,
-        venueCity: details?.city || prev.venueCity || 'San Antonio',
-        venueState: details?.state || prev.venueState || 'TX',
-        venueZip: details?.zip || prev.venueZip,
+        venueCity: details?.city || prev.venueCity || DEFAULT_CITY,
+        venueState: details?.state || prev.venueState || DEFAULT_STATE,
+        venueZip: details?.zip || prev.venueZip || DEFAULT_POSTAL_CODE,
         venuePhone: details?.phone || prev.venuePhone,
         venueWebsite: details?.website || prev.venueWebsite,
         venueGooglePlaceId: details?.placeId || prev.venueGooglePlaceId || '',
@@ -1721,6 +1759,33 @@ export default function EventCreate() {
       setVenueLookupStatus('Venue details auto-filled.');
     } catch (err) {
       setVenueLookupStatus(`I hit a snag auto-filling venue details: ${err.message}`);
+    }
+  };
+
+  const applyWorkshopPreset = async (preset) => {
+    if (!preset?.name) return;
+    setWorkshopPresetStatus(`Loading ${preset.name}...`);
+    setForm(prev => ({
+      ...prev,
+      venue: preset.name,
+      venueCity: preset.city || prev.venueCity || DEFAULT_CITY,
+      venueState: preset.state || prev.venueState || DEFAULT_STATE,
+    }));
+
+    try {
+      const suggestionQuery = `${preset.name} ${preset.city || DEFAULT_CITY} ${preset.state || DEFAULT_STATE}`.trim();
+      const suggestions = await searchVenueSuggestions(suggestionQuery, {
+        limit: 6,
+        sessionToken: venueLookupSessionToken,
+      });
+      if (Array.isArray(suggestions) && suggestions.length > 0) {
+        await applyVenueSuggestion(suggestions[0]);
+        setWorkshopPresetStatus(`${preset.name} preset loaded with Google venue details.`);
+      } else {
+        setWorkshopPresetStatus(`${preset.name} preset loaded. I could not find Google details yet, so fill any missing fields manually.`);
+      }
+    } catch (err) {
+      setWorkshopPresetStatus(`Preset applied, but Google details hit a snag: ${err.message}`);
     }
   };
 
@@ -1737,9 +1802,9 @@ export default function EventCreate() {
       venueStreetNumber: selected.street_number || '',
       venueStreetName: selected.street_name || '',
       venueSuite: selected.suite || '',
-      venueCity: selected.city || prev.venueCity || 'San Antonio',
-      venueState: selected.state || prev.venueState || 'TX',
-      venueZip: selected.postal_code || '',
+      venueCity: selected.city || prev.venueCity || DEFAULT_CITY,
+      venueState: selected.state || prev.venueState || DEFAULT_STATE,
+      venueZip: selected.postal_code || prev.venueZip || DEFAULT_POSTAL_CODE,
       venuePhone: selected.phone || '',
       venueWebsite: selected.website || '',
       venueGooglePlaceId: selected.metadata?.googlePlaceId || prev.venueGooglePlaceId || '',
@@ -1772,15 +1837,16 @@ export default function EventCreate() {
         street_number: form.venueStreetNumber || '',
         street_name: form.venueStreetName || '',
         suite: form.venueSuite || '',
-        city: form.venueCity || 'San Antonio',
-        state: form.venueState || 'TX',
-        postal_code: form.venueZip || '',
+        city: form.venueCity || DEFAULT_CITY,
+        state: form.venueState || DEFAULT_STATE,
+        postal_code: form.venueZip || DEFAULT_POSTAL_CODE,
         phone: form.venuePhone || '',
         website: form.venueWebsite || '',
         metadata: {
           googlePlaceId: form.venueGooglePlaceId || '',
           googleMapsUrl: form.venueGoogleMapsUrl || '',
           socialLinks: form.venueSocialLinks || {},
+          avatarUrl: resolveMainPosterUrl({ uploadedImages }),
         },
       });
       setForm(prev => ({ ...prev, venueProfileId: saved.id }));
@@ -1865,8 +1931,34 @@ export default function EventCreate() {
   const handleExtract = useCallback(async (files, context) => {
     if (!files?.length) return;
     setExtracting(prev => ({ ...prev, [context]: true }));
-    setUploadedImages(prev => [...prev, ...files.map(f => ({ url: URL.createObjectURL(f), name: f.name, context }))]);
+    if (context === 'media') {
+      setMediaCaptionStatus('');
+    }
     try {
+      let preparedImages = files.map((file) => ({
+        url: URL.createObjectURL(file),
+        name: file.name,
+        source: 'local',
+        context,
+      }));
+
+      if (context === 'media' && user?.id) {
+        try {
+          const uploaded = await uploadImageAssetsBatch({
+            files,
+            userId: user.id,
+            category: 'event_media',
+          });
+          if (uploaded.length) {
+            preparedImages = uploaded.map((item) => ({ ...item, context }));
+          }
+        } catch (uploadErr) {
+          setMediaCaptionStatus(`I could not store those files in cloud storage yet: ${uploadErr.message}. I kept local previews so you can keep working.`);
+        }
+      }
+
+      setUploadedImages(prev => [...prev, ...preparedImages]);
+
       const result = await extractFromImages(files);
       if (!result.success) return;
       const d = result.data || {};
@@ -1960,7 +2052,53 @@ export default function EventCreate() {
       }
 
       if (context === 'media') {
-        // Images already added to uploadedImages above
+        setMediaCaptionLoading(true);
+        setMediaCaptionStatus('Writing photo descriptions and captions from your uploaded official assets...');
+        try {
+          const captionResult = await deepResearchImageCaptionPack({
+            domain: Array.isArray(d?.menuItems) && d.menuItems.length > 0
+              ? 'menu'
+              : form.genre === ARTISAN_GENRE_KEY
+                ? 'artwork'
+                : 'event',
+            styleIntensity: descriptionStyleIntensity,
+            extracted: d || {},
+            event: {
+              title: form.title,
+              genre: form.genre,
+              date: form.date,
+              time: form.time,
+              description: form.description,
+              ticketLink: form.ticketLink,
+            },
+            venue: {
+              name: form.venue,
+              city: form.venueCity,
+              state: form.venueState,
+              website: form.venueWebsite,
+            },
+          });
+
+          const summary = String(captionResult?.summary || '').trim();
+          const captions = Array.isArray(captionResult?.captions) ? captionResult.captions : [];
+          setMediaCaptionPack({ summary, captions });
+          const hadDescription = !!String(form.description || '').trim();
+          if (summary) {
+            setForm(prev => {
+              if (String(prev.description || '').trim()) return prev;
+              return { ...prev, description: summary };
+            });
+          }
+          setMediaCaptionStatus(
+            summary && !hadDescription
+              ? 'Added photo summary to event description. Review it before launch.'
+              : 'Photo captions are ready below.'
+          );
+        } catch (captionErr) {
+          setMediaCaptionStatus(`Images uploaded, but caption drafting hit a snag: ${captionErr.message}`);
+        } finally {
+          setMediaCaptionLoading(false);
+        }
       }
 
     } catch (err) {
@@ -1968,7 +2106,22 @@ export default function EventCreate() {
     } finally {
       setExtracting(prev => ({ ...prev, [context]: false }));
     }
-  }, [addCrewMembers, isTheaterGenre]);
+  }, [
+    addCrewMembers,
+    isTheaterGenre,
+    user?.id,
+    form.genre,
+    form.title,
+    form.date,
+    form.time,
+    form.description,
+    form.ticketLink,
+    form.venue,
+    form.venueCity,
+    form.venueState,
+    form.venueWebsite,
+    descriptionStyleIntensity,
+  ]);
 
   const completedFields = useMemo(() => {
     let c = 0;
@@ -1983,6 +2136,23 @@ export default function EventCreate() {
     return c;
   }, [form, crew, uploadedImages]);
 
+  const applyMediaSummaryToDescription = () => {
+    if (!String(mediaCaptionPack.summary || '').trim()) return;
+    setForm(prev => ({ ...prev, description: mediaCaptionPack.summary }));
+    setMediaCaptionStatus('Event description replaced with generated photo summary.');
+  };
+
+  const appendMediaCaptionToDescription = (caption = '') => {
+    const next = String(caption || '').trim();
+    if (!next) return;
+    setForm(prev => {
+      const current = String(prev.description || '').trim();
+      const combined = current ? `${current}\n\n${next}` : next;
+      return { ...prev, description: combined };
+    });
+    setMediaCaptionStatus('Caption appended to event description.');
+  };
+
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async () => {
@@ -1995,6 +2165,15 @@ export default function EventCreate() {
     try {
       const normalizedTicketProvider = resolveTicketProviderForStorage(form) || 'manual';
       const specialInstructions = mergeTheaterSpecialInstructions(form);
+      const normalizedUploadedImages = (uploadedImages || [])
+        .map((item) => ({
+          url: item.url,
+          name: item.name || '',
+          source: item.source || 'upload',
+          context: item.context || 'media',
+        }))
+        .filter((item) => !!item.url);
+      const mainPosterUrl = String(resolveMainPosterUrl({ uploadedImages: normalizedUploadedImages }) || '').trim();
       const baseProductionDetails = {
         seatsAvailable: form.seatsAvailable || '',
         ticketSalesCount: form.ticketSalesCount || '',
@@ -2004,6 +2183,8 @@ export default function EventCreate() {
         venueGoogleMapsUrl: form.venueGoogleMapsUrl || '',
         venueSocialLinks: form.venueSocialLinks || {},
         officialAssetsOnly: !!form.officialAssetsOnly,
+        mainPosterUrl,
+        uploadedImages: normalizedUploadedImages,
       };
       const event = await addEvent({
         ...form,
@@ -3189,6 +3370,13 @@ export default function EventCreate() {
                           onChange={() => toggleParticipantSelection(profile.id)}
                           className="accent-[#c8a45e]"
                         />
+                        <CircleAvatar
+                          entity={profile}
+                          type="user"
+                          name={profile.name}
+                          size="w-8 h-8"
+                          textSize="text-[10px]"
+                        />
                         <span className="min-w-0">
                           <span className="block text-sm font-medium truncate">{profile.name}</span>
                           <span className="block text-xs text-gray-500 truncate">
@@ -3262,19 +3450,22 @@ export default function EventCreate() {
             <div className="space-y-2">
               {crew.map(c => (
                 <div key={c.id} className="flex items-start justify-between p-3 bg-[#f5f5f5] rounded-lg gap-3">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium text-sm">{c.name}</span>
-                      <span className="text-xs text-gray-500">({c.role})</span>
-                      {c.department && <span className="text-[10px] bg-white border border-gray-200 px-1.5 py-0.5 rounded">{c.department}</span>}
-                      {c.callTime && <span className="text-[10px] bg-[#faf8f3] border border-[#c8a45e] px-1.5 py-0.5 rounded">Call: {c.callTime}</span>}
-                    </div>
-                    {(c.email || c.phone) && (
-                      <div className="text-xs text-gray-500 mt-1">
-                        {c.email}{c.email && c.phone ? ' · ' : ''}{c.phone}
+                  <div className="min-w-0 flex items-start gap-2">
+                    <CircleAvatar entity={c} type="user" name={c.name} size="w-8 h-8" textSize="text-[10px]" className="mt-0.5" />
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium text-sm">{c.name}</span>
+                        <span className="text-xs text-gray-500">({c.role})</span>
+                        {c.department && <span className="text-[10px] bg-white border border-gray-200 px-1.5 py-0.5 rounded">{c.department}</span>}
+                        {c.callTime && <span className="text-[10px] bg-[#faf8f3] border border-[#c8a45e] px-1.5 py-0.5 rounded">Call: {c.callTime}</span>}
                       </div>
-                    )}
-                    {c.notes && <div className="text-xs text-gray-600 mt-1">{c.notes}</div>}
+                      {(c.email || c.phone) && (
+                        <div className="text-xs text-gray-500 mt-1">
+                          {c.email}{c.email && c.phone ? ' · ' : ''}{c.phone}
+                        </div>
+                      )}
+                      {c.notes && <div className="text-xs text-gray-600 mt-1">{c.notes}</div>}
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <button
@@ -3329,8 +3520,55 @@ export default function EventCreate() {
                 </option>
               ))}
             </select>
+            {(venueProfiles || []).length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {(venueProfiles || []).slice(0, 6).map((profile) => (
+                  <button
+                    key={`venue-avatar-${profile.id}`}
+                    type="button"
+                    onClick={() => loadVenueProfileIntoForm(profile.id)}
+                    className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border text-xs ${
+                      form.venueProfileId === profile.id ? 'border-[#c8a45e] bg-[#faf8f3] text-[#7f5f2b]' : 'border-gray-200 bg-white text-gray-700'
+                    }`}
+                  >
+                    <CircleAvatar entity={profile} type="venue" name={profile.name} size="w-5 h-5" textSize="text-[9px]" />
+                    <span className="truncate max-w-[120px]">{profile.name || 'Venue'}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             {venueLibraryStatus && <p className="text-xs text-gray-600 mt-2 mb-0">{venueLibraryStatus}</p>}
           </div>
+
+          {isWorkshopFlow && (
+            <div className="card mb-4 border border-blue-200 bg-blue-50">
+              <div className="flex items-start justify-between gap-3 mb-2">
+                <div>
+                  <h3 className="text-base mb-1 text-blue-900">Workshop & Yoga Venue Presets (San Antonio)</h3>
+                  <p className="text-xs text-blue-800 m-0">
+                    Start fast with local workshop hosts, then I will pull Google venue details for address, maps, and contact fields.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {WORKSHOP_VENUE_PRESETS.map((preset) => (
+                  <button
+                    key={preset.key}
+                    type="button"
+                    onClick={() => applyWorkshopPreset(preset)}
+                    className="px-3 py-1.5 rounded border border-blue-300 bg-white text-blue-900 text-xs"
+                    title={preset.notes || preset.profileType}
+                  >
+                    {preset.name}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-blue-800 mt-2 mb-0">
+                Need another org? Type the venue name and choose it from Google suggestions below.
+              </p>
+              {workshopPresetStatus && <p className="text-xs text-blue-900 mt-2 mb-0">{workshopPresetStatus}</p>}
+            </div>
+          )}
 
           <div className="space-y-4">
             <div>
@@ -3737,7 +3975,7 @@ export default function EventCreate() {
             {extracting.media && <p className="text-sm text-[#c8a45e] animate-pulse mb-3">🔍 Processing...</p>}
             <p className="text-4xl mb-3">📁</p>
             <p className="text-gray-500 mb-1">Upload event photos, flyers, headshots, and graphics</p>
-            <p className="text-xs text-gray-400 mb-4">These will be stored to Google Drive and used for campaign visuals</p>
+            <p className="text-xs text-gray-400 mb-4">These will be stored to cloud media. The first uploaded poster becomes the default circle image next to this event name.</p>
             <div className="flex justify-center gap-3">
               <button type="button" onClick={async () => { try { const f = await openCamera(); handleExtract([f], 'media'); } catch {} }}
                 className="btn-primary text-sm" disabled={extracting.media}>📷 Take Photo</button>
@@ -3756,6 +3994,36 @@ export default function EventCreate() {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+          {(mediaCaptionLoading || mediaCaptionStatus || mediaCaptionPack.summary || (mediaCaptionPack.captions || []).length > 0) && (
+            <div className="mt-4 p-3 border border-gray-200 rounded-lg bg-white space-y-2">
+              <p className="text-xs font-semibold text-gray-700 m-0">📝 Photo Intelligence: Event Descriptions & Captions</p>
+              {mediaCaptionStatus && <p className="text-xs text-gray-600 m-0">{mediaCaptionStatus}</p>}
+              {mediaCaptionPack.summary && (
+                <div className="border border-gray-100 rounded p-2 bg-gray-50">
+                  <p className="text-xs font-medium text-gray-700 m-0">Summary</p>
+                  <p className="text-xs text-gray-600 mt-1 mb-2">{mediaCaptionPack.summary}</p>
+                  <button type="button" className="btn-secondary text-xs" onClick={applyMediaSummaryToDescription}>
+                    Use Summary in Event Description
+                  </button>
+                </div>
+              )}
+              {(mediaCaptionPack.captions || []).slice(0, 8).map((item, index) => (
+                <div key={`${item.title || 'caption'}-${index}`} className="border border-gray-100 rounded p-2">
+                  <p className="text-xs font-medium text-gray-700 m-0">{item.title || `Image ${index + 1}`}</p>
+                  <p className="text-xs text-gray-500 mt-1 mb-1">{item.shortDescription || item.altText || ''}</p>
+                  <p className="text-xs text-gray-700 mt-0 mb-2">{item.caption || ''}</p>
+                  <button type="button" className="btn-secondary text-xs" onClick={() => appendMediaCaptionToDescription(item.caption)}>
+                    Add Caption to Event Description
+                  </button>
+                </div>
+              ))}
+              <p className="text-[11px] text-gray-500 m-0">
+                {form.officialAssetsOnly
+                  ? 'Official-assets-only is on: your uploaded files stay exact. I only draft text from them.'
+                  : 'Uploaded files stay untouched. This block only drafts text descriptions and captions.'}
+              </p>
             </div>
           )}
         </div>
@@ -3859,7 +4127,16 @@ export default function EventCreate() {
             </div>
             <div className="card">
               <h3 className="text-sm font-semibold text-gray-500 uppercase mb-2">Event</h3>
-              <p className="text-lg font-semibold">{form.title || 'Untitled'}</p>
+              <div className="flex items-center gap-2">
+                <CircleAvatar
+                  entity={{ title: form.title, uploadedImages }}
+                  type="event"
+                  name={form.title || 'Untitled'}
+                  size="w-10 h-10"
+                  textSize="text-xs"
+                />
+                <p className="text-lg font-semibold m-0">{form.title || 'Untitled'}</p>
+              </div>
               <p className="text-sm text-gray-500">{form.date} at {form.time} · {form.venue}</p>
               {form.venueAddress && <p className="text-xs text-gray-400">{form.venueAddress}</p>}
               {form.description && <p className="text-sm mt-2">{form.description}</p>}
@@ -3890,8 +4167,9 @@ export default function EventCreate() {
                 <h3 className="text-sm font-semibold text-gray-500 uppercase mb-2">Reusable Acts</h3>
                 <div className="flex flex-wrap gap-2">
                   {selectedParticipantProfiles.map(profile => (
-                    <span key={profile.id} className="text-xs bg-[#faf8f3] border border-[#c8a45e] px-2 py-1 rounded">
-                      {profile.name}{profile.role ? ` (${profile.role})` : ''}
+                    <span key={profile.id} className="text-xs bg-[#faf8f3] border border-[#c8a45e] px-2 py-1 rounded inline-flex items-center gap-1.5">
+                      <CircleAvatar entity={profile} type="user" name={profile.name} size="w-5 h-5" textSize="text-[9px]" />
+                      <span>{profile.name}{profile.role ? ` (${profile.role})` : ''}</span>
                     </span>
                   ))}
                 </div>
@@ -3900,9 +4178,18 @@ export default function EventCreate() {
             {form.venueProfileId && (
               <div className="card">
                 <h3 className="text-sm font-semibold text-gray-500 uppercase mb-2">Saved Venue Profile</h3>
-                <p className="text-sm m-0">
-                  {(venueProfiles || []).find(v => v.id === form.venueProfileId)?.name || form.venue}
-                </p>
+                <div className="flex items-center gap-2">
+                  <CircleAvatar
+                    entity={(venueProfiles || []).find(v => v.id === form.venueProfileId) || { name: form.venue, uploadedImages }}
+                    type="venue"
+                    name={(venueProfiles || []).find(v => v.id === form.venueProfileId)?.name || form.venue}
+                    size="w-8 h-8"
+                    textSize="text-[10px]"
+                  />
+                  <p className="text-sm m-0">
+                    {(venueProfiles || []).find(v => v.id === form.venueProfileId)?.name || form.venue}
+                  </p>
+                </div>
               </div>
             )}
             {(form.performanceZoneId || form.showConfigurationId || (form.showContacts || []).length > 0) && (
@@ -4089,6 +4376,14 @@ export default function EventCreate() {
         </div>
       )}
       <h1 className="text-3xl mb-2" style={{ fontFamily: "'Playfair Display', serif" }}>Start New Event</h1>
+
+      <IntakePromptPanel
+        promptKey="event"
+        formType="event"
+        currentForm={form}
+        onApply={applyEventPatch}
+        titleOverride="Tell me what's happening (so I can publish this everywhere)."
+      />
 
       <FormAIAssist
         formType="event"

@@ -6,6 +6,9 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const DEFAULT_CITY = 'San Antonio';
+const DEFAULT_STATE = 'TX';
+const DEFAULT_POSTAL_CODE = '78205';
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.warn('[Supabase] Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY');
@@ -315,9 +318,9 @@ export async function createVenueProfile(profileData) {
       street_number: profileData.street_number || '',
       street_name: profileData.street_name || '',
       suite: profileData.suite || '',
-      city: profileData.city || 'San Antonio',
-      state: profileData.state || 'TX',
-      postal_code: profileData.postal_code || '',
+      city: profileData.city || DEFAULT_CITY,
+      state: profileData.state || DEFAULT_STATE,
+      postal_code: profileData.postal_code || DEFAULT_POSTAL_CODE,
       phone: profileData.phone || '',
       website: profileData.website || '',
       metadata: profileData.metadata || {},

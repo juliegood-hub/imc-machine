@@ -1,10 +1,11 @@
-import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useLocation, useNavigate, Link } from 'react-router-dom';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { VenueProvider } from './context/VenueContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
+import BuddyDrawer from './components/BuddyDrawer';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import Dashboard from './pages/Dashboard';
@@ -17,7 +18,8 @@ import CrewPortal from './pages/CrewPortal';
 import ArtistSetup from './pages/ArtistSetup';
 import Settings from './pages/Settings';
 import CampaignTracker from './pages/CampaignTracker';
-import PressPage from './pages/PressPagePreview';
+import PressPage from './pages/PressPageHub';
+import PublicPressPage from './pages/PublicPressPage';
 import MediaGallery from './pages/MediaGallery';
 import ProductionCalendar from './pages/ProductionCalendar';
 import WorkflowGuide from './pages/WorkflowGuide';
@@ -27,7 +29,13 @@ import ImageFormatter from './pages/ImageFormatter';
 import Pricing from './pages/Pricing';
 import ProductionOpsHub from './pages/ProductionOpsHub';
 import ChatHub from './pages/ChatHub';
+import ChatDashboard from './pages/ChatDashboard';
+import SafetyRiskHub from './pages/SafetyRiskHub';
+import SearchResults from './pages/SearchResults';
+import UserGuide from './pages/UserGuide';
+import WhitePapers from './pages/WhitePapers';
 import { normalizeWorkflowVariant, resolvePageFlow, resolveWorkflowVariantFromSearch } from './constants/pageFlow';
+import { getFloatingButtonsMode, USER_PREFS_UPDATED_EVENT } from './lib/userPrefs';
 
 // Lazy load PodcastStudio
 const PodcastStudio = lazy(() => import('./pages/PodcastStudio'));
@@ -71,6 +79,12 @@ function readWindowScrollTop() {
 function AppFooter() {
   return (
     <footer className="border-t border-gray-200 bg-white px-6 py-4 text-center">
+      <div className="flex flex-wrap items-center justify-center gap-3 mb-2">
+        <Link to="/workflow" className="text-xs text-gray-500 hover:text-[#0d1b2a] no-underline">📖 How It Works</Link>
+        <Link to="/white-papers" className="text-xs text-gray-500 hover:text-[#0d1b2a] no-underline">📄 White Papers</Link>
+        <Link to="/user-guide" className="text-xs text-gray-500 hover:text-[#0d1b2a] no-underline">🧭 User Guide</Link>
+        <Link to="/buddy" className="text-xs text-gray-500 hover:text-[#0d1b2a] no-underline">🐈‍⬛ CatBot Buddy</Link>
+      </div>
       <p className="text-xs text-gray-500 m-0 leading-relaxed">
         The IMC Machine™ · Integrated Marketing Communications · © {new Date().getFullYear()} Julie Good. All Rights Reserved.
       </p>
@@ -82,6 +96,7 @@ function AppFooter() {
 }
 
 function AppLayout({ children }) {
+  const { user } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const queryWorkflowVariant = resolveWorkflowVariantFromSearch(location.search);
@@ -105,6 +120,7 @@ function AppLayout({ children }) {
     if (typeof window === 'undefined') return 'in_progress';
     return window.localStorage.getItem(`imc-page-status:${resolvePageFlow(window.location.pathname).key}`) || 'in_progress';
   });
+  const [floatingButtonsMode, setFloatingButtonsMode] = useState(() => getFloatingButtonsMode(user?.id));
   const [pageActionNote, setPageActionNote] = useState('');
   const PULL_THRESHOLD = 72;
   const MAX_PULL = 120;
@@ -113,7 +129,7 @@ function AppLayout({ children }) {
   const isTouchDevice = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
   const useWindowScroll = iosSafari;
   const enableCustomPullToRefresh = isTouchDevice && !iosSafari;
-  const showStatusTapFallback = iosDevice && isTouchDevice && !iosSafari;
+  const showStatusTapFallback = false;
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -125,6 +141,21 @@ function AppLayout({ children }) {
     const storedVariant = normalizeWorkflowVariant(window.localStorage.getItem('imc-workflow-variant') || 'default');
     setWorkflowVariant(storedVariant);
   }, [queryWorkflowVariant]);
+
+  useEffect(() => {
+    setFloatingButtonsMode(getFloatingButtonsMode(user?.id));
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const syncMode = () => setFloatingButtonsMode(getFloatingButtonsMode(user?.id));
+    window.addEventListener('storage', syncMode);
+    window.addEventListener(USER_PREFS_UPDATED_EVENT, syncMode);
+    return () => {
+      window.removeEventListener('storage', syncMode);
+      window.removeEventListener(USER_PREFS_UPDATED_EVENT, syncMode);
+    };
+  }, [user?.id]);
 
   const appendWorkflowVariant = (path) => {
     if (!path) return '/';
@@ -296,6 +327,9 @@ function AppLayout({ children }) {
   };
 
   const showPullUI = enableCustomPullToRefresh && (pullDistance > 0 || isRefreshing);
+  const backToTopCompact = floatingButtonsMode !== 'standard';
+  const backToTopVisibility = floatingButtonsMode === 'hidden_mobile' ? 'hidden sm:inline-flex' : 'inline-flex';
+  const backToTopLabel = backToTopCompact ? '↑ Top' : '↑ Back to Top';
 
   return (
     <div className="min-h-screen bg-[#f5f5f5] flex flex-col">
@@ -305,15 +339,20 @@ function AppLayout({ children }) {
           type="button"
           onClick={scrollToTop}
           aria-label="Scroll current view to top"
-          className="fixed left-0 right-0 top-0 z-[70] bg-transparent border-none p-0 m-0"
-          style={{ height: 'max(10px, env(safe-area-inset-top))' }}
+          className="fixed left-0 top-0 z-[70] bg-transparent border-none p-0 m-0"
+          style={{
+            width: '96px',
+            height: 'max(10px, env(safe-area-inset-top))',
+            maxHeight: '24px',
+          }}
         />
       )}
-      <div className="flex flex-1">
+      <div className="flex flex-1 w-full min-w-0 overflow-x-hidden">
         <Sidebar />
         <main
           ref={mainRef}
-          className={`flex-1 min-h-[calc(100vh-52px)] flex flex-col relative lg:ml-60 ${useWindowScroll ? 'overflow-visible' : 'overflow-auto'}`}
+          className={`flex-1 w-full min-w-0 max-w-full flex flex-col relative lg:ml-60 ${useWindowScroll ? 'overflow-visible' : 'overflow-auto'}`}
+          style={{ minHeight: 'calc(100vh - var(--imc-nav-height, 52px))' }}
           onTouchStart={enableCustomPullToRefresh ? handleTouchStart : undefined}
           onTouchMove={enableCustomPullToRefresh ? handleTouchMove : undefined}
           onTouchEnd={enableCustomPullToRefresh ? handleTouchEnd : undefined}
@@ -342,7 +381,7 @@ function AppLayout({ children }) {
               )}
             </div>
           </div>
-          <div className="flex-1">
+          <div className="flex-1 w-full min-w-0 max-w-full overflow-x-hidden pb-24 sm:pb-20">
             {children}
           </div>
           <div className="px-4 md:px-8 pb-4">
@@ -373,11 +412,12 @@ function AppLayout({ children }) {
           <button
             type="button"
             onClick={scrollToTop}
-            className="fixed bottom-5 right-5 z-40 px-3 py-2 rounded-full bg-[#0d1b2a] text-white text-xs border border-[#c8a45e] shadow-md"
+            className={`fixed left-4 z-40 rounded-full bg-[#0d1b2a] text-white border border-[#c8a45e] shadow-md ${backToTopVisibility} ${backToTopCompact ? 'bottom-4 px-2.5 py-1.5 text-[11px] leading-none' : 'bottom-5 px-3 py-2 text-xs'}`}
             aria-label="Back to top"
           >
-            ↑ Back to Top
+            {backToTopLabel}
           </button>
+          <BuddyDrawer />
           <AppFooter />
         </main>
       </div>
@@ -394,6 +434,7 @@ export default function App() {
             <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
+            <Route path="/press/:slug" element={<PublicPressPage />} />
             <Route path="/" element={<ProtectedRoute><AppLayout><Dashboard /></AppLayout></ProtectedRoute>} />
             <Route path="/venue-setup" element={<ProtectedRoute><AppLayout><VenueSetup /></AppLayout></ProtectedRoute>} />
             <Route path="/artist-setup" element={<ProtectedRoute><AppLayout><ArtistSetup /></AppLayout></ProtectedRoute>} />
@@ -409,12 +450,17 @@ export default function App() {
             <Route path="/production-ops/inventory" element={<ProtectedRoute><AppLayout><ProductionOpsHub /></AppLayout></ProtectedRoute>} />
             <Route path="/production-ops/training" element={<ProtectedRoute><AppLayout><ProductionOpsHub /></AppLayout></ProtectedRoute>} />
             <Route path="/production-ops/certifications" element={<ProtectedRoute><AppLayout><ProductionOpsHub /></AppLayout></ProtectedRoute>} />
+            <Route path="/safety-risk" element={<ProtectedRoute><AppLayout><SafetyRiskHub /></AppLayout></ProtectedRoute>} />
             <Route path="/production-calendar" element={<ProtectedRoute><AppLayout><ProductionCalendar /></AppLayout></ProtectedRoute>} />
             <Route path="/press-page/:id" element={<ProtectedRoute><AppLayout><PressPage /></AppLayout></ProtectedRoute>} />
             <Route path="/media" element={<ProtectedRoute><AppLayout><MediaGallery /></AppLayout></ProtectedRoute>} />
             <Route path="/format-images" element={<ProtectedRoute><AppLayout><ImageFormatter /></AppLayout></ProtectedRoute>} />
-            <Route path="/chat" element={<ProtectedRoute><AppLayout><ChatHub /></AppLayout></ProtectedRoute>} />
+            <Route path="/chat" element={<ProtectedRoute><AppLayout><ChatDashboard /></AppLayout></ProtectedRoute>} />
+            <Route path="/buddy" element={<ProtectedRoute><AppLayout><ChatHub /></AppLayout></ProtectedRoute>} />
             <Route path="/workflow" element={<ProtectedRoute><AppLayout><WorkflowGuide /></AppLayout></ProtectedRoute>} />
+            <Route path="/white-papers" element={<ProtectedRoute><AppLayout><WhitePapers /></AppLayout></ProtectedRoute>} />
+            <Route path="/user-guide" element={<ProtectedRoute><AppLayout><UserGuide /></AppLayout></ProtectedRoute>} />
+            <Route path="/search" element={<ProtectedRoute><AppLayout><SearchResults /></AppLayout></ProtectedRoute>} />
             <Route path="/podcast" element={<ProtectedRoute><AppLayout><PodcastStudio /></AppLayout></ProtectedRoute>} />
             <Route path="/admin" element={<ProtectedRoute><AppLayout><AdminDashboard /></AppLayout></ProtectedRoute>} />
             <Route path="/setup" element={<ProtectedRoute><AppLayout><SetupWizard /></AppLayout></ProtectedRoute>} />

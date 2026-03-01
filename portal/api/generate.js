@@ -14,6 +14,7 @@
 //   extract-upload    → Gemini OCR extraction from image/PDF upload
 //   research          → Gemini research (venue, artist, context)
 //   form-assist       → AI-assisted structured form filling
+//   helpful-chat      → Buddy the CatBot guided operations assistant
 // ═══════════════════════════════════════════════════════════════
 
 import {
@@ -96,6 +97,9 @@ export default async function handler(req, res) {
         break;
       case 'form-assist':
         result = await formAssist(scopedBody);
+        break;
+      case 'helpful-chat':
+        result = await helpfulChat(scopedBody);
         break;
       default:
         return res.status(400).json({ error: `I do not recognize "${action}" yet. Choose one of the supported generation actions.` });
@@ -460,6 +464,90 @@ const FORM_ASSIST_SCHEMAS = {
     analyticsLastSyncedAt: { type: 'string' },
     stakeholderReportExportedAt: { type: 'string' },
   },
+  offering: {
+    name: { type: 'string' },
+    category: { type: 'string' },
+    description: { type: 'string' },
+    promise: { type: 'string' },
+    duration: { type: 'string' },
+    format: { type: 'string' },
+    location: { type: 'string' },
+    included: { type: 'string' },
+    notIncluded: { type: 'string' },
+    audience: { type: 'string' },
+    skillLevel: { type: 'string' },
+    price: { type: 'string' },
+    refundPolicy: { type: 'string' },
+    prerequisites: { type: 'string' },
+    assets: { type: 'string' },
+    notes: { type: 'string' },
+  },
+  stage_plot: {
+    prosceniumWidthFeet: { type: 'number' },
+    playingSpaceWidthFeet: { type: 'number' },
+    playingSpaceDepthFeet: { type: 'number' },
+    trimHeightFeet: { type: 'number' },
+    gridHeightFeet: { type: 'number' },
+    deckSurfaceType: { type: 'string' },
+    wingSpaceDepthFeet: { type: 'number' },
+    houseCapacity: { type: 'number' },
+    stageNotes: { type: 'string' },
+    stagePlotUrl: { type: 'string' },
+  },
+  lighting_plot: {
+    lightingPlotUrl: { type: 'string' },
+    instrumentSchedule: { type: 'string' },
+    channelHookup: { type: 'string' },
+    dimmerSchedule: { type: 'string' },
+    patchSheet: { type: 'string' },
+    dmxUniverseMap: { type: 'string' },
+    cueListReference: { type: 'string' },
+    notes: { type: 'string' },
+  },
+  audio_plot: {
+    audioPlotUrl: { type: 'string' },
+    channelList: { type: 'string' },
+    inputList: { type: 'string' },
+    monitorMixes: { type: 'string' },
+    fohConsole: { type: 'string' },
+    wirelessAssignments: { type: 'string' },
+    rfNotes: { type: 'string' },
+    notes: { type: 'string' },
+  },
+  comms_chart: {
+    clearComChannels: { type: 'string' },
+    headsetAssignments: { type: 'string' },
+    walkieChannels: { type: 'string' },
+    callboardChannel: { type: 'string' },
+    smDeskChannel: { type: 'string' },
+    fohChannel: { type: 'string' },
+    emergencyChannel: { type: 'string' },
+    notes: { type: 'string' },
+  },
+  technical_rider: {
+    riderUrl: { type: 'string' },
+    attachmentsNotes: { type: 'string' },
+    loadInNotes: { type: 'string' },
+    strikeNotes: { type: 'string' },
+  },
+  cue_sheet: {
+    cueId: { type: 'string' },
+    cueType: { type: 'string', enum: ['LX', 'SND', 'FLY', 'DECK', 'PROJ', 'STAGE', 'VIDEO', 'FOH'] },
+    standbyCall: { type: 'string' },
+    goCall: { type: 'string' },
+    triggerSource: { type: 'string' },
+    cueNotes: { type: 'string' },
+  },
+  department_checklist: {
+    department: { type: 'string' },
+    item: { type: 'string' },
+    assigneeName: { type: 'string' },
+    assigneeRole: { type: 'string' },
+    dueAt: { type: 'string' },
+    status: { type: 'string', enum: ['todo', 'in_progress', 'done', 'blocked'] },
+    providerScope: { type: 'string', enum: ['house', 'tour', 'promoter', 'other'] },
+    notes: { type: 'string' },
+  },
   staff_profile: {
     firstName: { type: 'string' },
     lastName: { type: 'string' },
@@ -634,6 +722,15 @@ const FORM_ASSIST_SCHEMAS = {
     inventoryLink: { type: 'string' },
     isSignatureItem: { type: 'boolean' },
     availabilityStatus: { type: 'string' },
+    promoType: { type: 'string' },
+    promoTitle: { type: 'string' },
+    promoDetails: { type: 'string' },
+    couponCode: { type: 'string' },
+    couponTerms: { type: 'string' },
+    imageDescription: { type: 'string' },
+    caption: { type: 'string' },
+    altText: { type: 'string' },
+    tags: { type: 'string' },
     notes: { type: 'string' },
   },
   merch_plan: {
@@ -681,6 +778,14 @@ const FORM_REQUIRED_FIELDS = {
   venue: ['businessName', 'city', 'state'],
   artist: ['stageName', 'genre'],
   event: ['title', 'date', 'time', 'venue'],
+  offering: ['name', 'category'],
+  stage_plot: ['stageNotes'],
+  lighting_plot: ['lightingPlotUrl'],
+  audio_plot: ['inputList'],
+  comms_chart: ['clearComChannels'],
+  technical_rider: ['riderUrl'],
+  cue_sheet: ['cueId', 'cueType'],
+  department_checklist: ['department', 'item'],
   staff_profile: ['displayName', 'phoneNumber', 'primaryRole'],
   contact: ['displayName', 'email'],
   performance_zone: ['name', 'zoneType'],
@@ -707,6 +812,8 @@ const FORM_REQUIRED_FIELDS = {
 
 const FOLLOW_UP_QUESTION_MAP = {
   title: 'What should the final title be?',
+  name: 'What is the final public name for this item?',
+  category: 'Which category should this live under?',
   date: 'What is the confirmed date?',
   time: 'What is the confirmed start time?',
   venue: 'Which venue is this tied to?',
@@ -717,6 +824,8 @@ const FOLLOW_UP_QUESTION_MAP = {
   captureMode: 'Is this static, multi-cam, or AI-directed capture?',
   zoomJoinUrl: 'What is the Zoom join URL?',
   splitType: 'Should the split be gross or net?',
+  cueId: 'What cue number should this use?',
+  cueType: 'Which cue type is this (LX, SND, FLY, DECK, PROJ)?',
 };
 
 function buildMissingFieldQuestions(formType, schema, fields = {}, explicitMissing = []) {
@@ -903,6 +1012,173 @@ function normalizeString(value) {
   if (typeof value === 'string') return value.trim();
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   return null;
+}
+
+function sanitizeChatActions(actions = []) {
+  if (!Array.isArray(actions)) return [];
+  return actions
+    .map((item) => {
+      const label = normalizeString(item?.label || '') || '';
+      const path = normalizeString(item?.path || '') || '';
+      const note = normalizeString(item?.note || '') || '';
+      const safePath = path.startsWith('/') ? path : '';
+      if (!label || !safePath) return null;
+      return { label: label.slice(0, 80), path: safePath, note: note.slice(0, 140) };
+    })
+    .filter(Boolean)
+    .slice(0, 6);
+}
+
+const BUDDY_GUIDE_RULES = [
+  {
+    keywords: ['light', 'lighting', 'lx', 'audio', 'sound', 'a1', 'a2', 'patch', 'channel'],
+    action: { label: 'User Guide: Lighting + Sound', path: '/user-guide#lighting-sound-documentation', note: 'Open technical documentation workflow for lighting and sound.' },
+  },
+  {
+    keywords: ['timeline', 'cue', 'run of show', 'go call', 'standby'],
+    action: { label: 'User Guide: Timeline Editor', path: '/user-guide#using-timeline-editor', note: 'Open cue timing and timeline controls.' },
+  },
+  {
+    keywords: ['risk', 'safety', 'permit', 'insurance', 'compliance', 'incident', 'eap'],
+    action: { label: 'White Paper: Risk Architecture', path: '/white-papers#wp-bridging-creative-compliance-risk-aware-event-architecture', note: 'Open risk-aware event architecture paper.' },
+  },
+  {
+    keywords: ['calendar', 'rehearsal', 'google sync', 'call time', 'schedule'],
+    action: { label: 'User Guide: Calendar + Google Sync', path: '/user-guide#rehearsal-calendar-google-sync', note: 'Open date/time sync workflow guidance.' },
+  },
+];
+
+function inferGuideActions({ latestUserMessage = '', currentPage = '' } = {}) {
+  const text = `${latestUserMessage} ${currentPage}`.toLowerCase();
+  const actions = [];
+  BUDDY_GUIDE_RULES.forEach((rule) => {
+    const matched = rule.keywords.some((keyword) => text.includes(keyword));
+    if (matched) actions.push(rule.action);
+  });
+  if (String(currentPage || '').startsWith('/production-ops')) {
+    actions.push({ label: 'Open User Guide: Plots + Ops', path: '/user-guide#building-plots-layouts', note: 'Open plots and production operations execution guidance.' });
+  }
+  if (String(currentPage || '').startsWith('/run-of-show')) {
+    actions.push({ label: 'Open User Guide: Cue Management', path: '/user-guide#cue-management', note: 'Open cue ownership and trigger guidance.' });
+  }
+  if (!actions.length) {
+    actions.push({ label: 'Open How It Works', path: '/workflow', note: 'Use the color-coded workflow map and jump links.' });
+    actions.push({ label: 'Open User Guide', path: '/user-guide', note: 'Use the step-by-step guide by module.' });
+  }
+
+  const deduped = [];
+  const seen = new Set();
+  actions.forEach((action) => {
+    const key = `${action.label}:${action.path}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    deduped.push(action);
+  });
+  return deduped.slice(0, 4);
+}
+
+async function helpfulChat({ messages = [], context = {}, workflowVariant = 'default' }) {
+  const validMessages = Array.isArray(messages)
+    ? messages
+      .map((message) => ({
+        role: message?.role === 'assistant' ? 'assistant' : 'user',
+        content: normalizeString(message?.content || message?.text || '') || '',
+      }))
+      .filter((message) => message.content)
+      .slice(-12)
+    : [];
+
+  if (!validMessages.length) {
+    throw new Error('Give Buddy at least one message and I will help.');
+  }
+
+  const roleHint = workflowVariant === 'theater'
+    ? 'stage_manager'
+    : workflowVariant === 'music'
+      ? 'promoter'
+      : workflowVariant === 'legal'
+        ? 'legal_coordinator'
+        : 'general';
+
+  const systemPrompt = `You are Buddy the CatBot, an in-app operations copilot for IMC Machine.
+You help users execute live-event work fast with concrete next steps and direct app links.
+
+Rules:
+- Be concise, practical, and action-first.
+- Never mention being an AI model.
+- Assume the user is in IMC Machine web app.
+- Prefer specific page links the user can click now.
+- Keep tone warm, direct, and competent.
+- If asked for legal/medical/financial certainty, recommend qualified human review.
+- Return JSON only.
+
+Allowed link paths:
+/events/create
+/imc-composer
+/production-ops
+/production-ops/staffing
+/production-ops/event-ops
+/production-calendar
+/buddy
+/chat
+/venue-setup
+/artist-setup
+/settings
+/workflow
+/white-papers
+/white-papers#wp-bridging-creative-compliance-risk-aware-event-architecture
+/user-guide
+/user-guide#lighting-sound-documentation
+/user-guide#using-timeline-editor
+/events/:eventId
+/events/:eventId?opsTab=staffing
+/events/:eventId?opsTab=production
+/events/:eventId?opsTab=messaging
+
+Formatting rules:
+- When helpful, include one inline markdown link in reply text like [Open User Guide](/user-guide).
+- Keep response short and practical.
+
+Output schema:
+{
+  "reply": "short practical answer",
+  "actions": [
+    { "label": "short button label", "path": "/route", "note": "why this action" }
+  ],
+  "follow_up_question": "optional short question"
+}`;
+
+  const contextPrompt = JSON.stringify({
+    workflowVariant: roleHint,
+    context: (context && typeof context === 'object') ? context : {},
+    messages: validMessages,
+  });
+
+  const model = process.env.OPENAI_CHAT_HELP_MODEL || process.env.OPENAI_RESEARCH_MODEL || process.env.OPENAI_MODEL || 'gpt-4o';
+  const raw = await openaiChat(systemPrompt, contextPrompt, model, 0.2);
+  const parsed = parseJSONLoose(raw);
+  const latestUserMessage = [...validMessages].reverse().find((message) => message.role === 'user')?.content || '';
+  const currentPage = normalizeString(context?.currentPage || '') || '';
+  const inferredGuideActions = inferGuideActions({ latestUserMessage, currentPage });
+
+  if (!parsed || typeof parsed !== 'object') {
+    return {
+      reply: String(raw || 'I hit a snag formatting that response. Try again and I will return clean steps.').trim(),
+      actions: [],
+      followUpQuestion: '',
+      modelUsed: model,
+    };
+  }
+
+  const reply = normalizeString(parsed.reply || parsed.response || '') || 'Here is the fastest next move: open Event Create, lock the basics, then run IMC Composer.';
+  const followUpQuestion = normalizeString(parsed.follow_up_question || parsed.followUpQuestion || '') || '';
+
+  return {
+    reply: reply.slice(0, 2200),
+    actions: sanitizeChatActions([...(Array.isArray(parsed.actions) ? parsed.actions : []), ...inferredGuideActions]),
+    followUpQuestion: followUpQuestion.slice(0, 240),
+    modelUsed: model,
+  };
 }
 
 function normalizeStringArray(value) {
@@ -1386,7 +1662,227 @@ async function deepResearchDraft(payload = {}) {
   if (target === 'venue_profile') return deepResearchVenueProfile(payload);
   if (target === 'staffing_notes') return deepResearchStaffingNotes(payload);
   if (target === 'contract_copy') return deepResearchContractCopy(payload);
+  if (target === 'image_caption_pack') return deepResearchImageCaptionPack(payload);
   throw new Error(`I do not recognize deep research target "${target}" yet.`);
+}
+
+function normalizeCaptionDomain(domain = '') {
+  const value = String(domain || '').trim().toLowerCase();
+  if (!value) return 'generic';
+  if (value.includes('venue')) return 'venue';
+  if (value.includes('menu')) return 'menu';
+  if (value.includes('artist') || value.includes('act') || value.includes('band') || value.includes('speaker')) return 'artist';
+  if (value.includes('art') || value.includes('painting') || value.includes('ceramic') || value.includes('sculpt')) return 'artwork';
+  if (value.includes('merch') || value.includes('product')) return 'merch';
+  if (value.includes('event') || value.includes('poster') || value.includes('flyer')) return 'event';
+  return 'generic';
+}
+
+function normalizeCaptionItem(item = {}, index = 0) {
+  const tags = Array.isArray(item?.tags)
+    ? item.tags.map((tag) => String(tag || '').trim()).filter(Boolean)
+    : [];
+  return {
+    title: String(item?.title || item?.subject || item?.subjectType || `Image ${index + 1}`).trim() || `Image ${index + 1}`,
+    subjectType: String(item?.subjectType || item?.subject || '').trim() || 'scene',
+    shortDescription: String(item?.shortDescription || item?.description || '').trim(),
+    caption: String(item?.caption || '').trim(),
+    altText: String(item?.altText || item?.alt || item?.shortDescription || '').trim(),
+    tags,
+    confidence: Number(item?.confidence) > 0 ? Number(item.confidence) : null,
+  };
+}
+
+function buildFallbackCaptionPack({
+  extracted = {},
+  domain = 'generic',
+  event = {},
+  venue = {},
+  artist = {},
+} = {}) {
+  const normalizedDomain = normalizeCaptionDomain(domain);
+  const sourceInsights = Array.isArray(extracted?.imageInsights) ? extracted.imageInsights : [];
+  const fallbackSource = sourceInsights.map((item, index) => normalizeCaptionItem(item, index));
+
+  if (fallbackSource.length > 0) {
+    const summaryBits = [];
+    if (normalizedDomain === 'venue') {
+      const venueName = String(venue?.name || venue?.businessName || extracted?.venue?.name || event?.venue || '').trim();
+      if (venueName) summaryBits.push(`${venueName} visual highlights ready.`);
+    } else if (normalizedDomain === 'artist' || normalizedDomain === 'artwork') {
+      const artistName = String(artist?.stageName || artist?.name || extracted?.profile?.personName || '').trim();
+      if (artistName) summaryBits.push(`${artistName} image captions are ready.`);
+    } else if (normalizedDomain === 'menu') {
+      summaryBits.push('Menu image captions are ready.');
+    } else {
+      summaryBits.push('Image captions are ready.');
+    }
+    return {
+      summary: summaryBits.join(' ') || 'Image captions are ready.',
+      captions: fallbackSource,
+      factCheckNotes: [],
+      missingFacts: [],
+    };
+  }
+
+  const title = String(event?.title || extracted?.event?.title || '').trim();
+  const venueName = String(venue?.name || venue?.businessName || extracted?.venue?.name || event?.venue || '').trim();
+  const artistName = String(artist?.stageName || artist?.name || extracted?.profile?.personName || '').trim();
+  const shortDescription = String(
+    extracted?.venue?.description
+    || extracted?.event?.description
+    || extracted?.profile?.bio
+    || ''
+  ).trim();
+
+  const fallbackCaption = [
+    artistName || title || venueName || 'Live event highlight',
+    shortDescription || 'Official event image from your uploaded assets.',
+  ].filter(Boolean).join(': ');
+
+  return {
+    summary: normalizedDomain === 'venue'
+      ? 'Venue photo captions are ready to review.'
+      : normalizedDomain === 'menu'
+        ? 'Menu photo captions are ready to review.'
+        : 'Image captions are ready to review.',
+    captions: [{
+      title: artistName || title || venueName || 'Image',
+      subjectType: normalizedDomain,
+      shortDescription: shortDescription || 'Official uploaded image.',
+      caption: fallbackCaption,
+      altText: shortDescription || fallbackCaption,
+      tags: [normalizedDomain].filter(Boolean),
+      confidence: null,
+    }],
+    factCheckNotes: [],
+    missingFacts: [],
+  };
+}
+
+async function deepResearchImageCaptionPack({
+  extracted = {},
+  domain = 'generic',
+  event = {},
+  venue = {},
+  artist = {},
+  styleIntensity = 'feature',
+  correctionPrompt = '',
+  includeTerms = '',
+  avoidTerms = '',
+}) {
+  const style = normalizeStyleIntensity(styleIntensity);
+  const guidance = resolveResearchGuidance({ correctionPrompt, includeTerms, avoidTerms });
+  const normalizedDomain = normalizeCaptionDomain(domain);
+
+  const venueName = String(venue?.name || venue?.businessName || extracted?.venue?.name || event?.venue || '').trim();
+  const venueCity = [venue?.city || extracted?.venue?.city || event?.venueCity, venue?.state || extracted?.venue?.state || event?.venueState]
+    .filter(Boolean)
+    .join(', ');
+  const artistName = String(artist?.stageName || artist?.name || extracted?.profile?.personName || '').trim();
+  const artistGenre = String(artist?.genre || event?.genre || extracted?.event?.genre || '').trim();
+
+  let venueResearch = null;
+  let artistResearch = null;
+  try {
+    if (venueName) {
+      const venueResult = await researchVenue({ venueName, city: venueCity || 'San Antonio, TX' });
+      venueResearch = venueResult?.venue || null;
+    }
+    if (artistName) {
+      const artistResult = await researchArtist({ artistName, genre: artistGenre });
+      artistResearch = artistResult?.artist || null;
+    }
+  } catch (err) {
+    console.warn('[deepResearchImageCaptionPack] Research fallback:', err.message);
+  }
+
+  const systemPrompt = `You write factual image descriptions and social-ready captions for live-event operations teams.
+Rules:
+- Use only supplied extraction + research context.
+- Do not invent claims or credentials.
+- clean = direct and concise, feature = scene-rich and editorial, punchy = short and energetic.
+- Return valid JSON only.`;
+
+  const userPrompt = `Create a caption pack for uploaded official assets.
+DOMAIN: ${normalizedDomain}
+STYLE INTENSITY: ${style}
+USER CORRECTIONS / SPECIFIC TERMS: ${guidance.correctionText || 'none'}
+WORDS TO INCLUDE IF FACTUALLY FIT: ${guidance.includeList.join(', ') || 'none'}
+WORDS OR PHRASES TO AVOID: ${guidance.avoidList.join(', ') || 'none'}
+
+EXTRACTED DATA:
+${JSON.stringify(extracted, null, 2)}
+
+EVENT CONTEXT:
+${JSON.stringify(event, null, 2)}
+
+VENUE CONTEXT:
+${JSON.stringify(venue, null, 2)}
+
+ARTIST CONTEXT:
+${JSON.stringify(artist, null, 2)}
+
+RESEARCH CONTEXT:
+${JSON.stringify({ venue: venueResearch, artist: artistResearch }, null, 2)}
+
+Return JSON:
+{
+  "summary": "1-2 sentence overview",
+  "captions": [
+    {
+      "title": "",
+      "subjectType": "venue|menu|artist|artwork|merch|event|generic",
+      "shortDescription": "one sentence factual description",
+      "caption": "social-ready caption",
+      "altText": "accessible alt text",
+      "tags": ["array", "of", "tags"],
+      "confidence": 0.0
+    }
+  ],
+  "factCheckNotes": ["array"],
+  "missingFacts": ["array"]
+}`;
+
+  let aiPayload = null;
+  let modelUsed = OPENAI_RESEARCH_MODEL;
+  try {
+    const raw = await openaiChat(systemPrompt, userPrompt, OPENAI_RESEARCH_MODEL, 0.35);
+    aiPayload = parseJSONLoose(raw);
+  } catch {
+    aiPayload = null;
+  }
+
+  const fallback = buildFallbackCaptionPack({
+    extracted,
+    domain: normalizedDomain,
+    event,
+    venue,
+    artist,
+  });
+
+  const captions = Array.isArray(aiPayload?.captions) && aiPayload.captions.length > 0
+    ? aiPayload.captions.map((item, index) => normalizeCaptionItem(item, index))
+    : fallback.captions;
+  const summary = String(aiPayload?.summary || '').trim() || fallback.summary;
+
+  return {
+    summary,
+    captions,
+    factCheckNotes: Array.isArray(aiPayload?.factCheckNotes) ? aiPayload.factCheckNotes : fallback.factCheckNotes,
+    missingFacts: Array.isArray(aiPayload?.missingFacts) ? aiPayload.missingFacts : fallback.missingFacts,
+    meta: {
+      domain: normalizedDomain,
+      styleIntensity: style,
+      captionCount: captions.length,
+      venueFound: !!venueResearch,
+      artistFound: !!artistResearch,
+      correctionApplied: guidance.guidanceApplied,
+      includeTermsCount: guidance.includeList.length,
+      avoidTermsCount: guidance.avoidList.length,
+    },
+    modelUsed,
+  };
 }
 
 async function deepResearchEventDescription({

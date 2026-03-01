@@ -19,12 +19,61 @@ import { parseLocalDate } from '../lib/dateUtils.js';
 // 3. Hosted on Vercel as a static page
 // ═══════════════════════════════════════════════════════════════
 
+function cleanCopy(value = '') {
+  return String(value || '').trim();
+}
+
+function getCampaignEntry(campaign = {}, keys = []) {
+  if (!campaign) return null;
+  if (Array.isArray(campaign)) {
+    const found = campaign.find((row) => keys.includes(row?.channel));
+    return found || null;
+  }
+  for (const key of keys) {
+    if (campaign[key]) return campaign[key];
+  }
+  return null;
+}
+
+function buildDistributionRows(campaign = {}) {
+  const channels = [
+    { keys: ['press'], label: 'Press Release' },
+    { keys: ['eventbrite'], label: 'Eventbrite' },
+    { keys: ['facebook_event'], label: 'Facebook Event' },
+    { keys: ['social_facebook'], label: 'Facebook Feed' },
+    { keys: ['social_instagram'], label: 'Instagram' },
+    { keys: ['social_linkedin'], label: 'LinkedIn' },
+    { keys: ['social_twitter'], label: 'Twitter/X' },
+    { keys: ['calendar_do210'], label: 'Do210' },
+    { keys: ['calendar_sacurrent'], label: 'SA Current' },
+    { keys: ['calendar_evvnt'], label: 'Evvnt' },
+    { keys: ['email_campaign'], label: 'Email Blast' },
+    { keys: ['sms_blast'], label: 'SMS Blast' },
+  ];
+
+  return channels
+    .map((entry) => {
+      const row = getCampaignEntry(campaign, entry.keys);
+      if (!row) return null;
+      return {
+        label: entry.label,
+        status: row.status || 'not_started',
+        url: row.external_url || row.metadata?.event?.eventUrl || row.metadata?.feedPost?.postUrl || '',
+      };
+    })
+    .filter(Boolean);
+}
+
 export function generatePressPageHTML(event, venue, content, research, images, campaign) {
   const venueName = venue?.name || 'Venue';
   const eventDate = parseLocalDate(event.date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
   const mapsUrl = research?.googleMapsUrl || research?.venue?.googleMapsUrl || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((venue?.name || '') + ' ' + (venue?.address || '') + ' San Antonio TX')}`;
   const mapsQuery = encodeURIComponent((venue?.name || '') + ' San Antonio TX');
   const mapsEmbed = `https://www.google.com/maps/search/?api=1&query=${mapsQuery}`;
+  const pressCopy = cleanCopy(content?.press || content?.pressRelease || '');
+  const spanishCopy = cleanCopy(content?.spanish_press || content?.pressReleaseSpanish || content?.bilingual || '');
+  const socialCopy = cleanCopy(content?.social || '');
+  const distributionRows = buildDistributionRows(campaign);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -98,18 +147,32 @@ export function generatePressPageHTML(event, venue, content, research, images, c
       </div>
     </div>
 
-    ${content?.press ? `
+    ${pressCopy ? `
     <!-- Press Release -->
     <div class="section">
       <h2>Press Release</h2>
-      <div class="press-release">${content.press.replace(/\n/g, '<br>')}</div>
+      <div class="press-release">${pressCopy.replace(/\n/g, '<br>')}</div>
     </div>` : ''}
 
-    ${content?.spanish_press ? `
+    ${spanishCopy ? `
     <!-- Spanish Press Release -->
     <div class="section">
       <h2>Nota de Prensa 🇲🇽</h2>
-      <div class="press-release">${content.spanish_press.replace(/\n/g, '<br>')}</div>
+      <div class="press-release">${spanishCopy.replace(/\n/g, '<br>')}</div>
+    </div>` : ''}
+
+    ${distributionRows.length ? `
+    <!-- Distribution Snapshot -->
+    <div class="section">
+      <h2>Distribution Snapshot</h2>
+      <div class="stakeholders">
+        ${distributionRows.map((row) => `
+        <div class="stakeholder">
+          <div class="name">${row.label}</div>
+          <div class="bio" style="text-transform:capitalize">${row.status.replace(/_/g, ' ')}</div>
+          ${row.url ? `<div class="links"><a href="${row.url}" target="_blank" rel="noopener noreferrer">Open Link →</a></div>` : ''}
+        </div>`).join('')}
+      </div>
     </div>` : ''}
 
     ${images?.length > 0 ? `
@@ -157,11 +220,11 @@ export function generatePressPageHTML(event, venue, content, research, images, c
       <p style="text-align:center;margin-top:8px"><a href="${mapsUrl}" target="_blank" style="color:#c8a45e;font-size:0.9rem">📍 Get Directions →</a></p>
     </div>
 
-    ${content?.social ? `
+    ${socialCopy ? `
     <!-- Social Copy -->
     <div class="section">
       <h2>Social Media</h2>
-      <div class="press-release" style="font-size:0.9rem">${content.social.replace(/\n/g, '<br>')}</div>
+      <div class="press-release" style="font-size:0.9rem">${socialCopy.replace(/\n/g, '<br>')}</div>
     </div>` : ''}
 
     <!-- Media Contact -->

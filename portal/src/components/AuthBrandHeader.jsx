@@ -8,9 +8,15 @@ export default function AuthBrandHeader() {
   return (
     <div className="text-center mb-8">
       <Link to={brandHref} className="inline-flex items-center justify-center no-underline">
-        <div className="w-16 h-16 bg-[#c8a45e] rounded-2xl flex items-center justify-center mb-4">
-          <span className="text-[#0d1b2a] font-bold text-xl tracking-wide">IMC</span>
-        </div>
+        <img
+          src="/imc-catbot-icon.svg"
+          alt="The IMC Machine"
+          className="rounded-2xl mb-4 object-cover"
+          style={{
+            width: 'clamp(4rem, 11vw, 5rem)',
+            height: 'clamp(4rem, 11vw, 5rem)',
+          }}
+        />
       </Link>
       <p className="text-[#c8a45e] text-sm font-semibold uppercase tracking-[0.12em] m-0">GOOD CREATIVE MEDIA</p>
       <h1 className="text-white text-2xl sm:text-3xl font-bold leading-tight m-0 mt-2">THE IMC MACHINE</h1>

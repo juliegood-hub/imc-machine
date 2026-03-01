@@ -64,6 +64,14 @@ import {
   validateEmergencyContacts,
   verifyTimeClockToken,
 } from '../src/services/workforce.js';
+import {
+  DEFAULT_CALENDAR_EVENT_TYPES,
+  buildCalendarEntryTitle,
+  calculateEndIso,
+  ensureIsoDateTime,
+  normalizeCalendarTypeKey,
+  normalizeReminderSettings,
+} from '../src/services/production-calendar.js';
 
 // Initialize Supabase client for server-side operations
 const supabase = createClient(
@@ -242,6 +250,7 @@ export default async function handler(req, res) {
 
   try {
     const webhookActions = new Set(['handle-zoom-webhook', 'process-staffing-sms']);
+    const publicReadActions = new Set(['get-press-page']);
     const requiresWebhookSecret = webhookActions.has(action);
     let authContext = null;
     let payload = normalizeDistributionPayload(req.body || {});
@@ -252,7 +261,7 @@ export default async function handler(req, res) {
         'ZOOM_WEBHOOK_SECRET',
         'STAFFING_SMS_WEBHOOK_SECRET',
       ]);
-    } else {
+    } else if (!publicReadActions.has(action)) {
       authContext = await requireApiAuth(req, { supabase });
       payload = scopePayloadToUser(payload, authContext);
       const eventId = resolvePayloadEventId(payload);
@@ -313,6 +322,18 @@ export default async function handler(req, res) {
         break;
       case 'send-sms':
         result = await sendSMS(payload);
+        break;
+      case 'create-press-page':
+        result = await createPressPage(payload, req);
+        break;
+      case 'get-press-page':
+        result = await getPressPage(payload);
+        break;
+      case 'email-press-page':
+        result = await emailPressPage(payload, req);
+        break;
+      case 'export-press-page-pdf':
+        result = await exportPressPagePdf(payload);
         break;
       case 'notify-admin-distribution':
         result = await notifyAdminDistribution(payload);
@@ -451,6 +472,51 @@ export default async function handler(req, res) {
         break;
       case 'delete-emergency-contact':
         result = await deleteEmergencyContact(payload);
+        break;
+      case 'get-calendar-event-types':
+        result = await getCalendarEventTypes(payload);
+        break;
+      case 'upsert-calendar-event-type':
+        result = await upsertCalendarEventType(payload);
+        break;
+      case 'delete-calendar-event-type':
+        result = await deleteCalendarEventType(payload);
+        break;
+      case 'get-rehearsal-calendar-entries':
+        result = await getRehearsalCalendarEntries(payload);
+        break;
+      case 'upsert-rehearsal-calendar-entry':
+        result = await upsertRehearsalCalendarEntry(payload);
+        break;
+      case 'delete-rehearsal-calendar-entry':
+        result = await deleteRehearsalCalendarEntry(payload);
+        break;
+      case 'upsert-calendar-entry-assignment':
+        result = await upsertCalendarEntryAssignment(payload);
+        break;
+      case 'delete-calendar-entry-assignment':
+        result = await deleteCalendarEntryAssignment(payload);
+        break;
+      case 'get-google-calendar-connection':
+        result = await getGoogleCalendarConnection(payload);
+        break;
+      case 'get-google-calendar-auth-url':
+        result = await getGoogleCalendarAuthUrl(payload, req);
+        break;
+      case 'connect-google-calendar':
+        result = await connectGoogleCalendar(payload);
+        break;
+      case 'list-google-calendars':
+        result = await listGoogleCalendars(payload);
+        break;
+      case 'create-google-calendar':
+        result = await createGoogleCalendarRecord(payload);
+        break;
+      case 'sync-calendar-entry':
+        result = await syncCalendarEntry(payload);
+        break;
+      case 'sync-all-dated-items':
+        result = await syncAllDatedItems(payload);
         break;
       case 'get-training-courses':
         result = await getTrainingCourses(payload);
@@ -860,6 +926,108 @@ export default async function handler(req, res) {
       case 'delete-board-risk-item':
         result = await deleteBoardRiskItem(payload);
         break;
+      case 'get-event-safety-profile':
+        result = await getEventSafetyProfile(payload);
+        break;
+      case 'upsert-event-safety-profile':
+        result = await upsertEventSafetyProfile(payload);
+        break;
+      case 'get-event-permits':
+        result = await getEventPermits(payload);
+        break;
+      case 'upsert-event-permit':
+        result = await upsertEventPermit(payload);
+        break;
+      case 'delete-event-permit':
+        result = await deleteEventPermit(payload);
+        break;
+      case 'get-event-insurance-policies':
+        result = await getEventInsurancePolicies(payload);
+        break;
+      case 'upsert-event-insurance-policy':
+        result = await upsertEventInsurancePolicy(payload);
+        break;
+      case 'delete-event-insurance-policy':
+        result = await deleteEventInsurancePolicy(payload);
+        break;
+      case 'get-event-surveillance-assets':
+        result = await getEventSurveillanceAssets(payload);
+        break;
+      case 'upsert-event-surveillance-asset':
+        result = await upsertEventSurveillanceAsset(payload);
+        break;
+      case 'delete-event-surveillance-asset':
+        result = await deleteEventSurveillanceAsset(payload);
+        break;
+      case 'get-event-access-control-points':
+        result = await getEventAccessControlPoints(payload);
+        break;
+      case 'upsert-event-access-control-point':
+        result = await upsertEventAccessControlPoint(payload);
+        break;
+      case 'delete-event-access-control-point':
+        result = await deleteEventAccessControlPoint(payload);
+        break;
+      case 'get-event-crowd-plan':
+        result = await getEventCrowdPlan(payload);
+        break;
+      case 'upsert-event-crowd-plan':
+        result = await upsertEventCrowdPlan(payload);
+        break;
+      case 'get-event-medical-plan':
+        result = await getEventMedicalPlan(payload);
+        break;
+      case 'upsert-event-medical-plan':
+        result = await upsertEventMedicalPlan(payload);
+        break;
+      case 'get-event-sanitation-plan':
+        result = await getEventSanitationPlan(payload);
+        break;
+      case 'upsert-event-sanitation-plan':
+        result = await upsertEventSanitationPlan(payload);
+        break;
+      case 'get-event-weather-plan':
+        result = await getEventWeatherPlan(payload);
+        break;
+      case 'upsert-event-weather-plan':
+        result = await upsertEventWeatherPlan(payload);
+        break;
+      case 'get-event-city-coordination':
+        result = await getEventCityCoordination(payload);
+        break;
+      case 'upsert-event-city-coordination':
+        result = await upsertEventCityCoordination(payload);
+        break;
+      case 'get-event-incidents':
+        result = await getEventIncidents(payload);
+        break;
+      case 'upsert-event-incident':
+        result = await upsertEventIncident(payload);
+        break;
+      case 'delete-event-incident':
+        result = await deleteEventIncident(payload);
+        break;
+      case 'get-event-safety-checklists':
+        result = await getEventSafetyChecklists(payload);
+        break;
+      case 'upsert-event-safety-checklist':
+        result = await upsertEventSafetyChecklist(payload);
+        break;
+      case 'upsert-event-safety-checklist-item':
+        result = await upsertEventSafetyChecklistItem(payload);
+        break;
+      case 'delete-event-safety-checklist-item':
+        result = await deleteEventSafetyChecklistItem(payload);
+        break;
+      case 'generate-event-eap':
+        result = await generateEventEmergencyActionPlan(payload);
+        break;
+      case 'get-event-eap-docs':
+        result = await getEventEmergencyActionPlans(payload);
+        break;
+      case 'get-event-safety-dashboard':
+        result = await getEventSafetyDashboard(payload);
+        break;
       case 'get-show-checkins':
         result = await getShowCheckins(payload);
         break;
@@ -961,6 +1129,376 @@ async function sendEmail({ to, subject, html, from, replyTo, attachments }) {
     throw new Error(lastError);
   }
   throw new Error(lastError || 'Resend error');
+}
+
+function normalizePressPageSlug(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+}
+
+function resolvePressPageBaseUrl(req, payload = {}) {
+  const explicit = firstValidHttpUrl(
+    payload.baseUrl,
+    payload.base_url,
+    process.env.APP_BASE_URL,
+    process.env.NEXT_PUBLIC_APP_URL,
+    process.env.VITE_APP_URL
+  );
+  if (explicit) return explicit.replace(/\/+$/g, '');
+  const proto = req?.headers?.['x-forwarded-proto'] || 'https';
+  const host = req?.headers?.host || 'imcmachine.vercel.app';
+  return `${proto}://${host}`.replace(/\/+$/g, '');
+}
+
+function parseRecipientEmails(value = '') {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => normalizePlainText(entry, 320).toLowerCase())
+      .filter((entry) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(entry));
+  }
+  return String(value || '')
+    .split(/[,\n;]/g)
+    .map((entry) => normalizePlainText(entry, 320).toLowerCase())
+    .filter((entry) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(entry));
+}
+
+async function getGeneratedContentByType(eventId) {
+  const { data, error } = await supabase
+    .from('generated_content')
+    .select('content_type, content')
+    .eq('event_id', eventId);
+  if (error) throw error;
+  const byType = {};
+  for (const row of data || []) {
+    byType[row.content_type] = row.content || '';
+  }
+  return byType;
+}
+
+async function getCampaignSummaryByChannel(eventId) {
+  const { data, error } = await supabase
+    .from('campaigns')
+    .select('channel,status,external_url,external_id,error_message,sent_at,recipients,metadata')
+    .eq('event_id', eventId);
+  if (error) throw error;
+  const channels = {};
+  for (const row of data || []) channels[row.channel] = row;
+  return { rows: data || [], channels };
+}
+
+function buildPressPageDistributionLines(distribution = {}) {
+  const lines = [];
+  const pick = (channel, label) => {
+    const row = distribution?.[channel];
+    if (!row) return;
+    const state = row.status || 'not_started';
+    const link = row.external_url || row.metadata?.event?.eventUrl || row.metadata?.feedPost?.postUrl || '';
+    lines.push(`${label}: ${state}${link ? ` · ${link}` : ''}`);
+  };
+  pick('press', 'Press');
+  pick('eventbrite', 'Eventbrite');
+  pick('facebook_event', 'Facebook Event');
+  pick('social_facebook', 'Facebook');
+  pick('social_instagram', 'Instagram');
+  pick('social_linkedin', 'LinkedIn');
+  pick('social_twitter', 'Twitter/X');
+  pick('calendar_do210', 'Do210');
+  pick('calendar_sacurrent', 'SA Current');
+  pick('calendar_evvnt', 'Evvnt');
+  pick('email_campaign', 'Email Blast');
+  pick('sms_blast', 'SMS Blast');
+  return lines;
+}
+
+async function createPressPage(payload = {}, req) {
+  const userId = ensureUserId(payload);
+  const eventId = payload.eventId || payload.event?.id || payload.event_id;
+  if (!eventId) throw new Error('Missing eventId for press page.');
+
+  const { data: eventRow, error: eventError } = await supabase
+    .from('events')
+    .select('*')
+    .eq('id', eventId)
+    .single();
+  if (eventError) throw eventError;
+
+  const generated = await getGeneratedContentByType(eventId);
+  const campaignSnapshot = await getCampaignSummaryByChannel(eventId);
+
+  const event = {
+    id: eventRow.id,
+    title: normalizePlainText(payload.event?.title || eventRow.title, 220),
+    description: normalizePlainText(payload.event?.description || eventRow.description, 7000),
+    date: normalizeDate(payload.event?.date || eventRow.date),
+    time: normalizePlainText(payload.event?.time || eventRow.time, 30),
+    genre: normalizePlainText(payload.event?.genre || eventRow.genre, 120),
+    ticketLink: firstValidHttpUrl(payload.event?.ticketLink, eventRow.ticket_link),
+    ticketPrice: normalizePlainText(payload.event?.ticketPrice || eventRow.ticket_price, 60),
+    venue: normalizePlainText(payload.event?.venue || eventRow.venue_name, 220),
+    venueAddress: normalizePlainText(payload.event?.venueAddress || eventRow.venue_address, 320),
+    venueCity: normalizePlainText(payload.event?.venueCity || eventRow.venue_city, 120),
+    venueState: normalizePlainText(payload.event?.venueState || eventRow.venue_state, 120),
+  };
+
+  const venue = {
+    name: normalizePlainText(payload.venue?.name || event.venue, 220),
+    address: normalizePlainText(payload.venue?.address || event.venueAddress, 320),
+    city: normalizePlainText(payload.venue?.city || event.venueCity, 120),
+    state: normalizePlainText(payload.venue?.state || event.venueState, 120),
+    website: firstValidHttpUrl(payload.venue?.website, eventRow.venue_website),
+  };
+
+  const content = {
+    press: normalizePlainText(payload.content?.press || generated.press || event.description, 12000),
+    social: normalizePlainText(payload.content?.social || generated.social, 12000),
+    calendar: normalizePlainText(payload.content?.calendar || generated.calendar, 12000),
+    bilingual: normalizePlainText(payload.content?.bilingual || generated.bilingual, 12000),
+    email: normalizePlainText(payload.content?.email || generated.email, 12000),
+    sms: normalizePlainText(payload.content?.sms || generated.sms, 4000),
+  };
+
+  const images = Array.isArray(payload.images)
+    ? payload.images
+      .filter((img) => firstValidHttpUrl(img?.url))
+      .map((img) => ({
+        url: firstValidHttpUrl(img.url),
+        label: normalizePlainText(img.label || img.format || 'Image', 120),
+        format: normalizePlainText(img.format || '', 80),
+        dimensions: normalizePlainText(img.dimensions || '', 40),
+      }))
+    : [];
+
+  const html = String(payload.html || '').trim();
+  if (!html) throw new Error('Missing press page HTML payload.');
+
+  const { data: existingPressCampaign } = await supabase
+    .from('campaigns')
+    .select('external_id')
+    .eq('event_id', eventId)
+    .eq('channel', 'press_page')
+    .maybeSingle();
+
+  const defaultSlug = createHash('sha1')
+    .update(`${eventId}:${Date.now()}:${Math.random()}`)
+    .digest('hex')
+    .slice(0, 10);
+  const slug = normalizePressPageSlug(payload.slug)
+    || normalizePressPageSlug(existingPressCampaign?.external_id)
+    || defaultSlug;
+  const baseUrl = resolvePressPageBaseUrl(req, payload);
+  const shareUrl = `${baseUrl}/press/${slug}`;
+  const now = new Date().toISOString();
+
+  const metadata = {
+    html,
+    event,
+    venue,
+    content,
+    distribution: campaignSnapshot.channels,
+    distribution_lines: buildPressPageDistributionLines(campaignSnapshot.channels),
+    images,
+    research: payload.research || null,
+    generated_at: now,
+  };
+
+  const row = {
+    event_id: eventId,
+    user_id: userId,
+    channel: 'press_page',
+    status: 'created',
+    external_id: slug,
+    external_url: shareUrl,
+    sent_at: now,
+    metadata,
+    updated_at: now,
+  };
+
+  const { error: upsertError } = await supabase
+    .from('campaigns')
+    .upsert(row, { onConflict: 'event_id,channel' });
+  if (upsertError) throw upsertError;
+
+  return {
+    pressPage: {
+      eventId,
+      slug,
+      shareUrl,
+      generatedAt: now,
+      title: event.title || 'Press Page',
+      distribution: campaignSnapshot.channels,
+    },
+  };
+}
+
+async function getPressPage(payload = {}) {
+  const slug = normalizePressPageSlug(payload.slug || payload.id || payload.externalId || payload.external_id);
+  if (!slug) throw new Error('Missing press page slug.');
+
+  const { data, error } = await supabase
+    .from('campaigns')
+    .select('event_id,external_id,external_url,status,sent_at,updated_at,metadata')
+    .eq('channel', 'press_page')
+    .eq('external_id', slug)
+    .single();
+  if (error) {
+    if (error.code === 'PGRST116') {
+      const notFound = new Error('Press page not found.');
+      notFound.statusCode = 404;
+      throw notFound;
+    }
+    throw error;
+  }
+
+  const metadata = data.metadata || {};
+  const html = typeof metadata.html === 'string' ? metadata.html : '';
+  if (!html) {
+    const empty = new Error('Press page is missing HTML content.');
+    empty.statusCode = 404;
+    throw empty;
+  }
+
+  return {
+    pressPage: {
+      eventId: data.event_id,
+      slug: data.external_id,
+      shareUrl: data.external_url,
+      status: data.status,
+      generatedAt: data.updated_at || data.sent_at || metadata.generated_at || null,
+      title: metadata.event?.title || 'Press Page',
+      html,
+      event: metadata.event || null,
+      venue: metadata.venue || null,
+      content: metadata.content || null,
+      distribution: metadata.distribution || null,
+      distributionLines: metadata.distribution_lines || [],
+      images: metadata.images || [],
+    },
+  };
+}
+
+async function emailPressPage(payload = {}, req) {
+  const recipients = parseRecipientEmails(payload.recipients || payload.to);
+  if (!recipients.length) throw new Error('Add at least one valid email address.');
+
+  let pressPage = payload.pressPage || null;
+  if (!pressPage) {
+    const lookup = await getPressPage({
+      slug: payload.slug || payload.externalId || payload.external_id || '',
+      id: payload.id || '',
+    });
+    pressPage = lookup.pressPage;
+  }
+  if (!pressPage?.shareUrl) throw new Error('Generate a press page first so I have a share link.');
+
+  const title = normalizePlainText(payload.subjectTitle || payload.title || pressPage.title || 'Press Page', 180) || 'Press Page';
+  const senderNote = normalizePlainText(payload.note || payload.message || '', 2400);
+  const intro = senderNote
+    ? `<p style="margin:0 0 12px">${escapeHtml(senderNote).replace(/\n/g, '<br>')}</p>`
+    : '<p style="margin:0 0 12px">Here is the latest press page with distribution links, approved copy, and media assets.</p>';
+  const html = `<!doctype html><html><body style="font-family:Inter,Helvetica,Arial,sans-serif;color:#111;line-height:1.6">
+    <h2 style="margin:0 0 8px">${escapeHtml(title)}</h2>
+    ${intro}
+    <p style="margin:0 0 10px"><strong>Open Press Page:</strong> <a href="${pressPage.shareUrl}">${pressPage.shareUrl}</a></p>
+    <p style="margin:0;color:#666;font-size:12px">Shared from The IMC Machine · Good Creative Media</p>
+  </body></html>`;
+
+  const emailResult = await sendEmail({
+    to: recipients,
+    subject: normalizePlainText(payload.subject || `Press Page · ${title}`, 220),
+    html,
+    replyTo: normalizePlainText(payload.replyTo || '', 220) || 'juliegood@goodcreativemedia.com',
+  });
+
+  const eventId = payload.eventId || payload.event?.id || pressPage.eventId;
+  if (eventId) {
+    await supabase.from('campaigns').upsert({
+      event_id: eventId,
+      user_id: payload.userId || payload.user_id || null,
+      channel: 'press_page',
+      status: 'sent',
+      external_id: pressPage.slug || payload.slug || null,
+      external_url: pressPage.shareUrl,
+      sent_at: new Date().toISOString(),
+      metadata: {
+        ...(pressPage || {}),
+        last_email_sent_at: new Date().toISOString(),
+        last_email_recipients: recipients,
+      },
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'event_id,channel' });
+  }
+
+  return {
+    success: true,
+    sent: recipients.length,
+    recipients,
+    emailId: emailResult?.emailId || null,
+    shareUrl: pressPage.shareUrl,
+  };
+}
+
+function buildPressPagePdfLines(payload = {}) {
+  const event = payload.event || {};
+  const venue = payload.venue || {};
+  const content = payload.content || {};
+  const title = normalizePlainText(payload.title || event.title || 'Press Page', 180) || 'Press Page';
+  const whenLine = [normalizeDate(event.date), normalizePlainText(event.time || '', 30)].filter(Boolean).join(' · ');
+  const whereLine = [venue.name || event.venue, venue.address || event.venueAddress, venue.city || event.venueCity, venue.state || event.venueState]
+    .filter(Boolean)
+    .join(', ');
+  const lines = [
+    title,
+    whenLine ? `When: ${whenLine}` : '',
+    whereLine ? `Where: ${whereLine}` : '',
+    payload.shareUrl ? `Share Link: ${payload.shareUrl}` : '',
+    '',
+    'Press Copy',
+    normalizePlainText(content.press || '', 9000),
+    '',
+    'Social Copy',
+    normalizePlainText(content.social || '', 5000),
+    '',
+    'Calendar Copy',
+    normalizePlainText(content.calendar || '', 5000),
+    '',
+    'Distribution Snapshot',
+    ...(Array.isArray(payload.distributionLines) ? payload.distributionLines : []),
+  ].filter(Boolean);
+  return lines;
+}
+
+async function exportPressPagePdf(payload = {}) {
+  let source = payload.pressPage || null;
+  if (!source?.title && (payload.slug || payload.id || payload.externalId || payload.external_id)) {
+    const lookup = await getPressPage({
+      slug: payload.slug || payload.externalId || payload.external_id || '',
+      id: payload.id || '',
+    });
+    source = lookup.pressPage;
+  }
+
+  const title = normalizePlainText(payload.title || source?.title || payload.event?.title || 'Press Page', 180) || 'Press Page';
+  const lines = buildPressPagePdfLines({
+    title,
+    event: payload.event || source?.event || {},
+    venue: payload.venue || source?.venue || {},
+    content: payload.content || source?.content || {},
+    shareUrl: payload.shareUrl || source?.shareUrl || '',
+    distributionLines: payload.distributionLines || source?.distributionLines || [],
+  });
+  const pdfBuffer = buildSimplePdfBuffer(title, lines);
+  const pdfBase64 = pdfBuffer.toString('base64');
+  const fileName = `${toSlug(title)}.pdf`;
+
+  return {
+    fileName,
+    pdfBase64,
+    downloadUrl: `data:application/pdf;base64,${pdfBase64}`,
+    generatedAt: new Date().toISOString(),
+  };
 }
 
 // SA Media Contacts - Embedded from distribution list
@@ -3323,6 +3861,83 @@ function listToSummary(label, rows = [], mapper) {
   return lines;
 }
 
+function formatPlotItemLabelForExport(item = {}, exportOptions = {}) {
+  const system = String(item.systemType || item.type || item.label || 'Item').trim();
+  const defaultLabel = String(item.defaultLabel || item.label || system).trim();
+  const customLabel = String(item.customLabel || '').trim();
+
+  const includeSystem = exportOptions.includeSystemTypes !== false;
+  const includeDefault = exportOptions.includeDefaultLabels !== false;
+  const includeCustom = exportOptions.includeCustomLabels !== false;
+  const includeBoth = !!exportOptions.includeBoth;
+
+  const parts = [];
+  if (includeBoth && (defaultLabel || system) && customLabel) {
+    parts.push(`${defaultLabel || system} · ${customLabel}`);
+  } else {
+    if (includeSystem && system) parts.push(`type:${system}`);
+    if (includeDefault && defaultLabel) parts.push(`label:${defaultLabel}`);
+    if (includeCustom && customLabel) parts.push(`custom:${customLabel}`);
+  }
+
+  if (!parts.length) return defaultLabel || customLabel || system || 'Item';
+  return parts.join(' | ');
+}
+
+function computePlotLoadAmps(item = {}) {
+  const explicit = Number(item.amperage);
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  const watts = Number(item.wattage);
+  const voltageText = String(item.voltage || item.sourceVoltage || '120V');
+  const voltage = Number(voltageText.replace(/[^0-9.]/g, '')) || 120;
+  if (Number.isFinite(watts) && watts > 0 && Number.isFinite(voltage) && voltage > 0) {
+    return watts / voltage;
+  }
+  return 0;
+}
+
+function buildCircuitSummaryFromLayout(layoutItems = []) {
+  const sources = (Array.isArray(layoutItems) ? layoutItems : []).filter((item) => item?.isElectricalSource);
+  const loads = (Array.isArray(layoutItems) ? layoutItems : []).filter((item) => !item?.isElectricalSource && !!item?.powerRequired);
+
+  const loadMap = new Map();
+  loads.forEach((item) => {
+    const circuitId = String(item.assignedCircuitId || '').trim();
+    if (!circuitId) return;
+    if (!loadMap.has(circuitId)) loadMap.set(circuitId, []);
+    loadMap.get(circuitId).push(item);
+  });
+
+  const summary = sources.map((source) => {
+    const rows = loadMap.get(source.id) || [];
+    const capacity = Number(source.sourceAmperage || source.amperage || 0) || 0;
+    const assigned = rows.reduce((sum, row) => sum + computePlotLoadAmps(row), 0);
+    return {
+      id: source.id,
+      label: source.customLabel || source.defaultLabel || source.label || source.systemType || source.type || 'Circuit',
+      voltage: source.sourceVoltage || source.voltage || '120V',
+      capacity,
+      assigned,
+      remaining: capacity - assigned,
+      overloaded: capacity > 0 && assigned > capacity,
+    };
+  });
+
+  const totalCapacity = summary.reduce((sum, row) => sum + row.capacity, 0);
+  const totalAssigned = summary.reduce((sum, row) => sum + row.assigned, 0);
+  const unassignedLoads = loads.filter((item) => !String(item.assignedCircuitId || '').trim()).length;
+  const overloadedCount = summary.filter((row) => row.overloaded).length;
+
+  return {
+    circuits: summary,
+    totalCapacity,
+    totalAssigned,
+    remainingHeadroom: totalCapacity - totalAssigned,
+    unassignedLoads,
+    overloadedCount,
+  };
+}
+
 function buildProductionPdfLines(payload = {}) {
   const event = payload.event || {};
   const zone = payload.zone || {};
@@ -3330,6 +3945,13 @@ function buildProductionPdfLines(payload = {}) {
   const contacts = Array.isArray(payload.contacts) ? payload.contacts : (showConfig.show_contacts || event.show_contacts || []);
   const layout = showConfig.stage_plot_layout || payload.stagePlotLayout || {};
   const layoutItems = Array.isArray(layout.items) ? layout.items : [];
+  const exportOptions = (layout.exportOptions && typeof layout.exportOptions === 'object') ? layout.exportOptions : {};
+  const egress = (layout.egress && typeof layout.egress === 'object') ? layout.egress : {};
+  const sharing = (layout.sharing && typeof layout.sharing === 'object') ? layout.sharing : {};
+  const circuitSummary = buildCircuitSummaryFromLayout(layoutItems);
+  const doorItems = layoutItems.filter((item) => item?.isDoor);
+  const emergencyDoors = doorItems.filter((item) => item?.isEmergencyExit);
+  const adaDoors = doorItems.filter((item) => item?.isADA);
 
   const lines = [
     `Generated: ${new Date().toLocaleString('en-US')}`,
@@ -3343,13 +3965,67 @@ function buildProductionPdfLines(payload = {}) {
     '',
     '## Stage Plot',
     `Grid: ${layout.width || 24}w x ${layout.depth || 16}d`,
+    layout.terminologyMode ? `Terminology: ${layout.terminologyMode}` : '',
+    layout.ceilingHeightFeet ? `Ceiling Height: ${layout.ceilingHeightFeet} ft` : '',
+    layout.gridHeightFeet ? `Grid Height: ${layout.gridHeightFeet} ft` : '',
+    layout.stageTrimHeightFeet ? `Stage Trim Height: ${layout.stageTrimHeightFeet} ft` : '',
+    layout.maxOccupancy ? `Max Occupancy: ${layout.maxOccupancy}` : '',
+    layout.structuralColumns ? `Columns: ${layout.structuralColumns}` : '',
+    layout.walls ? `Walls: ${layout.walls}` : '',
+    layout.windows ? `Windows: ${layout.windows}` : '',
+    layout.fixedBars ? `Fixed Bars: ${layout.fixedBars}` : '',
+    layout.fixedFeatures ? `Fixed Features: ${layout.fixedFeatures}` : '',
     `Items: ${layoutItems.length}`,
     ...(layoutItems.slice(0, 80).map(item => (
-      `- ${item.label || item.type || 'item'} @ (${item.x ?? 0},${item.y ?? 0}) size ${item.w || 1}x${item.h || 1} rot ${item.rotation || 0}`
+      `- ${formatPlotItemLabelForExport(item, exportOptions)} @ (${item.x ?? 0},${item.y ?? 0}) size ${item.w || 1}x${item.h || 1} rot ${item.rotation || 0}${item.assignedPerson ? ` | owner ${item.assignedPerson}` : ''}${item.role ? ` (${item.role})` : ''}${item.powerRequired ? ` | power ${(computePlotLoadAmps(item)).toFixed(2)}A ${item.assignedCircuitId ? `(circuit ${item.assignedCircuitId})` : '(unassigned circuit)'}` : ''}${item.isDoor ? ` | door ${item.doorWidthFeet || '?'}ft ${item.entryType || 'public'} ${item.isEmergencyExit ? '| emergency exit' : ''}${item.isADA ? '| ADA' : ''}` : ''}`
     ))),
     '',
     ...(showConfig.plot_summary ? ['## Plot Summary', showConfig.plot_summary, ''] : []),
   ];
+
+  lines.push('## Sharing + Publish');
+  lines.push(`Visibility: ${sharing.visibility || 'private'}`);
+  lines.push(`Publish State: ${sharing.publishState || 'draft'}`);
+  lines.push(`Owner: ${sharing.ownerName || 'Unknown'}${sharing.ownerEmail ? ` <${sharing.ownerEmail}>` : ''}`);
+  if (sharing.audit?.updatedAt) {
+    lines.push(`Last Updated: ${sharing.audit.updatedAt}${sharing.audit?.updatedBy ? ` by ${sharing.audit.updatedBy}` : ''}`);
+  }
+  if (sharing.audit?.publishedAt) {
+    lines.push(`Published: ${sharing.audit.publishedAt}${sharing.audit?.publishedBy ? ` by ${sharing.audit.publishedBy}` : ''}`);
+  }
+  const individualCount = Array.isArray(sharing.individuals) ? sharing.individuals.length : 0;
+  const groupCount = Array.isArray(sharing.groups) ? sharing.groups.filter((group) => group?.enabled).length : 0;
+  const linkCount = Array.isArray(sharing.links) ? sharing.links.length : 0;
+  lines.push(`Individuals Shared: ${individualCount}`);
+  lines.push(`Role Groups Enabled: ${groupCount}`);
+  lines.push(`Share Links: ${linkCount}`);
+  lines.push('');
+
+  lines.push('## Power Distribution (from plot)');
+  lines.push(`Main Service Capacity: ${circuitSummary.totalCapacity.toFixed(2)}A`);
+  lines.push(`Assigned Load: ${circuitSummary.totalAssigned.toFixed(2)}A`);
+  lines.push(`Remaining Headroom: ${circuitSummary.remainingHeadroom.toFixed(2)}A`);
+  lines.push(`Unassigned Powered Loads: ${circuitSummary.unassignedLoads}`);
+  lines.push(`Overloaded Circuits: ${circuitSummary.overloadedCount}`);
+  if (!circuitSummary.circuits.length) {
+    lines.push('No electrical source objects were plotted.');
+  } else {
+    circuitSummary.circuits.slice(0, 40).forEach((row, index) => {
+      lines.push(`${index + 1}. ${row.label} | ${row.voltage} | ${row.assigned.toFixed(2)}A / ${row.capacity.toFixed(2)}A | remaining ${row.remaining.toFixed(2)}A${row.overloaded ? ' | OVERLOADED' : ''}`);
+    });
+  }
+  lines.push('');
+
+  lines.push('## Safety / Egress');
+  lines.push(`Doors Plotted: ${doorItems.length}`);
+  lines.push(`Emergency Exits: ${emergencyDoors.length}`);
+  lines.push(`ADA Doors: ${adaDoors.length}`);
+  lines.push(`Egress Paths Overlay: ${egress.showPaths ? 'On' : 'Off'}`);
+  lines.push(`Fire Lanes Overlay: ${egress.showFireLanes ? 'On' : 'Off'}`);
+  lines.push(`Highlight Emergency Exits: ${egress.highlightEmergencyExits === false ? 'Off' : 'On'}`);
+  lines.push(`Crowd Flow Arrows: ${egress.showCrowdFlowArrows ? 'On' : 'Off'}`);
+  if (egress.notes) lines.push(`Egress Notes: ${egress.notes}`);
+  lines.push('');
 
   lines.push(...listToSummary('Input List', showConfig.input_list, row => (
     `${row.label || row.source || 'Input'} | source: ${row.source || 'TBD'} | qty: ${row.quantity || 1} ${row.notes ? `| ${row.notes}` : ''}`
@@ -4318,9 +4994,48 @@ async function upsertStaffAssignment(payload = {}) {
     saved = data;
   }
 
+  let calendarSync = null;
+  try {
+    const { data: eventRow } = await supabase
+      .from('events')
+      .select('id,title,venue_name,venue_city,venue_state,venue_profile_id')
+      .eq('id', bookingId)
+      .maybeSingle();
+    const calendarEntry = await upsertCalendarEntryFromSource({
+      userId,
+      orgId: eventRow?.venue_profile_id || null,
+      eventId: bookingId,
+      title: buildCalendarEntryTitle({
+        typeName: normalizePlainText(saved?.job_title || 'Staffing Call', 160) || 'Staffing Call',
+        eventTitle: normalizePlainText(eventRow?.title || '', 160),
+        fallback: normalizePlainText(saved?.job_title || 'Staffing Call', 160) || 'Staffing Call',
+      }),
+      typeKey: 'staffing_call',
+      typeName: 'Staffing Call',
+      startDatetime: saved?.start_time,
+      endDatetime: saved?.end_time,
+      location: [eventRow?.venue_name, eventRow?.venue_city, eventRow?.venue_state].filter(Boolean).join(', '),
+      description: saved?.notes || '',
+      sourceKind: 'staff_assignment',
+      sourceRefId: saved?.id,
+      status: saved?.status || 'confirmed',
+      assignedRoles: [saved?.job_title || 'Crew'],
+    });
+    if (calendarEntry) {
+      calendarSync = await syncCalendarEntryRow({
+        userId,
+        entry: calendarEntry,
+        orgId: calendarEntry.org_id || null,
+      });
+    }
+  } catch (err) {
+    calendarSync = { synced: false, warning: err.message };
+  }
+
   return {
     assignment: saved,
     compensation: calculateAssignmentCompensation(saved, saved?.staff_profile || profileRow || {}),
+    ...(calendarSync ? { calendarSync } : {}),
   };
 }
 
@@ -5637,6 +6352,1414 @@ async function deleteEmergencyContact(payload = {}) {
   return { removed: true, contactId };
 }
 
+const GOOGLE_CALENDAR_SCOPES = [
+  'https://www.googleapis.com/auth/calendar',
+  'https://www.googleapis.com/auth/calendar.events',
+];
+
+const CALENDAR_ENTRY_STATUSES = ['draft', 'confirmed', 'cancelled'];
+const CALENDAR_ATTENDANCE_OPTIONS = ['required', 'optional'];
+const CALENDAR_RSVP_OPTIONS = ['pending', 'yes', 'no', 'maybe'];
+const CALENDAR_ASSIGNEE_TYPES = ['user', 'role', 'group', 'external'];
+
+function normalizeDateTimeNullable(value) {
+  const iso = ensureIsoDateTime(value);
+  return iso || null;
+}
+
+function normalizeTextArray(value, maxItems = 24, maxLen = 120) {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(
+    value
+      .map((entry) => normalizePlainText(entry, maxLen))
+      .filter(Boolean)
+      .slice(0, maxItems)
+  ));
+}
+
+function normalizeCalendarStatus(value = 'draft') {
+  const normalized = normalizePlainText(value, 40).toLowerCase();
+  return CALENDAR_ENTRY_STATUSES.includes(normalized) ? normalized : 'draft';
+}
+
+function normalizeCalendarAttendance(value = 'required') {
+  const normalized = normalizePlainText(value, 40).toLowerCase();
+  return CALENDAR_ATTENDANCE_OPTIONS.includes(normalized) ? normalized : 'required';
+}
+
+function normalizeCalendarRsvp(value = 'pending') {
+  const normalized = normalizePlainText(value, 40).toLowerCase();
+  return CALENDAR_RSVP_OPTIONS.includes(normalized) ? normalized : 'pending';
+}
+
+function normalizeCalendarAssigneeType(value = 'user') {
+  const normalized = normalizePlainText(value, 40).toLowerCase();
+  return CALENDAR_ASSIGNEE_TYPES.includes(normalized) ? normalized : 'user';
+}
+
+function normalizeCalendarSourceKind(value = 'manual') {
+  return normalizePlainText(value || 'manual', 80).toLowerCase() || 'manual';
+}
+
+function buildCalendarSyncHash(entry = {}) {
+  const seed = [
+    entry.id,
+    entry.title,
+    entry.type_key,
+    entry.start_datetime,
+    entry.end_datetime,
+    entry.timezone,
+    entry.location,
+    entry.status,
+    JSON.stringify(entry.reminder_settings || []),
+  ].join('|');
+  return createHash('sha1').update(seed).digest('hex');
+}
+
+async function seedCalendarEventTypesIfNeeded() {
+  const { data: existing, error: existingError } = await supabase
+    .from('calendar_event_types')
+    .select('id')
+    .eq('is_system', true)
+    .limit(1);
+  if (existingError) {
+    if (isMissingRelationError(existingError)) return;
+    throw existingError;
+  }
+  if (Array.isArray(existing) && existing.length) return;
+
+  const rows = DEFAULT_CALENDAR_EVENT_TYPES.map((template, index) => ({
+    type_key: normalizeCalendarTypeKey(template.key || template.name || `type_${index + 1}`),
+    name: normalizePlainText(template.name || 'Production Call', 220) || 'Production Call',
+    category: normalizePlainText(template.category || 'general', 80) || 'general',
+    default_duration_minutes: Number.isFinite(Number(template.durationMinutes))
+      ? Math.max(15, Number(template.durationMinutes))
+      : 120,
+    typical_roles: normalizeTextArray(template.typicalRoles, 24, 180),
+    department_tags: normalizeTextArray(template.departmentTags, 24, 80),
+    checklist_links: [],
+    is_system: true,
+    is_active: true,
+    sort_order: Number.isFinite(Number(template.sortOrder))
+      ? Number(template.sortOrder)
+      : index + 1,
+    metadata: {},
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }));
+
+  if (!rows.length) return;
+  const { error } = await supabase
+    .from('calendar_event_types')
+    .upsert(rows, { onConflict: 'type_key' });
+  if (error && !isMissingRelationError(error)) throw error;
+}
+
+function mapCalendarTypeResponse(row = {}) {
+  return {
+    ...row,
+    typeKey: row.type_key,
+    defaultDurationMinutes: row.default_duration_minutes,
+    typicalRoles: Array.isArray(row.typical_roles) ? row.typical_roles : [],
+    departmentTags: Array.isArray(row.department_tags) ? row.department_tags : [],
+    checklistLinks: Array.isArray(row.checklist_links) ? row.checklist_links : [],
+  };
+}
+
+function mapCalendarEntryResponse(row = {}) {
+  return {
+    ...row,
+    typeKey: row.type_key || '',
+    typeName: row.type_name || '',
+    startDatetime: row.start_datetime || '',
+    endDatetime: row.end_datetime || '',
+    requiredAttendance: row.required_attendance || 'required',
+    internalNotes: row.internal_notes || '',
+    shareableNotes: row.shareable_notes || '',
+    reminderSettings: Array.isArray(row.reminder_settings) ? row.reminder_settings : [],
+    sourceKind: row.source_kind || 'manual',
+    sourceRefId: row.source_ref_id || '',
+    googleSyncEnabled: row.google_sync_enabled !== false,
+    assignments: Array.isArray(row.assignments) ? row.assignments : [],
+  };
+}
+
+async function getCalendarEventTypes(payload = {}) {
+  const userId = ensureUserId(payload);
+  await seedCalendarEventTypesIfNeeded();
+
+  let query = supabase
+    .from('calendar_event_types')
+    .select('*')
+    .eq('is_active', true)
+    .order('sort_order', { ascending: true })
+    .order('name', { ascending: true });
+
+  const orgId = payload.orgId || payload.org_id || payload.venueProfileId || payload.venue_profile_id || null;
+  if (orgId) {
+    query = query.or(`is_system.eq.true,user_id.eq.${userId},org_id.eq.${orgId}`);
+  } else {
+    query = query.or(`is_system.eq.true,user_id.eq.${userId}`);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    if (isMissingRelationError(error)) {
+      return {
+        eventTypes: DEFAULT_CALENDAR_EVENT_TYPES.map((row, index) => ({
+          id: `default-calendar-type-${index + 1}`,
+          type_key: row.key,
+          typeKey: row.key,
+          name: row.name,
+          category: row.category,
+          default_duration_minutes: row.durationMinutes,
+          defaultDurationMinutes: row.durationMinutes,
+          typical_roles: row.typicalRoles || [],
+          typicalRoles: row.typicalRoles || [],
+          department_tags: row.departmentTags || [],
+          departmentTags: row.departmentTags || [],
+          is_system: true,
+          is_active: true,
+        })),
+        warning: 'calendar_event_types table missing; using built-in defaults.',
+      };
+    }
+    throw error;
+  }
+  const rows = Array.isArray(data) ? data : [];
+  return {
+    eventTypes: rows.map(mapCalendarTypeResponse),
+  };
+}
+
+async function upsertCalendarEventType(payload = {}) {
+  const userId = ensureUserId(payload);
+  const input = payload.eventType || payload.type || {};
+  const orgId = payload.orgId || payload.org_id || input.orgId || input.org_id || null;
+  const baseTypeKey = normalizeCalendarTypeKey(input.typeKey || input.type_key || input.name || '');
+  if (!baseTypeKey) throw new Error('Calendar type key or name is required.');
+
+  const next = {
+    user_id: userId,
+    org_id: orgId,
+    type_key: baseTypeKey,
+    name: normalizePlainText(input.name || '', 220) || 'Production Call',
+    category: normalizePlainText(input.category || 'general', 80) || 'general',
+    default_duration_minutes: Number.isFinite(Number(input.defaultDurationMinutes ?? input.default_duration_minutes))
+      ? Math.max(15, Number(input.defaultDurationMinutes ?? input.default_duration_minutes))
+      : 120,
+    typical_roles: normalizeTextArray(input.typicalRoles || input.typical_roles, 24, 180),
+    department_tags: normalizeTextArray(input.departmentTags || input.department_tags, 24, 80),
+    checklist_links: Array.isArray(input.checklistLinks || input.checklist_links)
+      ? (input.checklistLinks || input.checklist_links)
+      : [],
+    is_system: false,
+    is_active: input.isActive === false || input.is_active === false ? false : true,
+    sort_order: Number.isFinite(Number(input.sortOrder ?? input.sort_order))
+      ? Number(input.sortOrder ?? input.sort_order)
+      : 0,
+    metadata: (input.metadata && typeof input.metadata === 'object') ? input.metadata : {},
+    updated_at: new Date().toISOString(),
+  };
+
+  const typeId = payload.typeId || payload.id || input.id || null;
+  let data = null;
+  if (typeId) {
+    const { data: updated, error } = await supabase
+      .from('calendar_event_types')
+      .update(next)
+      .eq('id', typeId)
+      .eq('user_id', userId)
+      .select('*')
+      .single();
+    if (error) {
+      if (isMissingRelationError(error)) return { eventType: null, warning: 'calendar_event_types table missing.' };
+      throw error;
+    }
+    data = updated;
+  } else {
+    const nowIso = new Date().toISOString();
+    let insertPayload = { ...next, created_at: nowIso };
+    let insert = await supabase
+      .from('calendar_event_types')
+      .insert(insertPayload)
+      .select('*')
+      .single();
+
+    if (insert.error && insert.error.code === '23505') {
+      insertPayload = {
+        ...insertPayload,
+        type_key: `${baseTypeKey}_${Math.random().toString(36).slice(2, 7)}`,
+      };
+      insert = await supabase
+        .from('calendar_event_types')
+        .insert(insertPayload)
+        .select('*')
+        .single();
+    }
+    if (insert.error) {
+      if (isMissingRelationError(insert.error)) return { eventType: null, warning: 'calendar_event_types table missing.' };
+      throw insert.error;
+    }
+    data = insert.data;
+  }
+
+  return { eventType: mapCalendarTypeResponse(data) };
+}
+
+async function deleteCalendarEventType(payload = {}) {
+  const userId = ensureUserId(payload);
+  const typeId = payload.typeId || payload.id;
+  if (!typeId) throw new Error('Missing typeId.');
+  const { data, error } = await supabase
+    .from('calendar_event_types')
+    .update({ is_active: false, updated_at: new Date().toISOString() })
+    .eq('id', typeId)
+    .eq('user_id', userId)
+    .select('*')
+    .single();
+  if (error) {
+    if (isMissingRelationError(error)) return { removed: false, warning: 'calendar_event_types table missing.' };
+    throw error;
+  }
+  return { removed: true, eventType: mapCalendarTypeResponse(data) };
+}
+
+async function getFallbackCalendarEntriesFromEvents(userId, payload = {}) {
+  let query = supabase
+    .from('events')
+    .select('id,title,description,date,time,venue_name,venue_city,venue_state,booking_start_at,booking_end_at,booking_status')
+    .eq('user_id', userId)
+    .order('date', { ascending: true });
+  if (payload.eventId || payload.bookingId) query = query.eq('id', payload.eventId || payload.bookingId);
+  const { data, error } = await query;
+  if (error) throw error;
+  const rows = (data || []).map((eventRow) => {
+    const start = normalizeDateTimeNullable(eventRow.booking_start_at)
+      || ensureIsoDateTime(`${eventRow.date || ''}T${eventRow.time || '19:00'}:00`)
+      || null;
+    if (!start) return null;
+    const end = normalizeDateTimeNullable(eventRow.booking_end_at)
+      || calculateEndIso(start, 120);
+    return {
+      id: `fallback-event-${eventRow.id}`,
+      user_id: userId,
+      event_id: eventRow.id,
+      title: buildCalendarEntryTitle({
+        typeName: 'Performance',
+        eventTitle: eventRow.title,
+        fallback: eventRow.title || 'Performance',
+      }),
+      type_key: 'performance',
+      type_name: 'Performance',
+      start_datetime: start,
+      end_datetime: end,
+      timezone: 'America/Chicago',
+      location: [eventRow.venue_name, eventRow.venue_city, eventRow.venue_state].filter(Boolean).join(', '),
+      description: eventRow.description || '',
+      status: normalizeCalendarStatus(eventRow.booking_status || 'confirmed'),
+      required_attendance: 'required',
+      reminder_settings: normalizeReminderSettings([]),
+      source_kind: 'event',
+      source_ref_id: eventRow.id,
+      google_sync_enabled: false,
+      assignments: [],
+      is_fallback: true,
+    };
+  }).filter(Boolean);
+  return rows;
+}
+
+async function getRehearsalCalendarEntries(payload = {}) {
+  const userId = ensureUserId(payload);
+  const eventId = payload.eventId || payload.bookingId || null;
+  const orgId = payload.orgId || payload.org_id || null;
+  const status = payload.status ? normalizeCalendarStatus(payload.status) : null;
+  const typeKey = normalizeCalendarTypeKey(payload.typeKey || payload.type_key || '');
+  const startFrom = normalizeDateTimeNullable(payload.startFrom || payload.start_from);
+  const startTo = normalizeDateTimeNullable(payload.startTo || payload.start_to);
+
+  let query = supabase
+    .from('rehearsal_calendar_entries')
+    .select('*, assignments:calendar_entry_assignments(*), google_mappings:google_calendar_event_mappings(*)')
+    .eq('user_id', userId)
+    .order('start_datetime', { ascending: true });
+  if (eventId) query = query.eq('event_id', eventId);
+  if (orgId) query = query.eq('org_id', orgId);
+  if (status) query = query.eq('status', status);
+  if (typeKey) query = query.eq('type_key', typeKey);
+  if (startFrom) query = query.gte('start_datetime', startFrom);
+  if (startTo) query = query.lte('start_datetime', startTo);
+
+  const { data, error } = await query;
+  if (error) {
+    if (!isMissingRelationError(error)) throw error;
+    const fallbackEntries = await getFallbackCalendarEntriesFromEvents(userId, payload);
+    return {
+      entries: fallbackEntries,
+      warning: 'rehearsal_calendar_entries table missing; showing fallback event schedule.',
+    };
+  }
+
+  return {
+    entries: (data || []).map(mapCalendarEntryResponse),
+  };
+}
+
+function normalizeCalendarEntryInput(payload = {}) {
+  const input = payload.entry || payload.calendarEntry || {};
+  const typeKey = normalizeCalendarTypeKey(input.typeKey || input.type_key || payload.typeKey || '');
+  const typeTemplate = DEFAULT_CALENDAR_EVENT_TYPES.find((row) => row.key === typeKey) || null;
+  const typeName = normalizePlainText(
+    input.typeName || input.type_name || typeTemplate?.name || payload.typeName || '',
+    180
+  );
+  const startDatetime = normalizeDateTimeNullable(input.startDatetime || input.start_datetime || payload.startDatetime || payload.start_datetime);
+  const fallbackDuration = Number.isFinite(Number(input.durationMinutes ?? input.defaultDurationMinutes ?? typeTemplate?.durationMinutes))
+    ? Number(input.durationMinutes ?? input.defaultDurationMinutes ?? typeTemplate?.durationMinutes)
+    : 120;
+  let endDatetime = normalizeDateTimeNullable(input.endDatetime || input.end_datetime || payload.endDatetime || payload.end_datetime)
+    || (startDatetime ? calculateEndIso(startDatetime, fallbackDuration) : null);
+  if (startDatetime && endDatetime && new Date(endDatetime) <= new Date(startDatetime)) {
+    endDatetime = calculateEndIso(startDatetime, 120);
+  }
+  return {
+    id: payload.calendarEntryId || payload.entryId || payload.id || input.id || null,
+    org_id: payload.orgId || payload.org_id || input.orgId || input.org_id || null,
+    event_id: payload.eventId || payload.bookingId || input.eventId || input.event_id || null,
+    title: normalizePlainText(
+      input.title
+      || buildCalendarEntryTitle({
+        typeName,
+        eventTitle: input.eventTitle || payload.eventTitle || '',
+        fallback: 'Production Call',
+      }),
+      220
+    ) || 'Production Call',
+    type_key: typeKey || '',
+    type_name: typeName || '',
+    start_datetime: startDatetime,
+    end_datetime: endDatetime,
+    timezone: normalizePlainText(input.timezone || payload.timezone || 'America/Chicago', 80) || 'America/Chicago',
+    location: normalizePlainText(input.location || '', 320),
+    description: normalizePlainText(input.description || '', 8000),
+    department_tags: normalizeTextArray(input.departmentTags || input.department_tags || typeTemplate?.departmentTags || [], 24, 80),
+    assigned_roles: normalizeTextArray(input.assignedRoles || input.assigned_roles || typeTemplate?.typicalRoles || [], 24, 180),
+    required_attendance: normalizeCalendarAttendance(input.requiredAttendance || input.required_attendance || payload.requiredAttendance || 'required'),
+    status: normalizeCalendarStatus(input.status || payload.status || 'draft'),
+    internal_notes: normalizePlainText(input.internalNotes || input.internal_notes || '', 6000),
+    shareable_notes: normalizePlainText(input.shareableNotes || input.shareable_notes || '', 6000),
+    attachments: Array.isArray(input.attachments) ? input.attachments : [],
+    reminder_settings: normalizeReminderSettings(input.reminderSettings || input.reminder_settings),
+    source_kind: normalizeCalendarSourceKind(input.sourceKind || input.source_kind || payload.sourceKind || 'manual'),
+    source_ref_id: normalizePlainText(input.sourceRefId || input.source_ref_id || payload.sourceRefId || '', 180),
+    source_payload: (input.sourcePayload && typeof input.sourcePayload === 'object')
+      ? input.sourcePayload
+      : ((payload.sourcePayload && typeof payload.sourcePayload === 'object') ? payload.sourcePayload : {}),
+    google_sync_enabled: input.googleSyncEnabled === false || input.google_sync_enabled === false ? false : true,
+    metadata: (input.metadata && typeof input.metadata === 'object') ? input.metadata : {},
+  };
+}
+
+async function upsertRehearsalCalendarEntry(payload = {}) {
+  const userId = ensureUserId(payload);
+  const normalized = normalizeCalendarEntryInput(payload);
+  if (!normalized.start_datetime) throw new Error('Calendar entry start date/time is required.');
+  if (!normalized.end_datetime) throw new Error('Calendar entry end date/time is required.');
+
+  const nowIso = new Date().toISOString();
+  const next = {
+    user_id: userId,
+    ...normalized,
+    updated_at: nowIso,
+  };
+
+  let saved = null;
+  if (normalized.id) {
+    const { data, error } = await supabase
+      .from('rehearsal_calendar_entries')
+      .update(next)
+      .eq('id', normalized.id)
+      .eq('user_id', userId)
+      .select('*, assignments:calendar_entry_assignments(*)')
+      .single();
+    if (error) {
+      if (isMissingRelationError(error)) return { entry: null, warning: 'rehearsal_calendar_entries table missing.' };
+      throw error;
+    }
+    saved = data;
+  } else {
+    const { data, error } = await supabase
+      .from('rehearsal_calendar_entries')
+      .insert({ ...next, created_at: nowIso })
+      .select('*, assignments:calendar_entry_assignments(*)')
+      .single();
+    if (error) {
+      if (isMissingRelationError(error)) return { entry: null, warning: 'rehearsal_calendar_entries table missing.' };
+      throw error;
+    }
+    saved = data;
+  }
+
+  let sync = null;
+  let warning = '';
+  if (payload.syncToGoogle !== false && saved?.google_sync_enabled !== false) {
+    try {
+      sync = await syncCalendarEntryRow({
+        userId,
+        entry: saved,
+        orgId: saved.org_id || null,
+        calendarId: payload.calendarId || payload.googleCalendarId || null,
+      });
+    } catch (err) {
+      warning = `Saved in IMC, but Google sync did not complete: ${err.message}`;
+    }
+  }
+
+  return {
+    entry: mapCalendarEntryResponse(saved),
+    ...(sync ? { sync } : {}),
+    ...(warning ? { warning } : {}),
+  };
+}
+
+async function deleteRehearsalCalendarEntry(payload = {}) {
+  const userId = ensureUserId(payload);
+  const entryId = payload.calendarEntryId || payload.entryId || payload.id;
+  if (!entryId) throw new Error('Missing calendarEntryId.');
+  const { error } = await supabase
+    .from('rehearsal_calendar_entries')
+    .delete()
+    .eq('id', entryId)
+    .eq('user_id', userId);
+  if (error) {
+    if (isMissingRelationError(error)) return { removed: false, warning: 'rehearsal_calendar_entries table missing.' };
+    throw error;
+  }
+  return { removed: true, calendarEntryId: entryId };
+}
+
+async function upsertCalendarEntryAssignment(payload = {}) {
+  const userId = ensureUserId(payload);
+  const assignment = payload.assignment || {};
+  const calendarEntryId = payload.calendarEntryId || payload.entryId || assignment.calendarEntryId || assignment.calendar_entry_id;
+  if (!calendarEntryId) throw new Error('Missing calendarEntryId for assignment.');
+  const nowIso = new Date().toISOString();
+  const next = {
+    user_id: userId,
+    calendar_entry_id: calendarEntryId,
+    assignee_user_id: assignment.assigneeUserId || assignment.assignee_user_id || null,
+    assignee_name: normalizePlainText(assignment.assigneeName || assignment.assignee_name || '', 180),
+    assignee_role: normalizePlainText(assignment.assigneeRole || assignment.assignee_role || '', 180),
+    assignee_type: normalizeCalendarAssigneeType(assignment.assigneeType || assignment.assignee_type || 'user'),
+    attendance_required: assignment.attendanceRequired === false || assignment.attendance_required === false ? false : true,
+    rsvp_status: normalizeCalendarRsvp(assignment.rsvpStatus || assignment.rsvp_status || 'pending'),
+    invited_at: normalizeDateTimeNullable(assignment.invitedAt || assignment.invited_at),
+    responded_at: normalizeDateTimeNullable(assignment.respondedAt || assignment.responded_at),
+    metadata: (assignment.metadata && typeof assignment.metadata === 'object') ? assignment.metadata : {},
+    updated_at: nowIso,
+  };
+
+  const assignmentId = payload.assignmentId || payload.id || assignment.id || null;
+  let saved = null;
+  if (assignmentId) {
+    const { data, error } = await supabase
+      .from('calendar_entry_assignments')
+      .update(next)
+      .eq('id', assignmentId)
+      .eq('user_id', userId)
+      .select('*')
+      .single();
+    if (error) {
+      if (isMissingRelationError(error)) return { assignment: null, warning: 'calendar_entry_assignments table missing.' };
+      throw error;
+    }
+    saved = data;
+  } else {
+    const { data, error } = await supabase
+      .from('calendar_entry_assignments')
+      .insert({ ...next, created_at: nowIso })
+      .select('*')
+      .single();
+    if (error) {
+      if (isMissingRelationError(error)) return { assignment: null, warning: 'calendar_entry_assignments table missing.' };
+      throw error;
+    }
+    saved = data;
+  }
+
+  if (saved && (payload.logNotification !== false)) {
+    const { error: notifError } = await supabase
+      .from('calendar_entry_notifications')
+      .insert({
+        user_id: userId,
+        calendar_entry_id: calendarEntryId,
+        assignment_id: saved.id,
+        notification_type: 'email',
+        recipient: saved.assignee_name || '',
+        subject: 'Calendar Assignment',
+        body: 'Assignment queued for notification.',
+        status: 'queued',
+        created_at: nowIso,
+      });
+    if (notifError && !isMissingRelationError(notifError)) throw notifError;
+  }
+
+  return { assignment: saved };
+}
+
+async function deleteCalendarEntryAssignment(payload = {}) {
+  const userId = ensureUserId(payload);
+  const assignmentId = payload.assignmentId || payload.id;
+  if (!assignmentId) throw new Error('Missing assignmentId.');
+  const { error } = await supabase
+    .from('calendar_entry_assignments')
+    .delete()
+    .eq('id', assignmentId)
+    .eq('user_id', userId);
+  if (error) {
+    if (isMissingRelationError(error)) return { removed: false, warning: 'calendar_entry_assignments table missing.' };
+    throw error;
+  }
+  return { removed: true, assignmentId };
+}
+
+function getGoogleCalendarClientCredentials() {
+  const clientId = firstNonEmpty(
+    process.env.GOOGLE_CALENDAR_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.YOUTUBE_CLIENT_ID
+  );
+  const clientSecret = firstNonEmpty(
+    process.env.GOOGLE_CALENDAR_CLIENT_SECRET,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.YOUTUBE_CLIENT_SECRET
+  );
+  return { clientId, clientSecret };
+}
+
+function resolveGoogleCalendarRedirectUri(payload = {}, req = null) {
+  const explicit = firstValidHttpUrl(
+    payload.redirectUri,
+    payload.redirect_uri,
+    process.env.GOOGLE_CALENDAR_REDIRECT_URI,
+    process.env.OAUTH_GOOGLE_REDIRECT_URI
+  );
+  if (explicit) return explicit;
+  if (req?.headers?.host) {
+    const proto = req.headers['x-forwarded-proto'] || 'https';
+    return `${proto}://${req.headers.host}/production-calendar`;
+  }
+  const appBase = firstValidHttpUrl(process.env.APP_BASE_URL, process.env.NEXT_PUBLIC_APP_URL, process.env.VITE_APP_URL);
+  if (appBase) return `${appBase.replace(/\/+$/g, '')}/production-calendar`;
+  return 'https://imc.goodcreativemedia.com/production-calendar';
+}
+
+function sanitizeGoogleCalendarConnection(row = null) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    org_id: row.org_id || null,
+    account_email: row.account_email || '',
+    default_calendar_id: row.default_calendar_id || 'primary',
+    auto_sync_types: Array.isArray(row.auto_sync_types) ? row.auto_sync_types : [],
+    sync_enabled: row.sync_enabled !== false,
+    status: row.status || 'not_connected',
+    metadata: row.metadata && typeof row.metadata === 'object' ? row.metadata : {},
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    token_expires_at: row.token_expires_at || null,
+  };
+}
+
+async function loadGoogleCalendarConnectionForUser(userId, orgId = null) {
+  let query = supabase
+    .from('google_calendar_connections')
+    .select('*')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false })
+    .limit(1);
+  if (orgId) query = query.eq('org_id', orgId);
+  let { data, error } = await query;
+  if (error) {
+    if (isMissingRelationError(error)) {
+      return { connection: null, warning: 'google_calendar_connections table missing.' };
+    }
+    throw error;
+  }
+  if (!data?.length && orgId) {
+    const fallback = await supabase
+      .from('google_calendar_connections')
+      .select('*')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false })
+      .limit(1);
+    if (fallback.error) {
+      if (isMissingRelationError(fallback.error)) {
+        return { connection: null, warning: 'google_calendar_connections table missing.' };
+      }
+      throw fallback.error;
+    }
+    data = fallback.data;
+  }
+  return { connection: data?.[0] || null };
+}
+
+async function refreshGoogleCalendarAccessToken(connection) {
+  if (!connection?.refresh_token) return connection;
+  const { clientId, clientSecret } = getGoogleCalendarClientCredentials();
+  if (!clientId || !clientSecret) return connection;
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: connection.refresh_token,
+      grant_type: 'refresh_token',
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.error) {
+    throw new Error(`Google token refresh failed: ${data.error_description || data.error || response.statusText}`);
+  }
+  const next = {
+    access_token: data.access_token || connection.access_token,
+    token_expires_at: data.expires_in
+      ? new Date(Date.now() + Number(data.expires_in) * 1000).toISOString()
+      : connection.token_expires_at || null,
+    updated_at: new Date().toISOString(),
+  };
+  const { data: updated, error } = await supabase
+    .from('google_calendar_connections')
+    .update(next)
+    .eq('id', connection.id)
+    .select('*')
+    .single();
+  if (error && !isMissingRelationError(error)) throw error;
+  return updated || { ...connection, ...next };
+}
+
+async function ensureFreshGoogleCalendarConnection(connection = null) {
+  if (!connection) return null;
+  if (!connection.access_token) return connection;
+  if (!connection.token_expires_at) return connection;
+  const expiresAt = new Date(connection.token_expires_at).getTime();
+  if (!Number.isFinite(expiresAt)) return connection;
+  if (Date.now() + 60000 < expiresAt) return connection;
+  return refreshGoogleCalendarAccessToken(connection);
+}
+
+async function googleCalendarApiRequest({ connection, method = 'GET', path = '', body = null }) {
+  if (!connection?.access_token) throw new Error('Google Calendar access token is missing.');
+  const refreshed = await ensureFreshGoogleCalendarConnection(connection);
+  const headers = {
+    Authorization: `Bearer ${refreshed.access_token}`,
+    Accept: 'application/json',
+  };
+  if (body) headers['Content-Type'] = 'application/json';
+
+  const attempt = async (activeToken) => fetch(`https://www.googleapis.com/calendar/v3${path}`, {
+    method,
+    headers: {
+      ...headers,
+      Authorization: `Bearer ${activeToken}`,
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+
+  let response = await attempt(refreshed.access_token);
+  if (response.status === 401 && refreshed.refresh_token) {
+    const retried = await refreshGoogleCalendarAccessToken(refreshed);
+    response = await attempt(retried.access_token);
+  }
+  const text = await response.text();
+  let data = {};
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { raw: text };
+    }
+  }
+  if (!response.ok) {
+    const message = data?.error?.message || data?.error_description || response.statusText || 'Google Calendar request failed';
+    throw new Error(`Google Calendar API error (${response.status}): ${message}`);
+  }
+  return data;
+}
+
+async function getGoogleCalendarConnection(payload = {}) {
+  const userId = ensureUserId(payload);
+  const orgId = payload.orgId || payload.org_id || payload.venueProfileId || payload.venue_profile_id || null;
+  const { connection, warning } = await loadGoogleCalendarConnectionForUser(userId, orgId);
+  return {
+    connection: sanitizeGoogleCalendarConnection(connection),
+    ...(warning ? { warning } : {}),
+  };
+}
+
+async function getGoogleCalendarAuthUrl(payload = {}, req = null) {
+  const userId = ensureUserId(payload);
+  const { clientId } = getGoogleCalendarClientCredentials();
+  if (!clientId) {
+    throw new Error('GOOGLE_CALENDAR_CLIENT_ID (or GOOGLE_CLIENT_ID) is not configured.');
+  }
+  const redirectUri = resolveGoogleCalendarRedirectUri(payload, req);
+  const state = createHash('sha1')
+    .update(`${userId}:${Date.now()}:${Math.random()}`)
+    .digest('hex')
+    .slice(0, 40);
+
+  const { error: stateError } = await supabase
+    .from('app_settings')
+    .upsert({
+      key: `oauth_google_calendar_state_${userId}`,
+      value: {
+        state,
+        redirect_uri: redirectUri,
+        created_at: new Date().toISOString(),
+      },
+      updated_at: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+    }, { onConflict: 'key' });
+  if (stateError && !isMissingRelationError(stateError)) throw stateError;
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: GOOGLE_CALENDAR_SCOPES.join(' '),
+    access_type: 'offline',
+    include_granted_scopes: 'true',
+    prompt: 'consent',
+    state,
+  });
+  return {
+    authUrl: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`,
+    redirectUri,
+    state,
+    scopes: GOOGLE_CALENDAR_SCOPES,
+  };
+}
+
+async function connectGoogleCalendar(payload = {}) {
+  const userId = ensureUserId(payload);
+  const orgId = payload.orgId || payload.org_id || payload.venueProfileId || payload.venue_profile_id || null;
+  const inputAccessToken = normalizePlainText(payload.accessToken || payload.access_token || '', 8000);
+  const inputRefreshToken = normalizePlainText(payload.refreshToken || payload.refresh_token || '', 8000);
+  const nowIso = new Date().toISOString();
+  const { clientId, clientSecret } = getGoogleCalendarClientCredentials();
+  const { connection: existingConnection } = await loadGoogleCalendarConnectionForUser(userId, orgId);
+
+  let accessToken = inputAccessToken || '';
+  let refreshToken = inputRefreshToken || '';
+  let expiresAt = normalizeDateTimeNullable(payload.tokenExpiresAt || payload.token_expires_at);
+  let accountEmail = normalizePlainText(payload.accountEmail || payload.account_email || '', 240);
+  const existingAccessToken = normalizePlainText(existingConnection?.access_token || '', 8000);
+  const existingRefreshToken = normalizePlainText(existingConnection?.refresh_token || '', 8000);
+  const existingAccountEmail = normalizePlainText(existingConnection?.account_email || '', 240);
+  const existingTokenExpiresAt = normalizeDateTimeNullable(existingConnection?.token_expires_at);
+
+  if (!accessToken) {
+    const code = normalizePlainText(payload.code || '', 4000);
+    const state = normalizePlainText(payload.state || '', 400);
+    if (!code) {
+      if (!existingAccessToken) throw new Error('Google OAuth code is required.');
+      accessToken = existingAccessToken;
+      refreshToken = refreshToken || existingRefreshToken;
+      expiresAt = expiresAt || existingTokenExpiresAt;
+      accountEmail = accountEmail || existingAccountEmail;
+    } else {
+      if (!clientId || !clientSecret) throw new Error('Google OAuth client credentials are not configured.');
+
+      const { data: stateRow } = await supabase
+        .from('app_settings')
+        .select('value')
+        .eq('key', `oauth_google_calendar_state_${userId}`)
+        .maybeSingle();
+      const expectedState = normalizePlainText(stateRow?.value?.state || '', 400);
+      const storedRedirect = normalizePlainText(stateRow?.value?.redirect_uri || '', 500);
+      const redirectUri = resolveGoogleCalendarRedirectUri(
+        { ...payload, redirectUri: payload.redirectUri || storedRedirect || undefined },
+        null
+      );
+
+      if (expectedState && state && expectedState !== state) {
+        throw new Error('Google OAuth state mismatch. Please reconnect from the wizard.');
+      }
+
+      const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          code,
+          grant_type: 'authorization_code',
+          redirect_uri: redirectUri,
+        }),
+      });
+      const tokenData = await tokenResponse.json().catch(() => ({}));
+      if (!tokenResponse.ok || tokenData.error) {
+        throw new Error(`Google token exchange failed: ${tokenData.error_description || tokenData.error || tokenResponse.statusText}`);
+      }
+      accessToken = normalizePlainText(tokenData.access_token || '', 8000);
+      refreshToken = normalizePlainText(tokenData.refresh_token || '', 8000) || refreshToken || existingRefreshToken;
+      expiresAt = tokenData.expires_in
+        ? new Date(Date.now() + Number(tokenData.expires_in) * 1000).toISOString()
+        : (expiresAt || existingTokenExpiresAt);
+    }
+  }
+
+  if (!accessToken && existingAccessToken) accessToken = existingAccessToken;
+  if (!refreshToken && existingRefreshToken) refreshToken = existingRefreshToken;
+  if (!accountEmail && existingAccountEmail) accountEmail = existingAccountEmail;
+  if (!expiresAt && existingTokenExpiresAt) expiresAt = existingTokenExpiresAt;
+
+  if (!accessToken) throw new Error('Google access token is missing.');
+
+  if (!accountEmail) {
+    const userInfo = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const userInfoData = await userInfo.json().catch(() => ({}));
+    accountEmail = normalizePlainText(userInfoData.email || '', 240);
+  }
+
+  const defaultCalendarId = normalizePlainText(
+    payload.defaultCalendarId
+      || payload.calendarId
+      || payload.calendar_id
+      || existingConnection?.default_calendar_id
+      || 'primary',
+    320
+  ) || 'primary';
+  const requestedSyncEnabled = payload.syncEnabled ?? payload.sync_enabled;
+  const syncEnabled = typeof requestedSyncEnabled === 'boolean'
+    ? requestedSyncEnabled
+    : (existingConnection?.sync_enabled !== false);
+  const requestedAutoSync = payload.autoSyncTypes ?? payload.auto_sync_types;
+  const autoSyncTypes = Array.isArray(requestedAutoSync)
+    ? normalizeTextArray(requestedAutoSync, 24, 80)
+    : normalizeTextArray(
+      Array.isArray(existingConnection?.auto_sync_types) && existingConnection.auto_sync_types.length
+        ? existingConnection.auto_sync_types
+        : ['performance', 'tech_rehearsal', 'soundcheck', 'load_in', 'load_out'],
+      24,
+      80
+    );
+  const next = {
+    user_id: userId,
+    org_id: orgId,
+    account_email: accountEmail || existingAccountEmail || '',
+    access_token: accessToken,
+    refresh_token: refreshToken || null,
+    token_expires_at: expiresAt || null,
+    default_calendar_id: defaultCalendarId,
+    auto_sync_types: autoSyncTypes,
+    sync_enabled: syncEnabled,
+    status: 'connected',
+    metadata: (payload.metadata && typeof payload.metadata === 'object') ? payload.metadata : {},
+    updated_at: nowIso,
+  };
+
+  let existingQuery = supabase
+    .from('google_calendar_connections')
+    .select('*')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false })
+    .limit(1);
+  if (orgId) existingQuery = existingQuery.eq('org_id', orgId);
+  const existingRes = await existingQuery;
+  if (existingRes.error && !isMissingRelationError(existingRes.error)) throw existingRes.error;
+
+  let saved = null;
+  if (existingRes.data?.[0]?.id) {
+    const { data, error } = await supabase
+      .from('google_calendar_connections')
+      .update(next)
+      .eq('id', existingRes.data[0].id)
+      .select('*')
+      .single();
+    if (error) {
+      if (isMissingRelationError(error)) return { connection: null, warning: 'google_calendar_connections table missing.' };
+      throw error;
+    }
+    saved = data;
+  } else {
+    const { data, error } = await supabase
+      .from('google_calendar_connections')
+      .insert({ ...next, created_at: nowIso })
+      .select('*')
+      .single();
+    if (error) {
+      if (isMissingRelationError(error)) return { connection: null, warning: 'google_calendar_connections table missing.' };
+      throw error;
+    }
+    saved = data;
+  }
+
+  return {
+    connected: true,
+    connection: sanitizeGoogleCalendarConnection(saved),
+  };
+}
+
+async function listGoogleCalendars(payload = {}) {
+  const userId = ensureUserId(payload);
+  const orgId = payload.orgId || payload.org_id || null;
+  const { connection, warning } = await loadGoogleCalendarConnectionForUser(userId, orgId);
+  if (!connection) {
+    return {
+      calendars: [],
+      warning: warning || 'Google Calendar is not connected yet.',
+    };
+  }
+  const data = await googleCalendarApiRequest({
+    connection,
+    method: 'GET',
+    path: '/users/me/calendarList?maxResults=250&showHidden=true',
+  });
+  const calendars = Array.isArray(data.items) ? data.items.map((item) => ({
+    id: item.id,
+    summary: item.summary || '',
+    description: item.description || '',
+    primary: !!item.primary,
+    accessRole: item.accessRole || '',
+    timeZone: item.timeZone || '',
+    backgroundColor: item.backgroundColor || '',
+    foregroundColor: item.foregroundColor || '',
+  })) : [];
+  return {
+    calendars,
+    connection: sanitizeGoogleCalendarConnection(connection),
+  };
+}
+
+async function createGoogleCalendarRecord(payload = {}) {
+  const userId = ensureUserId(payload);
+  const orgId = payload.orgId || payload.org_id || null;
+  const summary = normalizePlainText(payload.summary || payload.name || '', 180);
+  if (!summary) throw new Error('Calendar name is required.');
+  const { connection, warning } = await loadGoogleCalendarConnectionForUser(userId, orgId);
+  if (!connection) {
+    return {
+      calendar: null,
+      warning: warning || 'Google Calendar is not connected yet.',
+    };
+  }
+
+  const body = {
+    summary,
+    description: normalizePlainText(payload.description || '', 1000),
+    timeZone: normalizePlainText(payload.timeZone || payload.timezone || 'America/Chicago', 80) || 'America/Chicago',
+  };
+  const data = await googleCalendarApiRequest({
+    connection,
+    method: 'POST',
+    path: '/calendars',
+    body,
+  });
+
+  const setAsDefault = payload.setAsDefault === true || payload.set_as_default === true;
+  if (setAsDefault && data?.id) {
+    const { error } = await supabase
+      .from('google_calendar_connections')
+      .update({
+        default_calendar_id: data.id,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', connection.id);
+    if (error && !isMissingRelationError(error)) throw error;
+  }
+
+  return {
+    calendar: {
+      id: data.id,
+      summary: data.summary || summary,
+      timeZone: data.timeZone || body.timeZone,
+    },
+  };
+}
+
+function buildGoogleCalendarEventBody(entry = {}) {
+  const reminders = normalizeReminderSettings(entry.reminder_settings || entry.reminderSettings);
+  const reminderOverrides = reminders.map((minutes) => ({
+    method: minutes >= 60 ? 'email' : 'popup',
+    minutes,
+  }));
+  return {
+    summary: normalizePlainText(entry.title || 'Production Call', 220) || 'Production Call',
+    location: normalizePlainText(entry.location || '', 500),
+    description: normalizePlainText([
+      entry.description || '',
+      entry.shareable_notes || entry.shareableNotes || '',
+    ].filter(Boolean).join('\n\n'), 6000),
+    start: {
+      dateTime: ensureIsoDateTime(entry.start_datetime || entry.startDatetime),
+      timeZone: normalizePlainText(entry.timezone || 'America/Chicago', 80) || 'America/Chicago',
+    },
+    end: {
+      dateTime: ensureIsoDateTime(entry.end_datetime || entry.endDatetime),
+      timeZone: normalizePlainText(entry.timezone || 'America/Chicago', 80) || 'America/Chicago',
+    },
+    status: normalizeCalendarStatus(entry.status || 'confirmed') === 'cancelled' ? 'cancelled' : 'confirmed',
+    reminders: {
+      useDefault: false,
+      overrides: reminderOverrides,
+    },
+  };
+}
+
+async function syncCalendarEntryRow({ userId, entry, orgId = null, calendarId = null }) {
+  if (!entry?.id) throw new Error('calendar entry is required for sync.');
+  const { connection, warning } = await loadGoogleCalendarConnectionForUser(userId, orgId || entry.org_id || null);
+  if (!connection) {
+    return { synced: false, warning: warning || 'Google Calendar is not connected.' };
+  }
+  if (connection.sync_enabled === false) {
+    return { synced: false, warning: 'Google Calendar sync is disabled for this connection.' };
+  }
+  const resolvedCalendarId = normalizePlainText(calendarId || connection.default_calendar_id || 'primary', 320) || 'primary';
+  const syncHash = buildCalendarSyncHash(entry);
+
+  const { data: mappingRow, error: mappingError } = await supabase
+    .from('google_calendar_event_mappings')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('calendar_entry_id', entry.id)
+    .eq('google_calendar_id', resolvedCalendarId)
+    .maybeSingle();
+  if (mappingError && !isMissingRelationError(mappingError)) throw mappingError;
+
+  let googleEventId = mappingRow?.google_event_id || null;
+  const eventBody = buildGoogleCalendarEventBody(entry);
+  const encodedCalendarId = encodeURIComponent(resolvedCalendarId);
+
+  if (googleEventId) {
+    const encodedEventId = encodeURIComponent(googleEventId);
+    const method = normalizeCalendarStatus(entry.status || 'confirmed') === 'cancelled' ? 'PATCH' : 'PUT';
+    const body = method === 'PATCH' ? { status: 'cancelled' } : eventBody;
+    const updated = await googleCalendarApiRequest({
+      connection,
+      method,
+      path: `/calendars/${encodedCalendarId}/events/${encodedEventId}`,
+      body,
+    });
+    googleEventId = updated.id || googleEventId;
+  } else {
+    const created = await googleCalendarApiRequest({
+      connection,
+      method: 'POST',
+      path: `/calendars/${encodedCalendarId}/events`,
+      body: eventBody,
+    });
+    googleEventId = created.id;
+  }
+
+  const mappingPayload = {
+    user_id: userId,
+    calendar_entry_id: entry.id,
+    google_calendar_id: resolvedCalendarId,
+    google_event_id: googleEventId,
+    last_synced_at: new Date().toISOString(),
+    last_sync_direction: 'imc_to_google',
+    sync_hash: syncHash,
+    metadata: {},
+    updated_at: new Date().toISOString(),
+  };
+
+  const upsertRes = await supabase
+    .from('google_calendar_event_mappings')
+    .upsert({ ...mappingPayload, created_at: new Date().toISOString() }, { onConflict: 'calendar_entry_id,google_calendar_id' });
+  if (upsertRes.error && !isMissingRelationError(upsertRes.error)) throw upsertRes.error;
+
+  return {
+    synced: true,
+    calendarEntryId: entry.id,
+    googleCalendarId: resolvedCalendarId,
+    googleEventId,
+    lastSyncedAt: mappingPayload.last_synced_at,
+  };
+}
+
+async function syncCalendarEntry(payload = {}) {
+  const userId = ensureUserId(payload);
+  const calendarEntryId = payload.calendarEntryId || payload.entryId || payload.id;
+  if (!calendarEntryId) throw new Error('Missing calendarEntryId.');
+  const { data: entry, error } = await supabase
+    .from('rehearsal_calendar_entries')
+    .select('*')
+    .eq('id', calendarEntryId)
+    .eq('user_id', userId)
+    .single();
+  if (error) {
+    if (isMissingRelationError(error)) return { synced: false, warning: 'rehearsal_calendar_entries table missing.' };
+    throw error;
+  }
+  return syncCalendarEntryRow({
+    userId,
+    entry,
+    orgId: payload.orgId || payload.org_id || entry.org_id || null,
+    calendarId: payload.calendarId || payload.googleCalendarId || null,
+  });
+}
+
+async function upsertCalendarEntryFromSource({
+  userId,
+  orgId = null,
+  eventId = null,
+  title = 'Production Call',
+  typeKey = 'performance',
+  typeName = 'Performance',
+  startDatetime,
+  endDatetime,
+  timezone = 'America/Chicago',
+  location = '',
+  description = '',
+  sourceKind = 'manual',
+  sourceRefId = '',
+  status = 'confirmed',
+  departmentTags = [],
+  assignedRoles = [],
+  metadata = {},
+}) {
+  const startIso = normalizeDateTimeNullable(startDatetime);
+  if (!startIso) return null;
+  const endIso = normalizeDateTimeNullable(endDatetime) || calculateEndIso(startIso, 120);
+  const nowIso = new Date().toISOString();
+
+  let existingQuery = supabase
+    .from('rehearsal_calendar_entries')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('source_kind', normalizeCalendarSourceKind(sourceKind))
+    .eq('source_ref_id', normalizePlainText(sourceRefId, 180))
+    .limit(1);
+  const existingRes = await existingQuery;
+  if (existingRes.error && !isMissingRelationError(existingRes.error)) throw existingRes.error;
+  const existing = existingRes.data?.[0] || null;
+
+  const next = {
+    user_id: userId,
+    org_id: orgId,
+    event_id: eventId,
+    title: normalizePlainText(title, 220) || 'Production Call',
+    type_key: normalizeCalendarTypeKey(typeKey) || '',
+    type_name: normalizePlainText(typeName, 180) || '',
+    start_datetime: startIso,
+    end_datetime: endIso,
+    timezone: normalizePlainText(timezone, 80) || 'America/Chicago',
+    location: normalizePlainText(location, 320),
+    description: normalizePlainText(description, 8000),
+    department_tags: normalizeTextArray(departmentTags, 24, 80),
+    assigned_roles: normalizeTextArray(assignedRoles, 24, 180),
+    required_attendance: 'required',
+    status: normalizeCalendarStatus(status || 'confirmed'),
+    internal_notes: '',
+    shareable_notes: '',
+    attachments: [],
+    reminder_settings: normalizeReminderSettings([]),
+    source_kind: normalizeCalendarSourceKind(sourceKind),
+    source_ref_id: normalizePlainText(sourceRefId, 180),
+    source_payload: {},
+    google_sync_enabled: true,
+    metadata: (metadata && typeof metadata === 'object') ? metadata : {},
+    updated_at: nowIso,
+  };
+
+  if (existing?.id) {
+    const { data, error } = await supabase
+      .from('rehearsal_calendar_entries')
+      .update(next)
+      .eq('id', existing.id)
+      .select('*')
+      .single();
+    if (error) {
+      if (isMissingRelationError(error)) return null;
+      throw error;
+    }
+    return data;
+  }
+
+  const { data, error } = await supabase
+    .from('rehearsal_calendar_entries')
+    .insert({ ...next, created_at: nowIso })
+    .select('*')
+    .single();
+  if (error) {
+    if (isMissingRelationError(error)) return null;
+    throw error;
+  }
+  return data;
+}
+
+function getEventStartEnd(eventRow = {}) {
+  const startIso = normalizeDateTimeNullable(eventRow.booking_start_at)
+    || normalizeDateTimeNullable(`${eventRow.date || ''}T${eventRow.time || '19:00'}:00`);
+  if (!startIso) return { startIso: null, endIso: null };
+  const endIso = normalizeDateTimeNullable(eventRow.booking_end_at)
+    || calculateEndIso(startIso, 120);
+  return { startIso, endIso };
+}
+
+async function syncAllDatedItems(payload = {}) {
+  const userId = ensureUserId(payload);
+  const syncGoogle = payload.syncGoogle !== false && payload.sync_to_google !== false;
+  const warnings = [];
+  const upsertedEntries = [];
+
+  const eventRes = await supabase
+    .from('events')
+    .select('id,title,description,date,time,venue_name,venue_city,venue_state,booking_start_at,booking_end_at,booking_status,venue_profile_id')
+    .eq('user_id', userId)
+    .order('date', { ascending: true });
+  if (eventRes.error) {
+    if (isMissingRelationError(eventRes.error)) {
+      warnings.push('events table missing for auto calendar sync.');
+    } else {
+      throw eventRes.error;
+    }
+  } else {
+    for (const eventRow of eventRes.data || []) {
+      const { startIso, endIso } = getEventStartEnd(eventRow);
+      if (!startIso) continue;
+      const entry = await upsertCalendarEntryFromSource({
+        userId,
+        orgId: eventRow.venue_profile_id || null,
+        eventId: eventRow.id,
+        title: buildCalendarEntryTitle({
+          typeName: 'Performance',
+          eventTitle: eventRow.title,
+          fallback: eventRow.title || 'Performance',
+        }),
+        typeKey: 'performance',
+        typeName: 'Performance',
+        startDatetime: startIso,
+        endDatetime: endIso,
+        location: [eventRow.venue_name, eventRow.venue_city, eventRow.venue_state].filter(Boolean).join(', '),
+        description: eventRow.description || '',
+        sourceKind: 'event',
+        sourceRefId: eventRow.id,
+        status: eventRow.booking_status || 'confirmed',
+      });
+      if (entry) upsertedEntries.push(entry);
+    }
+  }
+
+  const trainingRes = await supabase
+    .from('training_sessions')
+    .select('id,training_course_id,session_type,start_datetime,end_datetime,location_notes,notes,venue_id,training_course:training_course_id(title)')
+    .eq('user_id', userId)
+    .order('start_datetime', { ascending: true });
+  if (trainingRes.error) {
+    if (!isMissingRelationError(trainingRes.error)) throw trainingRes.error;
+    warnings.push('training_sessions table missing for training calendar sync.');
+  } else {
+    for (const sessionRow of trainingRes.data || []) {
+      const startIso = normalizeDateTimeNullable(sessionRow.start_datetime);
+      if (!startIso) continue;
+      const endIso = normalizeDateTimeNullable(sessionRow.end_datetime) || calculateEndIso(startIso, 120);
+      const typeKey = normalizeCalendarTypeKey(sessionRow.session_type || 'rehearsal') || 'rehearsal';
+      const typeName = normalizePlainText(sessionRow.session_type || 'Rehearsal', 120) || 'Rehearsal';
+      const courseTitle = normalizePlainText(sessionRow.training_course?.title || '', 160);
+      const title = buildCalendarEntryTitle({
+        typeName,
+        eventTitle: courseTitle,
+        fallback: typeName,
+      });
+      const entry = await upsertCalendarEntryFromSource({
+        userId,
+        orgId: sessionRow.venue_id || null,
+        title,
+        typeKey,
+        typeName,
+        startDatetime: startIso,
+        endDatetime: endIso,
+        location: sessionRow.location_notes || '',
+        description: sessionRow.notes || '',
+        sourceKind: 'training_session',
+        sourceRefId: sessionRow.id,
+        status: 'confirmed',
+      });
+      if (entry) upsertedEntries.push(entry);
+    }
+  }
+
+  const assignmentRes = await supabase
+    .from('staff_assignments')
+    .select('id,booking_id,job_title,start_time,end_time,status,notes,event:booking_id(title,venue_name,venue_city,venue_state)')
+    .eq('user_id', userId)
+    .order('start_time', { ascending: true });
+  if (assignmentRes.error) {
+    if (!isMissingRelationError(assignmentRes.error)) throw assignmentRes.error;
+    warnings.push('staff_assignments table missing for staffing calendar sync.');
+  } else {
+    for (const assignmentRow of assignmentRes.data || []) {
+      const startIso = normalizeDateTimeNullable(assignmentRow.start_time);
+      if (!startIso) continue;
+      const endIso = normalizeDateTimeNullable(assignmentRow.end_time) || calculateEndIso(startIso, 240);
+      const eventTitle = normalizePlainText(assignmentRow.event?.title || '', 160);
+      const roleTitle = normalizePlainText(assignmentRow.job_title || 'Staffing Call', 160) || 'Staffing Call';
+      const entryTitle = buildCalendarEntryTitle({
+        typeName: roleTitle,
+        eventTitle,
+        fallback: roleTitle,
+      });
+      const entry = await upsertCalendarEntryFromSource({
+        userId,
+        eventId: assignmentRow.booking_id || null,
+        title: entryTitle,
+        typeKey: 'staffing_call',
+        typeName: 'Staffing Call',
+        startDatetime: startIso,
+        endDatetime: endIso,
+        location: [
+          assignmentRow.event?.venue_name,
+          assignmentRow.event?.venue_city,
+          assignmentRow.event?.venue_state,
+        ].filter(Boolean).join(', '),
+        description: assignmentRow.notes || '',
+        sourceKind: 'staff_assignment',
+        sourceRefId: assignmentRow.id,
+        status: assignmentRow.status || 'confirmed',
+      });
+      if (entry) upsertedEntries.push(entry);
+    }
+  }
+
+  const syncedEntries = [];
+  if (syncGoogle) {
+    for (const entry of upsertedEntries) {
+      try {
+        const synced = await syncCalendarEntryRow({
+          userId,
+          entry,
+          orgId: entry.org_id || null,
+          calendarId: payload.calendarId || payload.googleCalendarId || null,
+        });
+        if (synced?.synced) syncedEntries.push(synced);
+        if (synced?.warning) warnings.push(synced.warning);
+      } catch (err) {
+        warnings.push(`Google sync skipped for ${entry.title || entry.id}: ${err.message}`);
+      }
+    }
+  }
+
+  return {
+    scanned: {
+      events: eventRes.data?.length || 0,
+      trainingSessions: trainingRes.data?.length || 0,
+      staffAssignments: assignmentRes.data?.length || 0,
+    },
+    upsertedCount: upsertedEntries.length,
+    syncedCount: syncedEntries.length,
+    ...(warnings.length ? { warnings } : {}),
+  };
+}
+
 async function getTrainingCourses(payload = {}) {
   const userId = ensureUserId(payload);
   const venueId = payload.venueId || payload.venue_id || payload.venueProfileId || payload.venue_profile_id || null;
@@ -5765,6 +7888,7 @@ async function upsertTrainingSession(payload = {}) {
     throw new Error('Training session end time must be after start time.');
   }
   const sessionId = payload.sessionId || payload.id || session.id || null;
+  let saved = null;
   if (sessionId) {
     const { data, error } = await supabase
       .from('training_sessions')
@@ -5777,18 +7901,60 @@ async function upsertTrainingSession(payload = {}) {
       if (isMissingRelationError(error)) return { session: null, warning: 'training_sessions table missing.' };
       throw error;
     }
-    return { session: data };
+    saved = data;
+  } else {
+    const { data, error } = await supabase
+      .from('training_sessions')
+      .insert({ ...next, created_at: new Date().toISOString() })
+      .select('*')
+      .single();
+    if (error) {
+      if (isMissingRelationError(error)) return { session: null, warning: 'training_sessions table missing.' };
+      throw error;
+    }
+    saved = data;
   }
-  const { data, error } = await supabase
-    .from('training_sessions')
-    .insert({ ...next, created_at: new Date().toISOString() })
-    .select('*')
-    .single();
-  if (error) {
-    if (isMissingRelationError(error)) return { session: null, warning: 'training_sessions table missing.' };
-    throw error;
+
+  let calendarSync = null;
+  try {
+    const { data: courseRow } = await supabase
+      .from('training_courses')
+      .select('title')
+      .eq('id', trainingCourseId)
+      .maybeSingle();
+    const calendarEntry = await upsertCalendarEntryFromSource({
+      userId,
+      orgId: saved.venue_id || null,
+      title: buildCalendarEntryTitle({
+        typeName: normalizePlainText(saved.session_type || 'Rehearsal', 160) || 'Rehearsal',
+        eventTitle: normalizePlainText(courseRow?.title || '', 160),
+        fallback: normalizePlainText(saved.session_type || 'Rehearsal', 160) || 'Rehearsal',
+      }),
+      typeKey: normalizeCalendarTypeKey(saved.session_type || 'rehearsal') || 'rehearsal',
+      typeName: normalizePlainText(saved.session_type || 'Rehearsal', 160) || 'Rehearsal',
+      startDatetime: saved.start_datetime,
+      endDatetime: saved.end_datetime,
+      location: saved.location_notes || '',
+      description: saved.notes || '',
+      sourceKind: 'training_session',
+      sourceRefId: saved.id,
+      status: 'confirmed',
+    });
+    if (calendarEntry) {
+      calendarSync = await syncCalendarEntryRow({
+        userId,
+        entry: calendarEntry,
+        orgId: calendarEntry.org_id || null,
+      });
+    }
+  } catch (err) {
+    calendarSync = { synced: false, warning: err.message };
   }
-  return { session: data };
+
+  return {
+    session: saved,
+    ...(calendarSync ? { calendarSync } : {}),
+  };
 }
 
 async function deleteTrainingSession(payload = {}) {
@@ -9927,6 +12093,52 @@ function normalizeConcessionsMenuItemInput(input = {}) {
   const metadataInput = (input.metadata && typeof input.metadata === 'object') ? input.metadata : {};
   const itemUrl = firstValidHttpUrl(metadataInput.itemUrl, input.itemUrl, input.item_url) || '';
   const imageUrl = firstValidHttpUrl(metadataInput.imageUrl, input.imageUrl, input.image_url) || '';
+  const normalizeTags = (value) => {
+    if (Array.isArray(value)) {
+      return value
+        .map((entry) => normalizePlainText(entry || '', 40))
+        .filter(Boolean)
+        .slice(0, 24);
+    }
+    return String(value || '')
+      .split(/[\n,;|]+/)
+      .map((entry) => normalizePlainText(entry || '', 40))
+      .filter(Boolean)
+      .slice(0, 24);
+  };
+  const promoType = normalizePlainText(
+    input.promoType || input.promo_type || metadataInput.promoType || metadataInput.promo_type || 'none',
+    40
+  ) || 'none';
+  const promoTitle = normalizePlainText(
+    input.promoTitle || input.promo_title || metadataInput.promoTitle || metadataInput.promo_title || '',
+    200
+  );
+  const promoDetails = normalizePlainText(
+    input.promoDetails || input.promo_details || metadataInput.promoDetails || metadataInput.promo_details || '',
+    3000
+  );
+  const couponCode = normalizePlainText(
+    input.couponCode || input.coupon_code || metadataInput.couponCode || metadataInput.coupon_code || '',
+    120
+  );
+  const couponTerms = normalizePlainText(
+    input.couponTerms || input.coupon_terms || metadataInput.couponTerms || metadataInput.coupon_terms || '',
+    3000
+  );
+  const caption = normalizePlainText(
+    input.caption || metadataInput.caption || '',
+    1200
+  );
+  const shortDescription = normalizePlainText(
+    input.imageDescription || input.shortDescription || metadataInput.shortDescription || metadataInput.imageDescription || '',
+    600
+  );
+  const altText = normalizePlainText(
+    input.altText || input.alt_text || metadataInput.altText || metadataInput.alt_text || '',
+    600
+  );
+  const tags = normalizeTags(input.tags || metadataInput.tags || []);
 
   return {
     name: normalizePlainText(input.name || '', 200),
@@ -9943,6 +12155,15 @@ function normalizeConcessionsMenuItemInput(input = {}) {
       ...metadataInput,
       itemUrl,
       imageUrl,
+      promoType,
+      promoTitle,
+      promoDetails,
+      couponCode,
+      couponTerms,
+      caption,
+      shortDescription,
+      altText,
+      tags,
     },
   };
 }
@@ -10889,13 +13110,27 @@ function buildOperationsPacketLines(packet = {}) {
   if (packet.concessions) {
     lines.push('## Concessions / Food & Beverage');
     const concessionsPlan = packet.concessions.plan || {};
+    const concessionsMeta = (concessionsPlan.metadata && typeof concessionsPlan.metadata === 'object')
+      ? concessionsPlan.metadata
+      : {};
     lines.push(`Active: ${concessionsPlan.is_active ? 'Yes' : 'No'}`);
     if (concessionsPlan.bar_open_time) lines.push(`Bar Open: ${new Date(concessionsPlan.bar_open_time).toLocaleString('en-US')}`);
     if (concessionsPlan.bar_close_time) lines.push(`Bar Close: ${new Date(concessionsPlan.bar_close_time).toLocaleString('en-US')}`);
     lines.push(`Intermission Service: ${concessionsPlan.intermission_service ? 'Yes' : 'No'}`);
     lines.push(`Cashless Only: ${concessionsPlan.cashless_only ? 'Yes' : 'No'}`);
+    if (concessionsMeta.onlineMenuUrl) lines.push(`Online Menu: ${concessionsMeta.onlineMenuUrl}`);
+    if (concessionsMeta.specialsImageUrl) lines.push(`Specials Image: ${concessionsMeta.specialsImageUrl}`);
+    if (concessionsMeta.specialsCaption) lines.push(`Specials Caption: ${concessionsMeta.specialsCaption}`);
+    if (concessionsMeta.promoNotes) lines.push(`Promo Notes: ${concessionsMeta.promoNotes}`);
     (packet.concessions.menuItems || []).forEach((item, index) => {
+      const metadata = (item.metadata && typeof item.metadata === 'object') ? item.metadata : {};
       lines.push(`${index + 1}. ${item.name} | ${item.category} | $${Number(item.price || 0).toFixed(2)} | ${item.availability_status || 'available'}`);
+      if (metadata.promoTitle || metadata.promoType || metadata.couponCode) {
+        lines.push(`   Promo: ${metadata.promoTitle || metadata.promoType || 'Offer'}${metadata.couponCode ? ` | Code: ${metadata.couponCode}` : ''}`);
+      }
+      if (metadata.caption) {
+        lines.push(`   Caption: ${metadata.caption}`);
+      }
     });
     lines.push('');
   }
@@ -11683,6 +13918,1199 @@ async function deleteBoardRiskItem(payload = {}) {
     .eq('id', riskId);
   if (error) throw error;
   return { removed: true, riskId };
+}
+
+function toBool(value, fallback = false) {
+  if (value === null || value === undefined || value === '') return fallback;
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value).trim().toLowerCase();
+  if (['true', '1', 'yes', 'y'].includes(normalized)) return true;
+  if (['false', '0', 'no', 'n'].includes(normalized)) return false;
+  return fallback;
+}
+
+function toInt(value, fallback = 0) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function normalizeRiskText(value, fallback = '') {
+  return normalizePlainText(value || fallback, 120).toLowerCase();
+}
+
+function parseStringArray(input) {
+  if (Array.isArray(input)) {
+    return input.map((item) => normalizePlainText(item || '', 120)).filter(Boolean);
+  }
+  return String(input || '')
+    .split(/[,\n;|]+/)
+    .map((item) => normalizePlainText(item || '', 120))
+    .filter(Boolean);
+}
+
+function calculateEventRiskProfileScore(input = {}) {
+  const expectedAttendance = Math.max(0, toInt(input.expectedAttendance ?? input.expected_attendance, 0));
+  const securityStaffCount = Math.max(0, toInt(input.securityStaffCount ?? input.security_staff_count, 0));
+  const indoorOutdoor = normalizeRiskText(input.indoorOutdoor ?? input.indoor_outdoor, 'indoor');
+  const weatherExposure = normalizeRiskText(input.weatherExposure ?? input.weather_exposure, 'low');
+  const localCrimeRisk = normalizeRiskText(input.localCrimeRisk ?? input.local_crime_risk, '');
+  const fireRiskFactors = parseStringArray(input.fireRiskFactors ?? input.fire_risk_factors);
+  const alcoholPresent = toBool(input.alcoholPresent ?? input.alcohol_present, false);
+  const ticketedEvent = toBool(input.ticketedEvent ?? input.ticketed_event, false);
+  const generatorUse = toBool(input.generatorUse ?? input.generator_use, false);
+  const vipAttendance = toBool(input.vipAttendance ?? input.vip_attendance, false);
+
+  let score = 0;
+  if (indoorOutdoor === 'outdoor') score += 15;
+  if (expectedAttendance >= 5000) score += 30;
+  else if (expectedAttendance >= 2000) score += 24;
+  else if (expectedAttendance >= 1000) score += 18;
+  else if (expectedAttendance >= 500) score += 12;
+  else if (expectedAttendance >= 200) score += 8;
+  else if (expectedAttendance >= 100) score += 4;
+
+  if (alcoholPresent) score += 15;
+  if (!ticketedEvent) score += 6;
+
+  const staffingRatio = securityStaffCount > 0
+    ? Number((expectedAttendance / securityStaffCount).toFixed(2))
+    : null;
+  if (staffingRatio === null) score += 18;
+  else if (staffingRatio > 100) score += 16;
+  else if (staffingRatio > 75) score += 10;
+  else if (staffingRatio > 50) score += 5;
+
+  if (weatherExposure === 'high') score += 14;
+  else if (weatherExposure === 'medium') score += 8;
+
+  if (generatorUse) score += 8;
+  score += Math.min(16, fireRiskFactors.length * 4);
+  if (localCrimeRisk === 'high') score += 12;
+  else if (localCrimeRisk === 'medium') score += 6;
+  if (vipAttendance) score += 6;
+
+  const capped = Math.max(0, Math.min(100, Math.round(score)));
+  const riskLevel = capped <= 25 ? 'low'
+    : capped <= 50 ? 'moderate'
+      : capped <= 75 ? 'elevated'
+        : 'high';
+
+  const recommendations = [];
+  if (riskLevel === 'elevated' || riskLevel === 'high') {
+    recommendations.push('Increase security staffing and assign a dedicated Security Lead.');
+  }
+  if (staffingRatio === null || staffingRatio > 75) {
+    recommendations.push('Adjust security ratio target to 1:75 or better for this event.');
+  }
+  if (alcoholPresent) {
+    recommendations.push('Confirm alcohol enforcement plan, TABC compliance, and ID screening.');
+  }
+  if (weatherExposure !== 'low' || indoorOutdoor === 'outdoor') {
+    recommendations.push('Publish weather contingency trigger points and shelter/evacuation instructions.');
+  }
+  if (fireRiskFactors.length > 0 || generatorUse) {
+    recommendations.push('Run Fire Marshal and electrical safety walkthrough before doors.');
+  }
+  if (expectedAttendance >= 1000) {
+    recommendations.push('Coordinate police/EMS liaison and command-center communication plan.');
+  }
+  if (vipAttendance) {
+    recommendations.push('Create VIP lane and controlled access checkpoint map.');
+  }
+
+  return {
+    expectedAttendance,
+    securityStaffCount,
+    staffingRatio,
+    fireRiskFactors,
+    alcoholPresent,
+    ticketedEvent,
+    generatorUse,
+    vipAttendance,
+    indoorOutdoor,
+    weatherExposure,
+    localCrimeRisk,
+    riskScore: capped,
+    riskLevel,
+    recommendations: Array.from(new Set(recommendations)),
+  };
+}
+
+function isExpiredDateTime(value) {
+  if (!value) return false;
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return false;
+  return dt.getTime() < Date.now();
+}
+
+async function getEventSafetyProfile(payload = {}) {
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id;
+  if (!eventId) throw new Error('Missing eventId for safety profile.');
+  const { data, error } = await supabase
+    .from('event_safety_profiles')
+    .select('*')
+    .eq('event_id', eventId)
+    .single();
+  if (error) {
+    if (isMissingRelationError(error) || error.code === 'PGRST116') return { profile: null };
+    throw error;
+  }
+  return { profile: data || null };
+}
+
+async function upsertEventSafetyProfile(payload = {}) {
+  const userId = ensureUserId(payload);
+  const profile = payload.profile || {};
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id || profile.eventId || profile.event_id;
+  if (!eventId) throw new Error('Missing eventId for safety profile.');
+
+  const scored = calculateEventRiskProfileScore(profile);
+  const next = {
+    user_id: userId,
+    event_id: eventId,
+    venue_profile_id: profile.venueProfileId || profile.venue_profile_id || null,
+    organization_label: normalizePlainText(profile.organizationLabel || profile.organization_label || '', 220),
+    indoor_outdoor: normalizeRiskText(profile.indoorOutdoor || profile.indoor_outdoor, 'indoor') || 'indoor',
+    expected_attendance: scored.expectedAttendance,
+    alcohol_present: scored.alcoholPresent,
+    ticketed_event: scored.ticketedEvent,
+    security_staff_count: scored.securityStaffCount,
+    weather_exposure: scored.weatherExposure || 'low',
+    generator_use: scored.generatorUse,
+    fire_risk_factors: scored.fireRiskFactors,
+    vip_attendance: scored.vipAttendance,
+    local_crime_risk: scored.localCrimeRisk,
+    security_staffing_ratio: scored.staffingRatio,
+    risk_score: scored.riskScore,
+    risk_level: scored.riskLevel,
+    recommendations: scored.recommendations,
+    responsible_person: normalizePlainText(profile.responsiblePerson || profile.responsible_person || '', 220),
+    notes: normalizePlainText(profile.notes || '', 5000),
+    metadata: (profile.metadata && typeof profile.metadata === 'object') ? profile.metadata : {},
+    updated_at: new Date().toISOString(),
+  };
+  const profileId = payload.profileId || payload.id || profile.id;
+  if (profileId) {
+    const { data, error } = await supabase
+      .from('event_safety_profiles')
+      .update(next)
+      .eq('id', profileId)
+      .select('*')
+      .single();
+    if (error) throw error;
+    return { profile: data, scoring: scored };
+  }
+  const { data, error } = await supabase
+    .from('event_safety_profiles')
+    .upsert({ ...next, created_at: new Date().toISOString() }, { onConflict: 'event_id' })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return { profile: data, scoring: scored };
+}
+
+async function getEventPermits(payload = {}) {
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id;
+  if (!eventId) throw new Error('Missing eventId for permits.');
+  const { data, error } = await supabase
+    .from('event_permits')
+    .select('*')
+    .eq('event_id', eventId)
+    .order('expires_at', { ascending: true })
+    .order('permit_type', { ascending: true });
+  if (error) {
+    if (isMissingRelationError(error)) return { permits: [] };
+    throw error;
+  }
+  return { permits: data || [] };
+}
+
+async function upsertEventPermit(payload = {}) {
+  const userId = ensureUserId(payload);
+  const permit = payload.permit || {};
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id || permit.eventId || permit.event_id;
+  if (!eventId) throw new Error('Missing eventId for permit.');
+  const next = {
+    user_id: userId,
+    event_id: eventId,
+    permit_type: normalizePlainText(permit.permitType || permit.permit_type || '', 180),
+    status: normalizePlainText(permit.status || 'pending', 40).toLowerCase() || 'pending',
+    permit_number: normalizePlainText(permit.permitNumber || permit.permit_number || '', 180),
+    issuing_authority: normalizePlainText(permit.issuingAuthority || permit.issuing_authority || '', 220),
+    expires_at: normalizeStageDateTime(permit.expiresAt || permit.expires_at) || null,
+    file_url: normalizePlainText(permit.fileUrl || permit.file_url || '', 1200),
+    responsible_person: normalizePlainText(permit.responsiblePerson || permit.responsible_person || '', 220),
+    alert_days: Math.max(0, toInt(permit.alertDays || permit.alert_days, 30)),
+    notes: normalizePlainText(permit.notes || '', 3000),
+    metadata: (permit.metadata && typeof permit.metadata === 'object') ? permit.metadata : {},
+    updated_at: new Date().toISOString(),
+  };
+  if (!next.permit_type) throw new Error('Permit type is required.');
+  const permitId = payload.permitId || payload.id || permit.id;
+  if (permitId) {
+    const { data, error } = await supabase
+      .from('event_permits')
+      .update(next)
+      .eq('id', permitId)
+      .select('*')
+      .single();
+    if (error) throw error;
+    return { permit: data };
+  }
+  const { data, error } = await supabase
+    .from('event_permits')
+    .insert({ ...next, created_at: new Date().toISOString() })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return { permit: data };
+}
+
+async function deleteEventPermit(payload = {}) {
+  const permitId = payload.permitId || payload.id;
+  if (!permitId) throw new Error('Missing permitId.');
+  const { error } = await supabase
+    .from('event_permits')
+    .delete()
+    .eq('id', permitId);
+  if (error) throw error;
+  return { removed: true, permitId };
+}
+
+async function getEventInsurancePolicies(payload = {}) {
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id;
+  if (!eventId) throw new Error('Missing eventId for insurance.');
+  const { data, error } = await supabase
+    .from('event_insurance_policies')
+    .select('*')
+    .eq('event_id', eventId)
+    .order('expires_at', { ascending: true })
+    .order('policy_type', { ascending: true });
+  if (error) {
+    if (isMissingRelationError(error)) return { policies: [] };
+    throw error;
+  }
+  return { policies: data || [] };
+}
+
+async function upsertEventInsurancePolicy(payload = {}) {
+  const userId = ensureUserId(payload);
+  const policy = payload.policy || {};
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id || policy.eventId || policy.event_id;
+  if (!eventId) throw new Error('Missing eventId for insurance policy.');
+  const next = {
+    user_id: userId,
+    event_id: eventId,
+    policy_type: normalizePlainText(policy.policyType || policy.policy_type || '', 180),
+    policy_number: normalizePlainText(policy.policyNumber || policy.policy_number || '', 180),
+    coverage_limits: normalizePlainText(policy.coverageLimits || policy.coverage_limits || '', 2000),
+    deductible: toCurrencyNumber(policy.deductible, null),
+    carrier: normalizePlainText(policy.carrier || '', 220),
+    expires_at: normalizeStageDateTime(policy.expiresAt || policy.expires_at) || null,
+    additional_insured: normalizePlainText(policy.additionalInsured || policy.additional_insured || '', 220),
+    coi_file_url: normalizePlainText(policy.coiFileUrl || policy.coi_file_url || '', 1200),
+    status: normalizePlainText(policy.status || 'active', 40).toLowerCase() || 'active',
+    notes: normalizePlainText(policy.notes || '', 3000),
+    metadata: (policy.metadata && typeof policy.metadata === 'object') ? policy.metadata : {},
+    updated_at: new Date().toISOString(),
+  };
+  if (!next.policy_type) throw new Error('Policy type is required.');
+  const policyId = payload.policyId || payload.id || policy.id;
+  if (policyId) {
+    const { data, error } = await supabase
+      .from('event_insurance_policies')
+      .update(next)
+      .eq('id', policyId)
+      .select('*')
+      .single();
+    if (error) throw error;
+    return { policy: data };
+  }
+  const { data, error } = await supabase
+    .from('event_insurance_policies')
+    .insert({ ...next, created_at: new Date().toISOString() })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return { policy: data };
+}
+
+async function deleteEventInsurancePolicy(payload = {}) {
+  const policyId = payload.policyId || payload.id;
+  if (!policyId) throw new Error('Missing policyId.');
+  const { error } = await supabase
+    .from('event_insurance_policies')
+    .delete()
+    .eq('id', policyId);
+  if (error) throw error;
+  return { removed: true, policyId };
+}
+
+async function getEventSurveillanceAssets(payload = {}) {
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id;
+  if (!eventId) throw new Error('Missing eventId for surveillance assets.');
+  const { data, error } = await supabase
+    .from('event_surveillance_assets')
+    .select('*')
+    .eq('event_id', eventId)
+    .order('updated_at', { ascending: false });
+  if (error) {
+    if (isMissingRelationError(error)) return { assets: [] };
+    throw error;
+  }
+  return { assets: data || [] };
+}
+
+async function upsertEventSurveillanceAsset(payload = {}) {
+  const userId = ensureUserId(payload);
+  const asset = payload.asset || {};
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id || asset.eventId || asset.event_id;
+  if (!eventId) throw new Error('Missing eventId for surveillance asset.');
+  const next = {
+    user_id: userId,
+    event_id: eventId,
+    asset_type: normalizePlainText(asset.assetType || asset.asset_type || 'fixed_camera', 80) || 'fixed_camera',
+    camera_id: normalizePlainText(asset.cameraId || asset.camera_id || '', 120),
+    location: normalizePlainText(asset.location || '', 220),
+    coverage_zone: normalizePlainText(asset.coverageZone || asset.coverage_zone || '', 220),
+    power_source: normalizePlainText(asset.powerSource || asset.power_source || '', 120),
+    network_type: normalizePlainText(asset.networkType || asset.network_type || '', 120),
+    recording_status: normalizePlainText(asset.recordingStatus || asset.recording_status || 'active', 80) || 'active',
+    retention_days: Math.max(0, toInt(asset.retentionDays || asset.retention_days, 30)),
+    monitoring_station: normalizePlainText(asset.monitoringStation || asset.monitoring_station || '', 220),
+    monitoring_assignee: normalizePlainText(asset.monitoringAssignee || asset.monitoring_assignee || '', 220),
+    live_feed_url: normalizePlainText(asset.liveFeedUrl || asset.live_feed_url || '', 1200),
+    access_level: normalizePlainText(asset.accessLevel || asset.access_level || 'restricted', 80) || 'restricted',
+    permissions: Array.isArray(asset.permissions) ? asset.permissions : [],
+    notes: normalizePlainText(asset.notes || '', 3000),
+    metadata: (asset.metadata && typeof asset.metadata === 'object') ? asset.metadata : {},
+    updated_at: new Date().toISOString(),
+  };
+  const assetId = payload.assetId || payload.id || asset.id;
+  if (assetId) {
+    const { data, error } = await supabase
+      .from('event_surveillance_assets')
+      .update(next)
+      .eq('id', assetId)
+      .select('*')
+      .single();
+    if (error) throw error;
+    return { asset: data };
+  }
+  const { data, error } = await supabase
+    .from('event_surveillance_assets')
+    .insert({ ...next, created_at: new Date().toISOString() })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return { asset: data };
+}
+
+async function deleteEventSurveillanceAsset(payload = {}) {
+  const assetId = payload.assetId || payload.id;
+  if (!assetId) throw new Error('Missing assetId.');
+  const { error } = await supabase
+    .from('event_surveillance_assets')
+    .delete()
+    .eq('id', assetId);
+  if (error) throw error;
+  return { removed: true, assetId };
+}
+
+async function getEventAccessControlPoints(payload = {}) {
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id;
+  if (!eventId) throw new Error('Missing eventId for access control.');
+  const { data, error } = await supabase
+    .from('event_access_control_points')
+    .select('*')
+    .eq('event_id', eventId)
+    .order('updated_at', { ascending: false });
+  if (error) {
+    if (isMissingRelationError(error)) return { points: [] };
+    throw error;
+  }
+  return { points: data || [] };
+}
+
+async function upsertEventAccessControlPoint(payload = {}) {
+  const userId = ensureUserId(payload);
+  const point = payload.point || {};
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id || point.eventId || point.event_id;
+  if (!eventId) throw new Error('Missing eventId for access control point.');
+  const next = {
+    user_id: userId,
+    event_id: eventId,
+    control_type: normalizePlainText(point.controlType || point.control_type || 'checkpoint', 80) || 'checkpoint',
+    label: normalizePlainText(point.label || '', 220),
+    location: normalizePlainText(point.location || '', 220),
+    clearance_level: normalizePlainText(point.clearanceLevel || point.clearance_level || 'general', 80) || 'general',
+    assigned_staff: normalizePlainText(point.assignedStaff || point.assigned_staff || '', 220),
+    access_hours: normalizePlainText(point.accessHours || point.access_hours || '', 120),
+    notes: normalizePlainText(point.notes || '', 3000),
+    metadata: (point.metadata && typeof point.metadata === 'object') ? point.metadata : {},
+    updated_at: new Date().toISOString(),
+  };
+  const pointId = payload.pointId || payload.id || point.id;
+  if (pointId) {
+    const { data, error } = await supabase
+      .from('event_access_control_points')
+      .update(next)
+      .eq('id', pointId)
+      .select('*')
+      .single();
+    if (error) throw error;
+    return { point: data };
+  }
+  const { data, error } = await supabase
+    .from('event_access_control_points')
+    .insert({ ...next, created_at: new Date().toISOString() })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return { point: data };
+}
+
+async function deleteEventAccessControlPoint(payload = {}) {
+  const pointId = payload.pointId || payload.id;
+  if (!pointId) throw new Error('Missing pointId.');
+  const { error } = await supabase
+    .from('event_access_control_points')
+    .delete()
+    .eq('id', pointId);
+  if (error) throw error;
+  return { removed: true, pointId };
+}
+
+async function getEventCrowdPlan(payload = {}) {
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id;
+  if (!eventId) throw new Error('Missing eventId for crowd plan.');
+  const { data, error } = await supabase
+    .from('event_crowd_plans')
+    .select('*')
+    .eq('event_id', eventId)
+    .single();
+  if (error) {
+    if (isMissingRelationError(error) || error.code === 'PGRST116') return { plan: null };
+    throw error;
+  }
+  return { plan: data || null };
+}
+
+async function upsertEventCrowdPlan(payload = {}) {
+  const userId = ensureUserId(payload);
+  const plan = payload.plan || {};
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id || plan.eventId || plan.event_id;
+  if (!eventId) throw new Error('Missing eventId for crowd plan.');
+  const next = {
+    user_id: userId,
+    event_id: eventId,
+    barricade_plan: normalizePlainText(plan.barricadePlan || plan.barricade_plan || '', 3000),
+    queue_plan: normalizePlainText(plan.queuePlan || plan.queue_plan || '', 3000),
+    vip_lane_plan: normalizePlainText(plan.vipLanePlan || plan.vip_lane_plan || '', 3000),
+    ada_access_plan: normalizePlainText(plan.adaAccessPlan || plan.ada_access_plan || '', 3000),
+    emergency_assembly_points: normalizePlainText(plan.emergencyAssemblyPoints || plan.emergency_assembly_points || '', 3000),
+    staffing_ratio: normalizePlainText(plan.staffingRatio || plan.staffing_ratio || '', 120),
+    notes: normalizePlainText(plan.notes || '', 3000),
+    metadata: (plan.metadata && typeof plan.metadata === 'object') ? plan.metadata : {},
+    updated_at: new Date().toISOString(),
+  };
+  const planId = payload.planId || payload.id || plan.id;
+  if (planId) {
+    const { data, error } = await supabase
+      .from('event_crowd_plans')
+      .update(next)
+      .eq('id', planId)
+      .select('*')
+      .single();
+    if (error) throw error;
+    return { plan: data };
+  }
+  const { data, error } = await supabase
+    .from('event_crowd_plans')
+    .upsert({ ...next, created_at: new Date().toISOString() }, { onConflict: 'event_id' })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return { plan: data };
+}
+
+async function getEventMedicalPlan(payload = {}) {
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id;
+  if (!eventId) throw new Error('Missing eventId for medical plan.');
+  const { data, error } = await supabase
+    .from('event_medical_plans')
+    .select('*')
+    .eq('event_id', eventId)
+    .single();
+  if (error) {
+    if (isMissingRelationError(error) || error.code === 'PGRST116') return { plan: null };
+    throw error;
+  }
+  return { plan: data || null };
+}
+
+async function upsertEventMedicalPlan(payload = {}) {
+  const userId = ensureUserId(payload);
+  const plan = payload.plan || {};
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id || plan.eventId || plan.event_id;
+  if (!eventId) throw new Error('Missing eventId for medical plan.');
+  const next = {
+    user_id: userId,
+    event_id: eventId,
+    first_aid_station: normalizePlainText(plan.firstAidStation || plan.first_aid_station || '', 2000),
+    emt_staffing: normalizePlainText(plan.emtStaffing || plan.emt_staffing || '', 2000),
+    aed_locations: normalizePlainText(plan.aedLocations || plan.aed_locations || '', 2000),
+    cooling_stations: normalizePlainText(plan.coolingStations || plan.cooling_stations || '', 2000),
+    hydration_stations: normalizePlainText(plan.hydrationStations || plan.hydration_stations || '', 2000),
+    narcan_kits: normalizePlainText(plan.narcanKits || plan.narcan_kits || '', 2000),
+    ambulance_staging: normalizePlainText(plan.ambulanceStaging || plan.ambulance_staging || '', 2000),
+    emergency_numbers: normalizePlainText(plan.emergencyNumbers || plan.emergency_numbers || '', 2000),
+    staff_briefing_notes: normalizePlainText(plan.staffBriefingNotes || plan.staff_briefing_notes || '', 3000),
+    notes: normalizePlainText(plan.notes || '', 3000),
+    metadata: (plan.metadata && typeof plan.metadata === 'object') ? plan.metadata : {},
+    updated_at: new Date().toISOString(),
+  };
+  const planId = payload.planId || payload.id || plan.id;
+  if (planId) {
+    const { data, error } = await supabase
+      .from('event_medical_plans')
+      .update(next)
+      .eq('id', planId)
+      .select('*')
+      .single();
+    if (error) throw error;
+    return { plan: data };
+  }
+  const { data, error } = await supabase
+    .from('event_medical_plans')
+    .upsert({ ...next, created_at: new Date().toISOString() }, { onConflict: 'event_id' })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return { plan: data };
+}
+
+async function getEventSanitationPlan(payload = {}) {
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id;
+  if (!eventId) throw new Error('Missing eventId for sanitation plan.');
+  const { data, error } = await supabase
+    .from('event_sanitation_plans')
+    .select('*')
+    .eq('event_id', eventId)
+    .single();
+  if (error) {
+    if (isMissingRelationError(error) || error.code === 'PGRST116') return { plan: null };
+    throw error;
+  }
+  return { plan: data || null };
+}
+
+async function upsertEventSanitationPlan(payload = {}) {
+  const userId = ensureUserId(payload);
+  const plan = payload.plan || {};
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id || plan.eventId || plan.event_id;
+  if (!eventId) throw new Error('Missing eventId for sanitation plan.');
+  const next = {
+    user_id: userId,
+    event_id: eventId,
+    restrooms: normalizePlainText(plan.restrooms || '', 2000),
+    hand_washing_stations: normalizePlainText(plan.handWashingStations || plan.hand_washing_stations || '', 2000),
+    sanitizer_stations: normalizePlainText(plan.sanitizerStations || plan.sanitizer_stations || '', 2000),
+    waste_bins: normalizePlainText(plan.wasteBins || plan.waste_bins || '', 2000),
+    grease_disposal: normalizePlainText(plan.greaseDisposal || plan.grease_disposal || '', 2000),
+    food_vendor_permits_verified: toBool(plan.foodVendorPermitsVerified || plan.food_vendor_permits_verified, false),
+    ada_restroom_notes: normalizePlainText(plan.adaRestroomNotes || plan.ada_restroom_notes || '', 2000),
+    notes: normalizePlainText(plan.notes || '', 3000),
+    metadata: (plan.metadata && typeof plan.metadata === 'object') ? plan.metadata : {},
+    updated_at: new Date().toISOString(),
+  };
+  const planId = payload.planId || payload.id || plan.id;
+  if (planId) {
+    const { data, error } = await supabase
+      .from('event_sanitation_plans')
+      .update(next)
+      .eq('id', planId)
+      .select('*')
+      .single();
+    if (error) throw error;
+    return { plan: data };
+  }
+  const { data, error } = await supabase
+    .from('event_sanitation_plans')
+    .upsert({ ...next, created_at: new Date().toISOString() }, { onConflict: 'event_id' })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return { plan: data };
+}
+
+async function getEventWeatherPlan(payload = {}) {
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id;
+  if (!eventId) throw new Error('Missing eventId for weather plan.');
+  const { data, error } = await supabase
+    .from('event_weather_plans')
+    .select('*')
+    .eq('event_id', eventId)
+    .single();
+  if (error) {
+    if (isMissingRelationError(error) || error.code === 'PGRST116') return { plan: null };
+    throw error;
+  }
+  return { plan: data || null };
+}
+
+async function upsertEventWeatherPlan(payload = {}) {
+  const userId = ensureUserId(payload);
+  const plan = payload.plan || {};
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id || plan.eventId || plan.event_id;
+  if (!eventId) throw new Error('Missing eventId for weather plan.');
+  const next = {
+    user_id: userId,
+    event_id: eventId,
+    heat_index_threshold: normalizePlainText(plan.heatIndexThreshold || plan.heat_index_threshold || '', 120),
+    rain_plan: normalizePlainText(plan.rainPlan || plan.rain_plan || '', 2000),
+    wind_threshold: normalizePlainText(plan.windThreshold || plan.wind_threshold || '', 120),
+    lightning_protocol: normalizePlainText(plan.lightningProtocol || plan.lightning_protocol || '', 2000),
+    evacuation_shelter_location: normalizePlainText(plan.evacuationShelterLocation || plan.evacuation_shelter_location || '', 2000),
+    backup_indoor_venue: normalizePlainText(plan.backupIndoorVenue || plan.backup_indoor_venue || '', 220),
+    weather_monitor_assignee: normalizePlainText(plan.weatherMonitorAssignee || plan.weather_monitor_assignee || '', 220),
+    notes: normalizePlainText(plan.notes || '', 3000),
+    metadata: (plan.metadata && typeof plan.metadata === 'object') ? plan.metadata : {},
+    updated_at: new Date().toISOString(),
+  };
+  const planId = payload.planId || payload.id || plan.id;
+  if (planId) {
+    const { data, error } = await supabase
+      .from('event_weather_plans')
+      .update(next)
+      .eq('id', planId)
+      .select('*')
+      .single();
+    if (error) throw error;
+    return { plan: data };
+  }
+  const { data, error } = await supabase
+    .from('event_weather_plans')
+    .upsert({ ...next, created_at: new Date().toISOString() }, { onConflict: 'event_id' })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return { plan: data };
+}
+
+async function getEventCityCoordination(payload = {}) {
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id;
+  if (!eventId) throw new Error('Missing eventId for city coordination.');
+  const { data, error } = await supabase
+    .from('event_city_coordination')
+    .select('*')
+    .eq('event_id', eventId)
+    .single();
+  if (error) {
+    if (isMissingRelationError(error) || error.code === 'PGRST116') return { plan: null };
+    throw error;
+  }
+  return { plan: data || null };
+}
+
+async function upsertEventCityCoordination(payload = {}) {
+  const userId = ensureUserId(payload);
+  const plan = payload.plan || {};
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id || plan.eventId || plan.event_id;
+  if (!eventId) throw new Error('Missing eventId for city coordination.');
+  const next = {
+    user_id: userId,
+    event_id: eventId,
+    police_liaison: normalizePlainText(plan.policeLiaison || plan.police_liaison || '', 220),
+    off_duty_officers_count: Math.max(0, toInt(plan.offDutyOfficersCount || plan.off_duty_officers_count, 0)),
+    fire_department_contact: normalizePlainText(plan.fireDepartmentContact || plan.fire_department_contact || '', 220),
+    ems_contact: normalizePlainText(plan.emsContact || plan.ems_contact || '', 220),
+    city_event_contact: normalizePlainText(plan.cityEventContact || plan.city_event_contact || '', 220),
+    command_center_location: normalizePlainText(plan.commandCenterLocation || plan.command_center_location || '', 220),
+    communication_plan: normalizePlainText(plan.communicationPlan || plan.communication_plan || '', 3000),
+    notes: normalizePlainText(plan.notes || '', 3000),
+    metadata: (plan.metadata && typeof plan.metadata === 'object') ? plan.metadata : {},
+    updated_at: new Date().toISOString(),
+  };
+  const planId = payload.planId || payload.id || plan.id;
+  if (planId) {
+    const { data, error } = await supabase
+      .from('event_city_coordination')
+      .update(next)
+      .eq('id', planId)
+      .select('*')
+      .single();
+    if (error) throw error;
+    return { plan: data };
+  }
+  const { data, error } = await supabase
+    .from('event_city_coordination')
+    .upsert({ ...next, created_at: new Date().toISOString() }, { onConflict: 'event_id' })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return { plan: data };
+}
+
+async function getEventIncidents(payload = {}) {
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id;
+  if (!eventId) throw new Error('Missing eventId for incidents.');
+  const { data, error } = await supabase
+    .from('event_incidents')
+    .select('*')
+    .eq('event_id', eventId)
+    .order('occurred_at', { ascending: false });
+  if (error) {
+    if (isMissingRelationError(error)) return { incidents: [] };
+    throw error;
+  }
+  return { incidents: data || [] };
+}
+
+async function upsertEventIncident(payload = {}) {
+  const userId = ensureUserId(payload);
+  const incident = payload.incident || {};
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id || incident.eventId || incident.event_id;
+  if (!eventId) throw new Error('Missing eventId for incident.');
+  const next = {
+    user_id: userId,
+    event_id: eventId,
+    occurred_at: normalizeStageDateTime(incident.occurredAt || incident.occurred_at) || new Date().toISOString(),
+    location: normalizePlainText(incident.location || '', 220),
+    incident_type: normalizePlainText(incident.incidentType || incident.incident_type || 'other', 80) || 'other',
+    description: normalizePlainText(incident.description || '', 5000),
+    staff_involved: normalizePlainText(incident.staffInvolved || incident.staff_involved || '', 2200),
+    resolution: normalizePlainText(incident.resolution || '', 5000),
+    follow_up_required: toBool(incident.followUpRequired || incident.follow_up_required, false),
+    follow_up_notes: normalizePlainText(incident.followUpNotes || incident.follow_up_notes || '', 3000),
+    file_url: normalizePlainText(incident.fileUrl || incident.file_url || '', 1200),
+    visibility: normalizePlainText(incident.visibility || 'internal', 40).toLowerCase() || 'internal',
+    status: normalizePlainText(incident.status || 'open', 40).toLowerCase() || 'open',
+    metadata: (incident.metadata && typeof incident.metadata === 'object') ? incident.metadata : {},
+    updated_at: new Date().toISOString(),
+  };
+  if (!next.description) throw new Error('Incident description is required.');
+  const incidentId = payload.incidentId || payload.id || incident.id;
+  if (incidentId) {
+    const { data, error } = await supabase
+      .from('event_incidents')
+      .update(next)
+      .eq('id', incidentId)
+      .select('*')
+      .single();
+    if (error) throw error;
+    return { incident: data };
+  }
+  const { data, error } = await supabase
+    .from('event_incidents')
+    .insert({ ...next, created_at: new Date().toISOString() })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return { incident: data };
+}
+
+async function deleteEventIncident(payload = {}) {
+  const incidentId = payload.incidentId || payload.id;
+  if (!incidentId) throw new Error('Missing incidentId.');
+  const { error } = await supabase
+    .from('event_incidents')
+    .delete()
+    .eq('id', incidentId);
+  if (error) throw error;
+  return { removed: true, incidentId };
+}
+
+async function getEventSafetyChecklists(payload = {}) {
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id;
+  if (!eventId) throw new Error('Missing eventId for safety checklists.');
+  const { data, error } = await supabase
+    .from('event_safety_checklists')
+    .select('*, items:event_safety_checklist_items(*)')
+    .eq('event_id', eventId)
+    .order('updated_at', { ascending: false });
+  if (error) {
+    if (isMissingRelationError(error)) return { checklists: [] };
+    throw error;
+  }
+  return { checklists: data || [] };
+}
+
+async function upsertEventSafetyChecklist(payload = {}) {
+  const userId = ensureUserId(payload);
+  const checklist = payload.checklist || {};
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id || checklist.eventId || checklist.event_id;
+  if (!eventId) throw new Error('Missing eventId for safety checklist.');
+  const next = {
+    user_id: userId,
+    event_id: eventId,
+    title: normalizePlainText(checklist.title || 'Safety Checklist', 220) || 'Safety Checklist',
+    phase: normalizePlainText(checklist.phase || 'pre_show', 80) || 'pre_show',
+    status: normalizePlainText(checklist.status || 'draft', 40) || 'draft',
+    metadata: (checklist.metadata && typeof checklist.metadata === 'object') ? checklist.metadata : {},
+    updated_at: new Date().toISOString(),
+  };
+  const checklistId = payload.checklistId || payload.id || checklist.id;
+  if (checklistId) {
+    const { data, error } = await supabase
+      .from('event_safety_checklists')
+      .update(next)
+      .eq('id', checklistId)
+      .select('*')
+      .single();
+    if (error) throw error;
+    return { checklist: data };
+  }
+  const { data, error } = await supabase
+    .from('event_safety_checklists')
+    .insert({ ...next, created_at: new Date().toISOString() })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return { checklist: data };
+}
+
+async function upsertEventSafetyChecklistItem(payload = {}) {
+  const item = payload.item || {};
+  const checklistId = payload.checklistId || payload.parentId || item.checklistId || item.checklist_id;
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id || item.eventId || item.event_id;
+  if (!checklistId) throw new Error('Missing checklistId for safety checklist item.');
+  if (!eventId) throw new Error('Missing eventId for safety checklist item.');
+  const next = {
+    checklist_id: checklistId,
+    event_id: eventId,
+    sort_order: Number.isFinite(Number(item.sortOrder ?? item.sort_order)) ? Number(item.sortOrder ?? item.sort_order) : 0,
+    category: normalizePlainText(item.category || 'general', 80) || 'general',
+    label: normalizePlainText(item.label || '', 240),
+    required: item.required !== false,
+    status: normalizePlainText(item.status || 'todo', 40) || 'todo',
+    assignee_name: normalizePlainText(item.assigneeName || item.assignee_name || '', 220),
+    due_at: normalizeStageDateTime(item.dueAt || item.due_at) || null,
+    checked_at: normalizeStageDateTime(item.checkedAt || item.checked_at) || null,
+    notes: normalizePlainText(item.notes || '', 3000),
+    metadata: (item.metadata && typeof item.metadata === 'object') ? item.metadata : {},
+    updated_at: new Date().toISOString(),
+  };
+  if (!next.label) throw new Error('Safety checklist item label is required.');
+  const itemId = payload.itemId || payload.id || item.id;
+  if (itemId) {
+    const { data, error } = await supabase
+      .from('event_safety_checklist_items')
+      .update(next)
+      .eq('id', itemId)
+      .select('*')
+      .single();
+    if (error) throw error;
+    return { item: data };
+  }
+  const { data, error } = await supabase
+    .from('event_safety_checklist_items')
+    .insert({ ...next, created_at: new Date().toISOString() })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return { item: data };
+}
+
+async function deleteEventSafetyChecklistItem(payload = {}) {
+  const itemId = payload.itemId || payload.id;
+  if (!itemId) throw new Error('Missing itemId.');
+  const { error } = await supabase
+    .from('event_safety_checklist_items')
+    .delete()
+    .eq('id', itemId);
+  if (error) throw error;
+  return { removed: true, itemId };
+}
+
+function buildEmergencyActionPlanContent({
+  event = null,
+  profile = null,
+  permits = [],
+  insurance = [],
+  surveillanceAssets = [],
+  accessControlPoints = [],
+  crowdPlan = null,
+  medicalPlan = null,
+  sanitationPlan = null,
+  weatherPlan = null,
+  cityPlan = null,
+  incidents = [],
+}) {
+  const riskLevel = profile?.risk_level || 'low';
+  const eventTitle = event?.title || 'Event';
+  const eventDate = event?.date || 'TBD';
+  const eventTime = event?.time || '';
+  const permitSummary = (permits || []).map((row) => ({
+    type: row.permit_type || '',
+    status: row.status || '',
+    number: row.permit_number || '',
+    expiresAt: row.expires_at || null,
+  }));
+  const insuranceSummary = (insurance || []).map((row) => ({
+    type: row.policy_type || '',
+    status: row.status || '',
+    carrier: row.carrier || '',
+    expiresAt: row.expires_at || null,
+  }));
+  return {
+    eventOverview: {
+      title: eventTitle,
+      date: eventDate,
+      time: eventTime,
+      venue: event?.venue_name || event?.venue || '',
+      riskLevel,
+      riskScore: profile?.risk_score ?? 0,
+    },
+    chainOfCommand: {
+      responsiblePerson: profile?.responsible_person || '',
+      policeLiaison: cityPlan?.police_liaison || '',
+      fireDepartmentContact: cityPlan?.fire_department_contact || '',
+      emsContact: cityPlan?.ems_contact || '',
+      commandCenterLocation: cityPlan?.command_center_location || '',
+    },
+    evacuationProcedures: {
+      egressNotes: profile?.metadata?.egressNotes || '',
+      assemblyPoints: crowdPlan?.emergency_assembly_points || '',
+      weatherShelter: weatherPlan?.evacuation_shelter_location || '',
+      accessControl: accessControlPoints || [],
+    },
+    severeWeatherProtocol: {
+      weatherMonitor: weatherPlan?.weather_monitor_assignee || '',
+      heatIndexThreshold: weatherPlan?.heat_index_threshold || '',
+      windThreshold: weatherPlan?.wind_threshold || '',
+      rainPlan: weatherPlan?.rain_plan || '',
+      lightningProtocol: weatherPlan?.lightning_protocol || '',
+      backupVenue: weatherPlan?.backup_indoor_venue || '',
+    },
+    medicalResponseProtocol: {
+      firstAidStation: medicalPlan?.first_aid_station || '',
+      emtStaffing: medicalPlan?.emt_staffing || '',
+      aedLocations: medicalPlan?.aed_locations || '',
+      hydrationStations: medicalPlan?.hydration_stations || '',
+      emergencyNumbers: medicalPlan?.emergency_numbers || '',
+      narcanKits: medicalPlan?.narcan_kits || '',
+    },
+    securityEscalationProtocol: {
+      staffingRatio: profile?.security_staffing_ratio ?? null,
+      recommendations: profile?.recommendations || [],
+      surveillance: surveillanceAssets || [],
+      permits: permitSummary,
+      insurance: insuranceSummary,
+    },
+    sanitationAndHealth: {
+      restrooms: sanitationPlan?.restrooms || '',
+      handWashing: sanitationPlan?.hand_washing_stations || '',
+      sanitizerStations: sanitationPlan?.sanitizer_stations || '',
+      wasteBins: sanitationPlan?.waste_bins || '',
+      foodVendorPermitsVerified: sanitationPlan?.food_vendor_permits_verified === true,
+    },
+    incidentReportingProtocol: {
+      openIncidents: (incidents || []).filter((row) => String(row.status || '').toLowerCase() !== 'closed').length,
+      latestIncidents: (incidents || []).slice(0, 10).map((row) => ({
+        occurredAt: row.occurred_at || null,
+        type: row.incident_type || 'other',
+        status: row.status || 'open',
+        summary: row.description || '',
+      })),
+    },
+  };
+}
+
+async function generateEventEmergencyActionPlan(payload = {}) {
+  const userId = ensureUserId(payload);
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id;
+  if (!eventId) throw new Error('Missing eventId for emergency action plan.');
+
+  const [
+    eventRes,
+    profileRes,
+    permitsRes,
+    insuranceRes,
+    surveillanceRes,
+    accessRes,
+    crowdRes,
+    medicalRes,
+    sanitationRes,
+    weatherRes,
+    cityRes,
+    incidentsRes,
+    versionRes,
+  ] = await Promise.all([
+    supabase.from('events').select('*').eq('id', eventId).single(),
+    getEventSafetyProfile({ eventId }),
+    getEventPermits({ eventId }),
+    getEventInsurancePolicies({ eventId }),
+    getEventSurveillanceAssets({ eventId }),
+    getEventAccessControlPoints({ eventId }),
+    getEventCrowdPlan({ eventId }),
+    getEventMedicalPlan({ eventId }),
+    getEventSanitationPlan({ eventId }),
+    getEventWeatherPlan({ eventId }),
+    getEventCityCoordination({ eventId }),
+    getEventIncidents({ eventId }),
+    supabase
+      .from('event_emergency_action_plans')
+      .select('version_number')
+      .eq('event_id', eventId)
+      .order('version_number', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  if (eventRes.error) throw eventRes.error;
+  if (versionRes.error && !isMissingRelationError(versionRes.error)) throw versionRes.error;
+
+  const nextVersion = Math.max(1, Number(versionRes.data?.version_number || 0) + 1);
+  const content = buildEmergencyActionPlanContent({
+    event: eventRes.data || {},
+    profile: profileRes.profile || null,
+    permits: permitsRes.permits || [],
+    insurance: insuranceRes.policies || [],
+    surveillanceAssets: surveillanceRes.assets || [],
+    accessControlPoints: accessRes.points || [],
+    crowdPlan: crowdRes.plan || null,
+    medicalPlan: medicalRes.plan || null,
+    sanitationPlan: sanitationRes.plan || null,
+    weatherPlan: weatherRes.plan || null,
+    cityPlan: cityRes.plan || null,
+    incidents: incidentsRes.incidents || [],
+  });
+  const shareSlug = `${eventId.slice(0, 8)}-eap-v${nextVersion}`;
+  const insertRow = {
+    user_id: userId,
+    event_id: eventId,
+    version_number: nextVersion,
+    title: normalizePlainText(payload.title || 'Emergency Action Plan', 220) || 'Emergency Action Plan',
+    risk_level: content.eventOverview.riskLevel || 'low',
+    content_json: content,
+    generated_by: normalizePlainText(payload.generatedBy || payload.generated_by || '', 220) || (payload.userEmail || ''),
+    generated_at: new Date().toISOString(),
+    share_slug: shareSlug,
+    metadata: (payload.metadata && typeof payload.metadata === 'object') ? payload.metadata : {},
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  const { data, error } = await supabase
+    .from('event_emergency_action_plans')
+    .insert(insertRow)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return { eap: data, content };
+}
+
+async function getEventEmergencyActionPlans(payload = {}) {
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id;
+  if (!eventId) throw new Error('Missing eventId for emergency action plans.');
+  const { data, error } = await supabase
+    .from('event_emergency_action_plans')
+    .select('*')
+    .eq('event_id', eventId)
+    .order('version_number', { ascending: false })
+    .order('generated_at', { ascending: false });
+  if (error) {
+    if (isMissingRelationError(error)) return { eaps: [] };
+    throw error;
+  }
+  return { eaps: data || [] };
+}
+
+async function getEventSafetyDashboard(payload = {}) {
+  const eventId = payload.eventId || payload.bookingId || payload.event?.id;
+  if (!eventId) throw new Error('Missing eventId for safety dashboard.');
+  const [
+    profileRes,
+    permitsRes,
+    insuranceRes,
+    surveillanceRes,
+    accessRes,
+    crowdRes,
+    medicalRes,
+    sanitationRes,
+    weatherRes,
+    cityRes,
+    incidentsRes,
+    checklistsRes,
+  ] = await Promise.all([
+    getEventSafetyProfile({ eventId }),
+    getEventPermits({ eventId }),
+    getEventInsurancePolicies({ eventId }),
+    getEventSurveillanceAssets({ eventId }),
+    getEventAccessControlPoints({ eventId }),
+    getEventCrowdPlan({ eventId }),
+    getEventMedicalPlan({ eventId }),
+    getEventSanitationPlan({ eventId }),
+    getEventWeatherPlan({ eventId }),
+    getEventCityCoordination({ eventId }),
+    getEventIncidents({ eventId }),
+    getEventSafetyChecklists({ eventId }),
+  ]);
+
+  const permits = permitsRes.permits || [];
+  const policies = insuranceRes.policies || [];
+  const incidents = incidentsRes.incidents || [];
+  const surveillanceAssets = surveillanceRes.assets || [];
+  const checklists = checklistsRes.checklists || [];
+  const checklistItems = checklists.flatMap((row) => Array.isArray(row.items) ? row.items : []);
+  const checklistDone = checklistItems.filter((row) => String(row.status || '').toLowerCase() === 'done').length;
+  const checklistPct = checklistItems.length ? Math.round((checklistDone / checklistItems.length) * 100) : 0;
+
+  const expiredPermits = permits.filter((row) => isExpiredDateTime(row.expires_at));
+  const expiredPolicies = policies.filter((row) => isExpiredDateTime(row.expires_at));
+  const monitoringGaps = surveillanceAssets.filter((row) => !normalizePlainText(row.monitoring_assignee || '')).length;
+  const retentionGaps = surveillanceAssets.filter((row) => !Number.isFinite(Number(row.retention_days)) || Number(row.retention_days) <= 0).length;
+  const openIncidents = incidents.filter((row) => String(row.status || '').toLowerCase() !== 'closed');
+  const profile = profileRes.profile || null;
+  const riskLevel = profile?.risk_level || 'low';
+  const riskScore = Number(profile?.risk_score || 0);
+
+  const complianceAlerts = [
+    ...expiredPermits.map((row) => `Permit expired: ${row.permit_type || 'Permit'}`),
+    ...expiredPolicies.map((row) => `Insurance expired: ${row.policy_type || 'Policy'}`),
+  ];
+  if (monitoringGaps > 0) complianceAlerts.push(`Surveillance monitoring not assigned on ${monitoringGaps} asset(s).`);
+  if (retentionGaps > 0) complianceAlerts.push(`Surveillance retention not configured on ${retentionGaps} asset(s).`);
+  if (!medicalRes.plan) complianceAlerts.push('Medical/first aid plan is missing.');
+  if (!weatherRes.plan) complianceAlerts.push('Weather contingency plan is missing.');
+  if (!cityRes.plan) complianceAlerts.push('Law enforcement and city coordination plan is missing.');
+
+  return {
+    dashboard: {
+      riskLevel,
+      riskScore,
+      permitStatus: {
+        total: permits.length,
+        expired: expiredPermits.length,
+        pending: permits.filter((row) => String(row.status || '').toLowerCase() === 'pending').length,
+      },
+      insuranceStatus: {
+        total: policies.length,
+        expired: expiredPolicies.length,
+      },
+      cctvSummary: {
+        totalAssets: surveillanceAssets.length,
+        monitoringGaps,
+        retentionGaps,
+      },
+      accessControlSummary: {
+        totalPoints: (accessRes.points || []).length,
+      },
+      crowdManagementReady: !!crowdRes.plan,
+      medicalReadiness: {
+        ready: !!medicalRes.plan,
+      },
+      sanitationReadiness: {
+        ready: !!sanitationRes.plan,
+      },
+      weatherAlert: {
+        hasPlan: !!weatherRes.plan,
+        monitorAssigned: !!normalizePlainText(weatherRes.plan?.weather_monitor_assignee || ''),
+      },
+      openIncidents: openIncidents.length,
+      checklistCompletionPercent: checklistPct,
+      complianceAlerts,
+    },
+  };
 }
 
 function normalizeCheckinInput(input = {}) {

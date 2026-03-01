@@ -3,6 +3,7 @@ import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { useVenue } from '../context/VenueContext';
 import { parseLocalDate } from '../lib/dateUtils';
 import TaylorZoneReferenceStrip from '../components/TaylorZoneReferenceStrip';
+import CircleAvatar from '../components/CircleAvatar';
 import { TAYLOR_FRAMEWORK_ATTRIBUTION, WORKFLOW_SECTIONS } from '../constants/workflowSections';
 import {
   PRODUCTION_ROLE_DEPARTMENTS,
@@ -880,12 +881,15 @@ export default function ProductionOpsHub() {
               {upcomingEvents.map((event) => (
                 <div key={event.id} className="border border-gray-200 rounded p-3">
                   <div className="flex items-start justify-between gap-3 flex-wrap">
-                    <div>
-                      <p className="font-semibold text-sm m-0">{event.title || 'Untitled event'}</p>
-                      <p className="text-xs text-gray-500 m-0 mt-1">
-                        {formatEventDate(event)} · {event.venue || 'Venue TBD'}
-                        {event.performanceZoneName ? ` · ${event.performanceZoneName}` : ''}
-                      </p>
+                    <div className="flex items-start gap-2 min-w-0">
+                      <CircleAvatar entity={event} type="event" name={event.title || 'Untitled event'} size="w-8 h-8" textSize="text-[10px]" />
+                      <div className="min-w-0">
+                        <p className="font-semibold text-sm m-0">{event.title || 'Untitled event'}</p>
+                        <p className="text-xs text-gray-500 m-0 mt-1">
+                          {formatEventDate(event)} · {event.venue || 'Venue TBD'}
+                          {event.performanceZoneName ? ` · ${event.performanceZoneName}` : ''}
+                        </p>
+                      </div>
                     </div>
                     <div className="flex gap-2 flex-wrap text-xs">
                       <Link to={`/events/${event.id}?opsTab=staffing`} className="px-2 py-1 rounded border border-gray-300 text-gray-700 no-underline">Staffing</Link>
@@ -926,8 +930,13 @@ export default function ProductionOpsHub() {
           ) : (
             <div className="space-y-4">
               <div className="p-3 rounded border border-gray-200">
-                <p className="text-sm font-semibold m-0">{selectedEvent.title || 'Selected event'}</p>
-                <p className="text-xs text-gray-500 m-0 mt-1">{formatEventDate(selectedEvent)} · {selectedEvent.venue || 'Venue TBD'}</p>
+                <div className="flex items-center gap-2">
+                  <CircleAvatar entity={selectedEvent} type="event" name={selectedEvent.title || 'Selected event'} size="w-8 h-8" textSize="text-[10px]" />
+                  <div>
+                    <p className="text-sm font-semibold m-0">{selectedEvent.title || 'Selected event'}</p>
+                    <p className="text-xs text-gray-500 m-0 mt-1">{formatEventDate(selectedEvent)} · {selectedEvent.venue || 'Venue TBD'}</p>
+                  </div>
+                </div>
                 <div className="mt-2 flex gap-2 flex-wrap text-xs">
                   <Link to={`/events/${selectedEvent.id}?opsTab=production`} className="px-2 py-1 rounded border border-gray-300 text-gray-700 no-underline">Production Tab</Link>
                   <Link to={`/events/${selectedEvent.id}?opsTab=concessions`} className="px-2 py-1 rounded border border-gray-300 text-gray-700 no-underline">Concessions Tab</Link>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useVenue } from '../context/VenueContext';
 import {
   PRODUCTION_PHASE_META,
@@ -15,10 +15,12 @@ import {
   resolveWorkflowVariantFromSearch,
   WORKFLOW_VARIANT_META,
 } from '../constants/pageFlow';
+import { HELP_MENU_LINKS } from '../constants/helpCenterContent';
 
 const FOCUS_OPTIONS = [
   { key: 'all', label: 'All Sections', icon: '🧭', desc: 'Full end-to-end flow.' },
   { key: 'ai_intake', label: 'AI Intake', icon: '📥', desc: 'Voice, email, and upload intake to auto-build form drafts.' },
+  { key: 'chat_assistant', label: 'Buddy the CatBot', icon: '🐈‍⬛', desc: 'Get guided next steps with one-click links.' },
   { key: 'marketing_distribution', label: 'Marketing + Distribution', icon: '🚀', desc: 'Only campaign creation and channel delivery.' },
   { key: 'production_ops', label: 'Production Ops', icon: '🎬', desc: 'Only production, run-of-show, and staffing readiness.' },
   { key: 'booking_setup', label: 'Booking + Setup', icon: '🏗️', desc: 'Only setup, reusable libraries, and booking basics.' },
@@ -32,16 +34,27 @@ const WORKFLOW_VARIANT_OPTIONS = [
   { key: 'legal', label: WORKFLOW_VARIANT_META.legal.label, desc: 'CLE and legal event language for panels and registrations.' },
 ];
 
+const CORE_MODULE_OVERVIEW = [
+  { label: 'Events', desc: 'Build the event record once and use it everywhere else.' },
+  { label: 'Plots & Layouts', desc: 'Map stage, room, infrastructure, and safety layers with publish controls.' },
+  { label: 'Lighting + Sound + Projection', desc: 'Track technical metadata and generate department-ready paperwork.' },
+  { label: 'Timeline Editor', desc: 'Coordinate multi-department cues and timing from one synchronized timeline.' },
+  { label: 'Production Ops', desc: 'Run staffing, inventory, logistics, contracts, and day-of-show execution.' },
+  { label: 'Safety + Risk', desc: 'Track permits, insurance, incidents, and emergency action plans with visibility.' },
+  { label: 'Rehearsal Calendar + Google Sync', desc: 'Keep every dated item synchronized to calendar operations.' },
+  { label: 'AI Equipment Recognition', desc: 'Convert equipment photos into structured, reusable inventory records.' },
+];
+
 const SECTION_ROUTE_MAP = {
   account_profile: {
     path: '/settings',
     requiresEvent: false,
     requiresVenue: false,
     hintByVariant: {
-      default: 'Open settings and profile details.',
-      theater: 'Stage Manager prep: confirm profile, contacts, and crew communication defaults.',
-      music: 'Promoter prep: confirm profile, contacts, and campaign communication defaults.',
-      legal: 'Legal Coordinator prep: confirm profile, contacts, and compliance communication defaults.',
+      default: 'Open settings, profile details, and floating button preferences.',
+      theater: 'Stage Manager prep: confirm profile, contacts, crew communication defaults, and floating button style.',
+      music: 'Promoter prep: confirm profile, contacts, campaign communication defaults, and floating button style.',
+      legal: 'Legal Coordinator prep: confirm profile, contacts, compliance communication defaults, and floating button style.',
     },
   },
   reusable_libraries: {
@@ -53,6 +66,17 @@ const SECTION_ROUTE_MAP = {
       theater: 'Stage Manager setup: lock theater, room, and reusable production libraries.',
       music: 'Promoter setup: lock frequent venues and recurring act libraries.',
       legal: 'Legal Coordinator setup: lock recurring venues, speaker groups, and panel libraries.',
+    },
+  },
+  chat_assistant: {
+    path: '/buddy',
+    requiresEvent: false,
+    requiresVenue: false,
+    hintByVariant: {
+      default: 'Open Buddy the CatBot for guided next steps.',
+      theater: 'Open Buddy the CatBot for stage-management-focused guidance.',
+      music: 'Open Buddy the CatBot for promoter-focused guidance.',
+      legal: 'Open Buddy the CatBot for legal-coordinator-focused guidance.',
     },
   },
   ai_intake: {
@@ -75,6 +99,17 @@ const SECTION_ROUTE_MAP = {
       theater: 'Stage Manager workspace: costumes, set, dressing rooms, and parking plans.',
       music: 'Promoter workspace: hospitality, dressing, parking, and day-of-show logistics.',
       legal: 'Legal Coordinator workspace: room logistics, credentialing, and event operations details.',
+    },
+  },
+  safety_risk: {
+    path: '/safety-risk',
+    requiresEvent: true,
+    requiresVenue: false,
+    hintByVariant: {
+      default: 'Open Safety + Risk Management for compliance and emergency readiness.',
+      theater: 'Stage Manager safety lane: exits, compliance, incidents, and emergency action plans.',
+      music: 'Promoter safety lane: security, permits, weather contingencies, and incident reporting.',
+      legal: 'Legal Coordinator safety lane: compliance-ready risk, permits, and emergency planning.',
     },
   },
   staffing_workforce: {
@@ -181,12 +216,12 @@ const ROLE_STEP_OVERRIDES = {
     ],
     production_ops: [
       {
-        title: 'Set Plot, Inputs, and Cue Tech',
-        desc: 'Prepare stage plot, patching, monitors, and tech requirements for cue-safe execution.',
+        title: 'Build Stage, Power, and Safety Plots',
+        desc: 'Build plot layers for stage, audio, LX, power, and egress so departments share one clear map.',
       },
       {
-        title: 'Build Calling Script Workflow',
-        desc: 'Map cue flow, call timing, and owner responsibilities from preshow through strike.',
+        title: 'Share and Publish Plot Versions',
+        desc: 'Share plots to event/org/venue collaborators, publish a version, then return to draft and republish anytime.',
       },
       {
         title: 'Load Department Modules',
@@ -194,7 +229,25 @@ const ROLE_STEP_OVERRIDES = {
       },
       {
         title: 'Run Readiness Checklists',
-        desc: 'Use checklists to verify load-in, rehearsal, show call, and strike readiness.',
+        desc: 'Use checklists to verify load-in, before-doors, show call, strike, and closeout readiness.',
+      },
+    ],
+    safety_risk: [
+      {
+        title: 'Score theater event risk',
+        desc: 'Set attendance, weather, staffing, and fire factors so risk scoring reflects live production conditions.',
+      },
+      {
+        title: 'Lock permits and policy coverage',
+        desc: 'Confirm permits, insurance, and COI status before performance day.',
+      },
+      {
+        title: 'Coordinate security and medical readiness',
+        desc: 'Track screening, surveillance, crowd control, and first-aid readiness with assigned owners.',
+      },
+      {
+        title: 'Generate the EAP packet',
+        desc: 'Publish the Emergency Action Plan with command chain, egress routes, and escalation protocol.',
       },
     ],
     staffing_workforce: [
@@ -269,6 +322,24 @@ const ROLE_STEP_OVERRIDES = {
         desc: 'Deliver board and stakeholder reporting with ticketing and ops outcomes in one packet.',
       },
     ],
+    chat_assistant: [
+      {
+        title: 'Ask Buddy the CatBot in plain language',
+        desc: 'Describe what is stuck, and Buddy returns stage-management-friendly next steps.',
+      },
+      {
+        title: 'Get role-specific links',
+        desc: 'Buddy gives direct links to the exact production section you need right now.',
+      },
+      {
+        title: 'Turn notes into a checklist',
+        desc: 'Paste rehearsal or ops notes and Buddy returns an actionable checklist.',
+      },
+      {
+        title: 'Keep the team aligned',
+        desc: 'Use Buddy responses as quick call-sheet guidance for your next move.',
+      },
+    ],
   },
   music: {
     account_profile: [
@@ -327,12 +398,12 @@ const ROLE_STEP_OVERRIDES = {
     ],
     production_ops: [
       {
-        title: 'Set Stage Plot and Tech Needs',
-        desc: 'Prepare inputs, monitor needs, backline, and power so the show is technically ready.',
+        title: 'Build Stage, Power, and Safety Plots',
+        desc: 'Build plot layers for stage, audio, LX, power, and egress so crew and venue teams align fast.',
       },
       {
-        title: 'Build Show Timeline Workflow',
-        desc: 'Map load-in, soundcheck, doors, set times, changeovers, and strike responsibilities.',
+        title: 'Share and Publish Plot Versions',
+        desc: 'Share plots to event/org/venue stakeholders, publish current version, then move back to draft for revisions.',
       },
       {
         title: 'Load Event Operations Modules',
@@ -340,7 +411,25 @@ const ROLE_STEP_OVERRIDES = {
       },
       {
         title: 'Run Day-of-Show Checklists',
-        desc: 'Use readiness checklists to keep operations tight from load-in to closeout.',
+        desc: 'Use readiness checklists to keep operations tight from load-in through before-doors and closeout.',
+      },
+    ],
+    safety_risk: [
+      {
+        title: 'Score show risk by venue conditions',
+        desc: 'Set risk inputs for attendance, alcohol, weather, and staffing to get an accurate show-day risk level.',
+      },
+      {
+        title: 'Track permits, insurance, and contracts',
+        desc: 'Confirm permit and coverage status for venue, city, and partner requirements.',
+      },
+      {
+        title: 'Map security and incident readiness',
+        desc: 'Set screening points, surveillance assignments, crowd controls, and medical support.',
+      },
+      {
+        title: 'Generate emergency action plan',
+        desc: 'Publish an EAP that teams can execute from before-doors through closeout.',
       },
     ],
     staffing_workforce: [
@@ -415,6 +504,24 @@ const ROLE_STEP_OVERRIDES = {
         desc: 'Deliver promoter, venue, and stakeholder reporting in one clean summary packet.',
       },
     ],
+    chat_assistant: [
+      {
+        title: 'Ask Buddy the CatBot what to do next',
+        desc: 'Describe your situation, and Buddy returns promoter-specific actions.',
+      },
+      {
+        title: 'Jump via one-click links',
+        desc: 'Buddy links directly to events, IMC composer, staffing, and ops tabs.',
+      },
+      {
+        title: 'Convert loose ideas into plan',
+        desc: 'Paste notes and Buddy returns a practical rollout checklist.',
+      },
+      {
+        title: 'Use Buddy for fast decisions',
+        desc: 'Use quick answers to keep campaign and show execution moving.',
+      },
+    ],
   },
   legal: {
     account_profile: [
@@ -473,12 +580,12 @@ const ROLE_STEP_OVERRIDES = {
     ],
     production_ops: [
       {
-        title: 'Set Program AV and Tech Needs',
-        desc: 'Set microphone, AV, and room requirements for reliable legal session delivery.',
+        title: 'Build Room, AV, and Safety Plots',
+        desc: 'Build room, AV, power, and egress plot layers so legal sessions run with clean technical coverage.',
       },
       {
-        title: 'Build Program Timeline Workflow',
-        desc: 'Map speaker flow, check-in, session timing, and closeout responsibilities.',
+        title: 'Share and Publish Plot Versions',
+        desc: 'Share plots with event/org/venue teams, publish approved versions, then switch to draft for updates and republish.',
       },
       {
         title: 'Load Event Operations Modules',
@@ -487,6 +594,24 @@ const ROLE_STEP_OVERRIDES = {
       {
         title: 'Run Readiness and Compliance Checklists',
         desc: 'Use checklists to verify operational and compliance readiness before go-live.',
+      },
+    ],
+    safety_risk: [
+      {
+        title: 'Score legal event risk and exposure',
+        desc: 'Set capacity, weather, and staffing factors so risk classification stays current.',
+      },
+      {
+        title: 'Track permit and policy compliance',
+        desc: 'Track permit status, insurance validity, and supporting file links for compliance visibility.',
+      },
+      {
+        title: 'Confirm screening and medical coverage',
+        desc: 'Set access points, incident response coverage, and medical readiness notes.',
+      },
+      {
+        title: 'Generate emergency action plan',
+        desc: 'Create the legal-event EAP with response chain, routes, and escalation protocol.',
       },
     ],
     staffing_workforce: [
@@ -561,6 +686,24 @@ const ROLE_STEP_OVERRIDES = {
         desc: 'Deliver legal program performance reporting to partners and stakeholders.',
       },
     ],
+    chat_assistant: [
+      {
+        title: 'Ask Buddy the CatBot for legal-event guidance',
+        desc: 'Describe the blocker, and Buddy returns coordinator-focused steps.',
+      },
+      {
+        title: 'Follow one-click navigation',
+        desc: 'Buddy provides direct links to the right event, ops, and communication pages.',
+      },
+      {
+        title: 'Convert email notes into task list',
+        desc: 'Paste panel or logistics notes and Buddy returns a clean execution checklist.',
+      },
+      {
+        title: 'Stay compliant and on schedule',
+        desc: 'Use Buddy to keep scheduling, messaging, and reporting aligned.',
+      },
+    ],
   },
 };
 
@@ -570,36 +713,43 @@ const ROLE_SECTION_SUMMARY_OVERRIDES = {
     ai_intake: 'Ingest rehearsal emails and source docs fast, then approve clean structured drafts for production planning.',
     reusable_libraries: 'Store reusable theaters, teams, and stage-zone setups to avoid rework every show.',
     production_ops: 'Coordinate cue-critical departments so stage, deck, and FOH stay synchronized.',
+    safety_risk: 'Run theater safety command for screening, egress, incidents, and EAP before every performance.',
     staffing_workforce: 'Assign and confirm theater crew calls so every role is covered at call time.',
     capture_pipeline: 'Plan rehearsal/performance capture inputs and publishing outputs from one production lane.',
     marketing_distribution: 'Launch opening-night messaging and distribution while preserving show voice and timing.',
     ticketing_revenue: 'Track seats, settlement signals, and stakeholder reporting for each performance run.',
+    chat_assistant: 'Use Buddy the CatBot for stage-manager guidance, quick routing, and practical next-action checklists.',
   },
   music: {
     account_profile: 'Set a promoter-ready profile so booking, marketing, and audience comms stay consistent.',
     ai_intake: 'Ingest booking emails, artist notes, and source files, then convert them into ready event records.',
     reusable_libraries: 'Store reusable acts and venues so recurring shows can be launched quickly.',
     production_ops: 'Coordinate day-of-show operations from stage needs through hospitality and logistics.',
+    safety_risk: 'Run show-level safety for security staffing, weather plans, permits, and emergency response.',
     staffing_workforce: 'Assign and confirm venue/stage teams so doors, bar, security, and merch are covered.',
     capture_pipeline: 'Manage live capture inputs and distribution outputs for social, YouTube, and podcast reuse.',
     marketing_distribution: 'Launch show campaigns across channels with one workflow and clear delivery visibility.',
     ticketing_revenue: 'Track sales pace, settlement outcomes, and partner-ready reporting from one event record.',
+    chat_assistant: 'Use Buddy the CatBot for promoter guidance, campaign troubleshooting, and one-click execution links.',
   },
   legal: {
     account_profile: 'Set a legal-program profile so speaker, attendee, and compliance communication stays precise.',
     ai_intake: 'Ingest legal event emails and source docs, then approve structured records for accurate program setup.',
     reusable_libraries: 'Store reusable panel, speaker, and venue records for faster legal event setup.',
     production_ops: 'Coordinate room logistics, AV, and support workflows for dependable legal program execution.',
+    safety_risk: 'Run compliance-safe risk and emergency planning for legal events and stakeholder confidence.',
     staffing_workforce: 'Assign and confirm moderator, AV, and check-in coverage for each legal event window.',
     capture_pipeline: 'Manage panel/session capture inputs and publishing outputs with controlled workflows.',
     marketing_distribution: 'Launch legal-event announcements and reminders with channel-level review and tracking.',
     ticketing_revenue: 'Track registration signals, reconciliation notes, and stakeholder reporting in one place.',
+    chat_assistant: 'Use Buddy the CatBot for legal coordinator guidance, routing, and compliance-aware next steps.',
   },
 };
 
 function sectionMatchesFocus(section, focus) {
   if (focus === 'all') return true;
   if (focus === 'ai_intake') return section.id === 'ai_intake';
+  if (focus === 'chat_assistant') return section.id === 'chat_assistant';
   return section.track === focus;
 }
 
@@ -810,11 +960,44 @@ export default function WorkflowGuide() {
       <div>
         <h1 className="text-3xl mb-2" style={{ fontFamily: "'Playfair Display', serif" }}>📖 How It Works</h1>
         <p className="text-gray-500 mb-3">
-          You bring the art. I will help with the logistics. This is your color-coded map of the full machine:
-          use Guided Mode for a step-by-step walk, or jump straight into the section you need right now.
+          IMC Machine is your connected operating system for live events. I keep events, production, safety, staffing, and distribution in one place so your team can move without chaos.
+          Use Guided Mode for a step-by-step walk, jump straight into the section you need, or ask Buddy the CatBot for fast routing.
+        </p>
+        <p className="text-xs text-gray-500 mb-2">
+          Mobile tip: floating controls (Back to Top and Buddy) are adjustable in <Link to="/settings" className="text-[#0d1b2a] font-semibold">Settings</Link>.
         </p>
         <p className="text-xs text-[#0d1b2a] m-0">
           Active role context: <span className="font-semibold">{roleLabel}</span>
+        </p>
+      </div>
+
+      <div className="card border border-[#0d1b2a1a] bg-[#f7f9ff]">
+        <h2 className="text-lg m-0 mb-2">What IMC Machine Covers</h2>
+        <p className="text-sm text-gray-600 mt-0 mb-3">
+          This workspace is built for artists, venues, production managers, touring teams, galleries, festivals, and program leads.
+          I connect creative planning with operational execution, then protect that work with versioning and collaboration controls.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3">
+          {CORE_MODULE_OVERVIEW.map((module) => (
+            <div key={module.label} className="rounded border border-white bg-white px-3 py-2">
+              <p className="m-0 text-sm font-semibold">{module.label}</p>
+              <p className="m-0 text-xs text-gray-500">{module.desc}</p>
+            </div>
+          ))}
+        </div>
+        <div className="rounded border border-[#0d1b2a1a] bg-white px-3 py-2">
+          <p className="m-0 text-xs font-semibold text-[#0d1b2a]">Documentation Center</p>
+          <p className="m-0 text-xs text-gray-500">Use these pages for deep guidance, architecture context, and fast Buddy routing.</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {HELP_MENU_LINKS.map((link) => (
+              <Link key={`workflow-doc-${link.key}`} to={link.path} className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 no-underline">
+                {link.icon} {link.label}
+              </Link>
+            ))}
+          </div>
+        </div>
+        <p className="text-xs text-gray-500 mt-3 mb-0">
+          Why this is industry-grade: module data is connected, documentation is versioned, and collaboration permissions are explicit by event, org, and venue scope.
         </p>
       </div>
 

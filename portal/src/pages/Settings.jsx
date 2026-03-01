@@ -2,10 +2,19 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useVenue } from '../context/VenueContext';
 import { Link, useSearchParams } from 'react-router-dom';
+import CircleAvatar from '../components/CircleAvatar';
+import { uploadImageAsset } from '../services/mediaUpload';
+import { resolveMainPosterUrl } from '../lib/entityAvatar';
+import {
+  FLOATING_BUTTON_MODE_OPTIONS,
+  getUserPrefs,
+  normalizeFloatingButtonsMode,
+  saveUserPrefs,
+} from '../lib/userPrefs';
 
 export default function Settings() {
   const { user, logout } = useAuth();
-  const { venue, saveVenue } = useVenue();
+  const { venue, events, saveVenue } = useVenue();
   const [searchParams] = useSearchParams();
   
   // Settings state
@@ -21,6 +30,9 @@ export default function Settings() {
     emailOnEventCreated: false,
     emailWeeklyReport: true,
     smsReminders: false,
+  });
+  const [uiPreferences, setUiPreferences] = useState({
+    floatingButtonsMode: 'compact',
   });
 
   const [connections, setConnections] = useState({
@@ -39,6 +51,8 @@ export default function Settings() {
   const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const [connectingTo, setConnectingTo] = useState(null);
   const [showToast, setShowToast] = useState(null);
+  const [profileImageStatus, setProfileImageStatus] = useState('');
+  const latestPosterUrl = resolveMainPosterUrl((events || []).find((event) => resolveMainPosterUrl(event)) || {});
 
   // Load user preferences on mount
   useEffect(() => {
@@ -59,13 +73,14 @@ export default function Settings() {
     if (!user?.id) return;
 
     try {
-      // Load from a preferences table or use defaults
-      // For now, we'll use localStorage as a fallback
-      const savedPrefs = localStorage.getItem(`user_prefs_${user.id}`);
-      if (savedPrefs) {
-        const prefs = JSON.parse(savedPrefs);
-        if (prefs.notifications) setNotifications(prefs.notifications);
+      const prefs = getUserPrefs(user.id);
+      if (prefs.notifications) {
+        setNotifications(prev => ({ ...prev, ...prefs.notifications }));
       }
+      setUiPreferences(prev => ({
+        ...prev,
+        floatingButtonsMode: normalizeFloatingButtonsMode(prefs?.ui?.floatingButtonsMode),
+      }));
     } catch (err) {
       console.error('Failed to load preferences:', err);
     }
@@ -150,14 +165,21 @@ export default function Settings() {
 
   const handleSaveNotifications = () => {
     try {
-      localStorage.setItem(`user_prefs_${user.id}`, JSON.stringify({
-        notifications,
-        updatedAt: new Date().toISOString(),
-      }));
+      saveUserPrefs(user.id, { notifications });
       alert('Done. Notification preferences are saved.');
     } catch (err) {
       console.error('Failed to save notifications:', err);
       alert('I hit a snag saving notification preferences.');
+    }
+  };
+
+  const handleSaveInterfacePreferences = () => {
+    try {
+      saveUserPrefs(user.id, { ui: { floatingButtonsMode: uiPreferences.floatingButtonsMode } });
+      alert('Perfect. Floating button preferences are saved.');
+    } catch (err) {
+      console.error('Failed to save interface preferences:', err);
+      alert('I hit a snag saving interface preferences.');
     }
   };
 
@@ -179,6 +201,35 @@ export default function Settings() {
     } catch (err) {
       console.error('Failed to delete account:', err);
       alert('I hit a snag deleting the account: ' + err.message);
+    }
+  };
+
+  const handleProfileImageUpload = async () => {
+    try {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.onchange = async () => {
+        const file = input.files?.[0];
+        if (!file) return;
+        try {
+          if (!user?.id) throw new Error('User session is required before upload');
+          setProfileImageStatus('Uploading profile image...');
+          const url = await uploadImageAsset({
+            file,
+            userId: user.id,
+            category: 'profile',
+            label: `${user.name || 'user'}-avatar`,
+          });
+          await saveVenue({ avatarUrl: url });
+          setProfileImageStatus('Profile image saved.');
+        } catch (err) {
+          setProfileImageStatus(`Profile image upload failed: ${err.message}`);
+        }
+      };
+      input.click();
+    } catch (err) {
+      setProfileImageStatus(`Profile image upload failed: ${err.message}`);
     }
   };
 
@@ -259,6 +310,29 @@ export default function Settings() {
       {/* Account Information */}
       <div className="card mb-6">
         <h3 className="text-lg mb-4">Account Information</h3>
+        <div className="mb-4 p-3 border border-gray-200 rounded-lg bg-[#faf8f3]">
+          <p className="text-xs font-semibold text-gray-700 m-0 mb-2">Circle Profile Picture (left of name)</p>
+          <div className="flex items-center gap-3">
+            <CircleAvatar
+              entity={{
+                name: user?.name || user?.email || '',
+                avatarUrl: venue.avatarUrl || '',
+                logo: venue.logo || '',
+                headshot: venue.headshot || '',
+                mainPosterUrl: latestPosterUrl,
+              }}
+              type="user"
+              name={user?.name || user?.email || 'User'}
+              size="w-12 h-12"
+              textSize="text-xs"
+            />
+            <div className="space-y-1">
+              <button type="button" className="btn-secondary text-xs" onClick={handleProfileImageUpload}>Upload Profile Image</button>
+              <p className="text-[11px] text-gray-500 m-0">If you skip this, I use your latest event poster as fallback.</p>
+              {profileImageStatus && <p className="text-[11px] text-gray-600 m-0">{profileImageStatus}</p>}
+            </div>
+          </div>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
@@ -396,6 +470,37 @@ export default function Settings() {
         >
           Save Notification Preferences
         </button>
+      </div>
+
+      {/* Interface Preferences */}
+      <div className="card mb-6">
+        <h3 className="text-lg mb-4">Interface Preferences</h3>
+        <div className="space-y-3">
+          <p className="text-sm text-gray-600 m-0">
+            Choose how the floating controls look: Back to Top and Buddy launcher.
+          </p>
+          <div className="space-y-2">
+            {FLOATING_BUTTON_MODE_OPTIONS.map((option) => (
+              <label key={option.value} className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="radio"
+                  name="floatingButtonsMode"
+                  value={option.value}
+                  checked={uiPreferences.floatingButtonsMode === option.value}
+                  onChange={(e) => setUiPreferences(prev => ({ ...prev, floatingButtonsMode: e.target.value }))}
+                  className="mt-1 w-4 h-4 text-[#c8a45e] border-gray-300 focus:ring-[#c8a45e]"
+                />
+                <div>
+                  <div className="font-medium text-sm">{option.label}</div>
+                  <div className="text-xs text-gray-500">{option.description}</div>
+                </div>
+              </label>
+            ))}
+          </div>
+          <button onClick={handleSaveInterfacePreferences} className="btn-secondary mt-2">
+            Save Interface Preferences
+          </button>
+        </div>
       </div>
 
       {/* Google Drive Integration */}

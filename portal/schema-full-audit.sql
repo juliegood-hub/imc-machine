@@ -1196,6 +1196,262 @@ CREATE TABLE IF NOT EXISTS board_risk_items (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- SAFETY, SECURITY, COMPLIANCE, AND RISK MANAGEMENT
+CREATE TABLE IF NOT EXISTS event_safety_profiles (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  event_id UUID REFERENCES events(id) ON DELETE CASCADE,
+  venue_profile_id UUID REFERENCES venue_profiles(id) ON DELETE SET NULL,
+  organization_label TEXT DEFAULT '',
+  indoor_outdoor TEXT DEFAULT 'indoor',
+  expected_attendance INTEGER DEFAULT 0,
+  alcohol_present BOOLEAN DEFAULT FALSE,
+  ticketed_event BOOLEAN DEFAULT FALSE,
+  security_staff_count INTEGER DEFAULT 0,
+  weather_exposure TEXT DEFAULT 'low',
+  generator_use BOOLEAN DEFAULT FALSE,
+  fire_risk_factors JSONB DEFAULT '[]'::jsonb,
+  vip_attendance BOOLEAN DEFAULT FALSE,
+  local_crime_risk TEXT DEFAULT '',
+  security_staffing_ratio NUMERIC(10,2),
+  risk_score INTEGER DEFAULT 0,
+  risk_level TEXT DEFAULT 'low',
+  recommendations JSONB DEFAULT '[]'::jsonb,
+  responsible_person TEXT DEFAULT '',
+  notes TEXT DEFAULT '',
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS event_permits (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  event_id UUID REFERENCES events(id) ON DELETE CASCADE,
+  permit_type TEXT NOT NULL DEFAULT '',
+  status TEXT DEFAULT 'pending',
+  permit_number TEXT DEFAULT '',
+  issuing_authority TEXT DEFAULT '',
+  expires_at TIMESTAMPTZ,
+  file_url TEXT DEFAULT '',
+  responsible_person TEXT DEFAULT '',
+  alert_days INTEGER DEFAULT 30,
+  notes TEXT DEFAULT '',
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS event_insurance_policies (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  event_id UUID REFERENCES events(id) ON DELETE CASCADE,
+  policy_type TEXT NOT NULL DEFAULT '',
+  policy_number TEXT DEFAULT '',
+  coverage_limits TEXT DEFAULT '',
+  deductible NUMERIC(12,2),
+  carrier TEXT DEFAULT '',
+  expires_at TIMESTAMPTZ,
+  additional_insured TEXT DEFAULT '',
+  coi_file_url TEXT DEFAULT '',
+  status TEXT DEFAULT 'active',
+  notes TEXT DEFAULT '',
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS event_surveillance_assets (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  event_id UUID REFERENCES events(id) ON DELETE CASCADE,
+  asset_type TEXT DEFAULT 'fixed_camera',
+  camera_id TEXT DEFAULT '',
+  location TEXT DEFAULT '',
+  coverage_zone TEXT DEFAULT '',
+  power_source TEXT DEFAULT '',
+  network_type TEXT DEFAULT '',
+  recording_status TEXT DEFAULT 'active',
+  retention_days INTEGER DEFAULT 30,
+  monitoring_station TEXT DEFAULT '',
+  monitoring_assignee TEXT DEFAULT '',
+  live_feed_url TEXT DEFAULT '',
+  access_level TEXT DEFAULT 'restricted',
+  permissions JSONB DEFAULT '[]'::jsonb,
+  notes TEXT DEFAULT '',
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS event_access_control_points (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  event_id UUID REFERENCES events(id) ON DELETE CASCADE,
+  control_type TEXT DEFAULT 'checkpoint',
+  label TEXT DEFAULT '',
+  location TEXT DEFAULT '',
+  clearance_level TEXT DEFAULT 'general',
+  assigned_staff TEXT DEFAULT '',
+  access_hours TEXT DEFAULT '',
+  notes TEXT DEFAULT '',
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS event_crowd_plans (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  event_id UUID REFERENCES events(id) ON DELETE CASCADE,
+  barricade_plan TEXT DEFAULT '',
+  queue_plan TEXT DEFAULT '',
+  vip_lane_plan TEXT DEFAULT '',
+  ada_access_plan TEXT DEFAULT '',
+  emergency_assembly_points TEXT DEFAULT '',
+  staffing_ratio TEXT DEFAULT '',
+  notes TEXT DEFAULT '',
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS event_medical_plans (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  event_id UUID REFERENCES events(id) ON DELETE CASCADE,
+  first_aid_station TEXT DEFAULT '',
+  emt_staffing TEXT DEFAULT '',
+  aed_locations TEXT DEFAULT '',
+  cooling_stations TEXT DEFAULT '',
+  hydration_stations TEXT DEFAULT '',
+  narcan_kits TEXT DEFAULT '',
+  ambulance_staging TEXT DEFAULT '',
+  emergency_numbers TEXT DEFAULT '',
+  staff_briefing_notes TEXT DEFAULT '',
+  notes TEXT DEFAULT '',
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS event_sanitation_plans (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  event_id UUID REFERENCES events(id) ON DELETE CASCADE,
+  restrooms TEXT DEFAULT '',
+  hand_washing_stations TEXT DEFAULT '',
+  sanitizer_stations TEXT DEFAULT '',
+  waste_bins TEXT DEFAULT '',
+  grease_disposal TEXT DEFAULT '',
+  food_vendor_permits_verified BOOLEAN DEFAULT FALSE,
+  ada_restroom_notes TEXT DEFAULT '',
+  notes TEXT DEFAULT '',
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS event_weather_plans (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  event_id UUID REFERENCES events(id) ON DELETE CASCADE,
+  heat_index_threshold TEXT DEFAULT '',
+  rain_plan TEXT DEFAULT '',
+  wind_threshold TEXT DEFAULT '',
+  lightning_protocol TEXT DEFAULT '',
+  evacuation_shelter_location TEXT DEFAULT '',
+  backup_indoor_venue TEXT DEFAULT '',
+  weather_monitor_assignee TEXT DEFAULT '',
+  notes TEXT DEFAULT '',
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS event_city_coordination (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  event_id UUID REFERENCES events(id) ON DELETE CASCADE,
+  police_liaison TEXT DEFAULT '',
+  off_duty_officers_count INTEGER DEFAULT 0,
+  fire_department_contact TEXT DEFAULT '',
+  ems_contact TEXT DEFAULT '',
+  city_event_contact TEXT DEFAULT '',
+  command_center_location TEXT DEFAULT '',
+  communication_plan TEXT DEFAULT '',
+  notes TEXT DEFAULT '',
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS event_incidents (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  event_id UUID REFERENCES events(id) ON DELETE CASCADE,
+  occurred_at TIMESTAMPTZ DEFAULT NOW(),
+  location TEXT DEFAULT '',
+  incident_type TEXT DEFAULT 'other',
+  description TEXT DEFAULT '',
+  staff_involved TEXT DEFAULT '',
+  resolution TEXT DEFAULT '',
+  follow_up_required BOOLEAN DEFAULT FALSE,
+  follow_up_notes TEXT DEFAULT '',
+  file_url TEXT DEFAULT '',
+  visibility TEXT DEFAULT 'internal',
+  status TEXT DEFAULT 'open',
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS event_emergency_action_plans (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  event_id UUID REFERENCES events(id) ON DELETE CASCADE,
+  version_number INTEGER DEFAULT 1,
+  title TEXT DEFAULT 'Emergency Action Plan',
+  risk_level TEXT DEFAULT 'low',
+  content_json JSONB DEFAULT '{}'::jsonb,
+  generated_by TEXT DEFAULT '',
+  generated_at TIMESTAMPTZ DEFAULT NOW(),
+  share_slug TEXT DEFAULT '',
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS event_safety_checklists (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  event_id UUID REFERENCES events(id) ON DELETE CASCADE,
+  title TEXT DEFAULT 'Safety Checklist',
+  phase TEXT DEFAULT 'pre_show',
+  status TEXT DEFAULT 'draft',
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS event_safety_checklist_items (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  checklist_id UUID REFERENCES event_safety_checklists(id) ON DELETE CASCADE,
+  event_id UUID REFERENCES events(id) ON DELETE CASCADE,
+  sort_order INTEGER DEFAULT 0,
+  category TEXT DEFAULT 'general',
+  label TEXT NOT NULL DEFAULT '',
+  required BOOLEAN DEFAULT TRUE,
+  status TEXT DEFAULT 'todo',
+  assignee_name TEXT DEFAULT '',
+  due_at TIMESTAMPTZ,
+  checked_at TIMESTAMPTZ,
+  notes TEXT DEFAULT '',
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- CONTRACTS / DOCS AUTOFILL
 CREATE TABLE IF NOT EXISTS document_templates (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -1753,6 +2009,24 @@ CREATE INDEX IF NOT EXISTS idx_touring_shows_user ON touring_shows(user_id);
 CREATE INDEX IF NOT EXISTS idx_tour_dates_show ON tour_dates(touring_show_id);
 CREATE INDEX IF NOT EXISTS idx_tour_dates_booking ON tour_dates(booking_id);
 CREATE INDEX IF NOT EXISTS idx_board_risk_items_event ON board_risk_items(event_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_event_safety_profiles_unique_event ON event_safety_profiles(event_id);
+CREATE INDEX IF NOT EXISTS idx_event_safety_profiles_risk_level ON event_safety_profiles(risk_level);
+CREATE INDEX IF NOT EXISTS idx_event_permits_event ON event_permits(event_id);
+CREATE INDEX IF NOT EXISTS idx_event_permits_expiry ON event_permits(expires_at);
+CREATE INDEX IF NOT EXISTS idx_event_insurance_event ON event_insurance_policies(event_id);
+CREATE INDEX IF NOT EXISTS idx_event_insurance_expiry ON event_insurance_policies(expires_at);
+CREATE INDEX IF NOT EXISTS idx_event_surveillance_assets_event ON event_surveillance_assets(event_id);
+CREATE INDEX IF NOT EXISTS idx_event_access_control_points_event ON event_access_control_points(event_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_event_crowd_plans_unique_event ON event_crowd_plans(event_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_event_medical_plans_unique_event ON event_medical_plans(event_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_event_sanitation_plans_unique_event ON event_sanitation_plans(event_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_event_weather_plans_unique_event ON event_weather_plans(event_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_event_city_coordination_unique_event ON event_city_coordination(event_id);
+CREATE INDEX IF NOT EXISTS idx_event_incidents_event ON event_incidents(event_id);
+CREATE INDEX IF NOT EXISTS idx_event_incidents_type ON event_incidents(incident_type);
+CREATE INDEX IF NOT EXISTS idx_event_eap_event ON event_emergency_action_plans(event_id);
+CREATE INDEX IF NOT EXISTS idx_event_safety_checklists_event ON event_safety_checklists(event_id);
+CREATE INDEX IF NOT EXISTS idx_event_safety_checklist_items_checklist ON event_safety_checklist_items(checklist_id);
 CREATE INDEX IF NOT EXISTS idx_document_templates_user ON document_templates(user_id);
 CREATE INDEX IF NOT EXISTS idx_booking_documents_event ON booking_documents(event_id);
 CREATE INDEX IF NOT EXISTS idx_booking_documents_type ON booking_documents(doc_type);
@@ -2118,6 +2392,183 @@ CREATE INDEX IF NOT EXISTS idx_completion_tasks_assignee ON completion_tasks(ass
 CREATE INDEX IF NOT EXISTS idx_completion_tasks_status ON completion_tasks(status);
 CREATE INDEX IF NOT EXISTS idx_ai_assist_audit_logs_user ON ai_assist_audit_logs(user_id);
 
+-- ═══════════════════════════════════════════════════════════════
+-- Rehearsal + Production Calendar (Org + Google Sync)
+-- ═══════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS calendar_event_types (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  org_id UUID REFERENCES venue_profiles(id) ON DELETE SET NULL,
+  type_key TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  category TEXT DEFAULT 'general',
+  default_duration_minutes INTEGER DEFAULT 120,
+  typical_roles JSONB DEFAULT '[]'::jsonb,
+  department_tags TEXT[] DEFAULT ARRAY[]::text[],
+  checklist_links JSONB DEFAULT '[]'::jsonb,
+  is_system BOOLEAN DEFAULT false,
+  is_active BOOLEAN DEFAULT true,
+  sort_order INTEGER DEFAULT 0,
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS rehearsal_calendar_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  org_id UUID REFERENCES venue_profiles(id) ON DELETE SET NULL,
+  event_id UUID REFERENCES events(id) ON DELETE CASCADE,
+  title TEXT NOT NULL DEFAULT '',
+  type_key TEXT DEFAULT '',
+  type_name TEXT DEFAULT '',
+  start_datetime TIMESTAMPTZ NOT NULL,
+  end_datetime TIMESTAMPTZ NOT NULL,
+  timezone TEXT DEFAULT 'America/Chicago',
+  location TEXT DEFAULT '',
+  description TEXT DEFAULT '',
+  department_tags TEXT[] DEFAULT ARRAY[]::text[],
+  assigned_roles TEXT[] DEFAULT ARRAY[]::text[],
+  required_attendance TEXT DEFAULT 'required' CHECK (required_attendance IN ('required', 'optional')),
+  status TEXT DEFAULT 'draft' CHECK (status IN ('draft', 'confirmed', 'cancelled')),
+  internal_notes TEXT DEFAULT '',
+  shareable_notes TEXT DEFAULT '',
+  attachments JSONB DEFAULT '[]'::jsonb,
+  reminder_settings JSONB DEFAULT '[]'::jsonb,
+  source_kind TEXT DEFAULT 'manual',
+  source_ref_id TEXT DEFAULT '',
+  source_payload JSONB DEFAULT '{}'::jsonb,
+  google_sync_enabled BOOLEAN DEFAULT true,
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS calendar_entry_assignments (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  calendar_entry_id UUID REFERENCES rehearsal_calendar_entries(id) ON DELETE CASCADE,
+  assignee_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  assignee_name TEXT DEFAULT '',
+  assignee_role TEXT DEFAULT '',
+  assignee_type TEXT DEFAULT 'user' CHECK (assignee_type IN ('user', 'role', 'group', 'external')),
+  attendance_required BOOLEAN DEFAULT true,
+  rsvp_status TEXT DEFAULT 'pending' CHECK (rsvp_status IN ('pending', 'yes', 'no', 'maybe')),
+  invited_at TIMESTAMPTZ,
+  responded_at TIMESTAMPTZ,
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS calendar_entry_notifications (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  calendar_entry_id UUID REFERENCES rehearsal_calendar_entries(id) ON DELETE CASCADE,
+  assignment_id UUID REFERENCES calendar_entry_assignments(id) ON DELETE SET NULL,
+  notification_type TEXT DEFAULT 'email' CHECK (notification_type IN ('in_app', 'email', 'sms', 'push')),
+  recipient TEXT DEFAULT '',
+  subject TEXT DEFAULT '',
+  body TEXT DEFAULT '',
+  status TEXT DEFAULT 'queued' CHECK (status IN ('queued', 'sent', 'failed')),
+  sent_at TIMESTAMPTZ,
+  error_message TEXT DEFAULT '',
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS google_calendar_connections (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  org_id UUID REFERENCES venue_profiles(id) ON DELETE SET NULL,
+  account_email TEXT DEFAULT '',
+  access_token TEXT,
+  refresh_token TEXT,
+  token_expires_at TIMESTAMPTZ,
+  default_calendar_id TEXT DEFAULT 'primary',
+  auto_sync_types TEXT[] DEFAULT ARRAY['performance','tech_rehearsal','soundcheck','load_in','load_out']::text[],
+  sync_enabled BOOLEAN DEFAULT true,
+  status TEXT DEFAULT 'not_connected' CHECK (status IN ('not_connected', 'connected', 'error')),
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS google_calendar_event_mappings (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  calendar_entry_id UUID REFERENCES rehearsal_calendar_entries(id) ON DELETE CASCADE,
+  google_calendar_id TEXT NOT NULL,
+  google_event_id TEXT NOT NULL,
+  last_synced_at TIMESTAMPTZ,
+  last_sync_direction TEXT DEFAULT 'imc_to_google',
+  sync_hash TEXT DEFAULT '',
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_calendar_event_types_key ON calendar_event_types(type_key);
+CREATE INDEX IF NOT EXISTS idx_calendar_event_types_user ON calendar_event_types(user_id);
+CREATE INDEX IF NOT EXISTS idx_calendar_event_types_org ON calendar_event_types(org_id);
+CREATE INDEX IF NOT EXISTS idx_calendar_entries_user_start ON rehearsal_calendar_entries(user_id, start_datetime);
+CREATE INDEX IF NOT EXISTS idx_calendar_entries_event ON rehearsal_calendar_entries(event_id);
+CREATE INDEX IF NOT EXISTS idx_calendar_entries_type ON rehearsal_calendar_entries(type_key);
+CREATE INDEX IF NOT EXISTS idx_calendar_entries_source ON rehearsal_calendar_entries(source_kind, source_ref_id);
+CREATE INDEX IF NOT EXISTS idx_calendar_assignments_entry ON calendar_entry_assignments(calendar_entry_id);
+CREATE INDEX IF NOT EXISTS idx_calendar_assignments_user ON calendar_entry_assignments(assignee_user_id);
+CREATE INDEX IF NOT EXISTS idx_calendar_notifications_entry ON calendar_entry_notifications(calendar_entry_id);
+CREATE INDEX IF NOT EXISTS idx_google_calendar_connections_user ON google_calendar_connections(user_id);
+CREATE INDEX IF NOT EXISTS idx_google_calendar_connections_org ON google_calendar_connections(org_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_google_calendar_mappings_unique
+  ON google_calendar_event_mappings(calendar_entry_id, google_calendar_id);
+CREATE INDEX IF NOT EXISTS idx_google_calendar_mappings_google_event ON google_calendar_event_mappings(google_event_id);
+
+INSERT INTO calendar_event_types (type_key, name, category, default_duration_minutes, typical_roles, department_tags, is_system, is_active, sort_order)
+VALUES
+  ('first_rehearsal', 'First Rehearsal', 'theatre', 180, '["Stage Manager","Director","Cast"]'::jsonb, ARRAY['SM','Cast'], true, true, 1),
+  ('table_read', 'Table Work / Table Read', 'theatre', 120, '["Stage Manager","Director","Cast"]'::jsonb, ARRAY['SM','Cast'], true, true, 2),
+  ('blocking_rehearsal', 'Staging / Blocking Rehearsal', 'theatre', 180, '["Director","Stage Manager","Cast"]'::jsonb, ARRAY['SM','Cast'], true, true, 3),
+  ('choreo_rehearsal', 'Choreo Rehearsal', 'theatre', 150, '["Choreographer","Dance Captain","Cast"]'::jsonb, ARRAY['Cast'], true, true, 4),
+  ('music_rehearsal', 'Music Rehearsal', 'theatre', 150, '["Music Director","Band","Cast"]'::jsonb, ARRAY['Band','Cast'], true, true, 5),
+  ('sitzprobe', 'Sitzprobe', 'theatre', 180, '["Music Director","Orchestra","Cast"]'::jsonb, ARRAY['Band','Cast'], true, true, 6),
+  ('spacing_rehearsal', 'Spacing Rehearsal', 'theatre', 180, '["Stage Manager","Cast","Deck"]'::jsonb, ARRAY['SM','Deck','Cast'], true, true, 7),
+  ('paper_tech', 'Paper Tech', 'theatre', 120, '["Stage Manager","Lighting","Sound","Projection"]'::jsonb, ARRAY['SM','LX','SND','PROJ'], true, true, 8),
+  ('dry_tech', 'Dry Tech', 'theatre', 180, '["Stage Manager","Lighting","Sound","Projection","Deck"]'::jsonb, ARRAY['SM','LX','SND','PROJ','DECK'], true, true, 9),
+  ('cue_to_cue', 'Cue-to-Cue', 'theatre', 240, '["Stage Manager","Lighting","Sound","Deck","Projection"]'::jsonb, ARRAY['SM','LX','SND','DECK','PROJ'], true, true, 10),
+  ('tech_rehearsal', 'Tech Rehearsal', 'theatre', 240, '["Stage Manager","All Departments"]'::jsonb, ARRAY['SM','LX','SND','DECK','PROJ','OPS'], true, true, 11),
+  ('dress_rehearsal', 'Dress Rehearsal', 'theatre', 240, '["Stage Manager","Cast","Wardrobe","Hair/Makeup"]'::jsonb, ARRAY['SM','Cast','Wardrobe'], true, true, 12),
+  ('preview', 'Preview', 'theatre', 210, '["Stage Manager","FOH","Cast","Crew"]'::jsonb, ARRAY['SM','FOH','Cast','Crew'], true, true, 13),
+  ('performance', 'Performance', 'production', 210, '["Stage Manager","FOH","Cast","Crew"]'::jsonb, ARRAY['SM','FOH','Cast','Crew'], true, true, 14),
+  ('notes_session', 'Notes Session', 'theatre', 60, '["Director","Stage Manager","Department Heads"]'::jsonb, ARRAY['SM','Dept Heads'], true, true, 15),
+  ('brush_up', 'Brush-Up / Put-In', 'theatre', 150, '["Stage Manager","Director","Understudy"]'::jsonb, ARRAY['SM','Cast'], true, true, 16),
+  ('fight_call', 'Fight Call', 'theatre', 45, '["Fight Captain","Cast","Stage Manager"]'::jsonb, ARRAY['SM','Cast'], true, true, 17),
+  ('warmup_call', 'Warmup Call', 'theatre', 30, '["Cast","SM"]'::jsonb, ARRAY['SM','Cast'], true, true, 18),
+  ('half_hour_call', 'Half-Hour Call', 'theatre', 30, '["Cast","Crew","FOH"]'::jsonb, ARRAY['SM','Cast','Crew','FOH'], true, true, 19),
+  ('places_call', 'Places Call', 'theatre', 15, '["Cast","Crew","SM"]'::jsonb, ARRAY['SM','Cast','Crew'], true, true, 20),
+  ('strike', 'Strike', 'production', 180, '["Deck","Lighting","Sound","Wardrobe","Props"]'::jsonb, ARRAY['DECK','LX','SND','Wardrobe','Props'], true, true, 21),
+  ('band_rehearsal', 'Band Rehearsal', 'music', 180, '["Band Leader","Band"]'::jsonb, ARRAY['Band'], true, true, 22),
+  ('sectional_rehearsal', 'Sectional Rehearsal', 'music', 120, '["Section Leader","Band"]'::jsonb, ARRAY['Band'], true, true, 23),
+  ('soundcheck', 'Soundcheck', 'music', 90, '["A1","A2","Band","Stage Manager"]'::jsonb, ARRAY['SND','Band','SM'], true, true, 24),
+  ('line_check', 'Line Check', 'music', 45, '["A1","A2"]'::jsonb, ARRAY['SND'], true, true, 25),
+  ('load_in', 'Load-In', 'ops', 120, '["Production Manager","Deck","Stagehands"]'::jsonb, ARRAY['OPS','DECK'], true, true, 26),
+  ('load_out', 'Load-Out', 'ops', 120, '["Production Manager","Deck","Stagehands"]'::jsonb, ARRAY['OPS','DECK'], true, true, 27),
+  ('gear_prep', 'Gear Pack / Prep', 'ops', 90, '["Backline Tech","Audio","Lighting"]'::jsonb, ARRAY['SND','LX','OPS'], true, true, 28),
+  ('truck_call', 'Van/Truck Call', 'ops', 45, '["Tour Manager","Driver","Crew"]'::jsonb, ARRAY['OPS'], true, true, 29),
+  ('backline_pickup', 'Backline Pickup/Return', 'ops', 60, '["Backline Tech","Runner"]'::jsonb, ARRAY['OPS','SND'], true, true, 30),
+  ('staffing_call', 'Staffing Call', 'ops', 30, '["Staff Scheduler","Department Heads"]'::jsonb, ARRAY['OPS','FOH','BOH'], true, true, 31),
+  ('doors', 'Doors', 'ops', 240, '["FOH Manager","Security","Ticketing"]'::jsonb, ARRAY['FOH','Security'], true, true, 32),
+  ('security_briefing', 'Security Briefing', 'ops', 30, '["Security Lead","Venue Manager"]'::jsonb, ARRAY['Security','OPS'], true, true, 33),
+  ('settlement', 'Settlement', 'ops', 45, '["Promoter","Venue Rep","Production Manager"]'::jsonb, ARRAY['OPS'], true, true, 34),
+  ('vendor_load', 'Vendor Load-In/Load-Out', 'ops', 120, '["Vendor Coordinator","Ops Lead"]'::jsonb, ARRAY['OPS','Vendors'], true, true, 35),
+  ('inventory_pull', 'Inventory Pull / Pack', 'ops', 90, '["Inventory Manager","Ops Lead"]'::jsonb, ARRAY['OPS'], true, true, 36),
+  ('shop_build', 'Shop Build / Prop Build', 'ops', 180, '["Technical Director","Deck","Props"]'::jsonb, ARRAY['DECK','Props'], true, true, 37),
+  ('costume_fittings', 'Costume Fittings', 'ops', 120, '["Wardrobe Supervisor","Cast"]'::jsonb, ARRAY['Wardrobe','Cast'], true, true, 38),
+  ('rental_pickup', 'Tech Pickup / Rental Return', 'ops', 60, '["Production Manager","Runner"]'::jsonb, ARRAY['OPS'], true, true, 39),
+  ('delivery_install', 'Deliveries / Install / Turnover', 'ops', 120, '["Ops Lead","Deck"]'::jsonb, ARRAY['OPS','DECK'], true, true, 40)
+ON CONFLICT (type_key) DO NOTHING;
+
 INSERT INTO notification_templates (key, subject_template, body_template, tone, is_active)
 VALUES (
   'completion_task_professor_good',
@@ -2211,6 +2662,335 @@ CREATE TABLE IF NOT EXISTS message_mentions (
 CREATE INDEX IF NOT EXISTS idx_message_mentions_message ON message_mentions(message_id);
 CREATE INDEX IF NOT EXISTS idx_message_mentions_user ON message_mentions(mentioned_user_id);
 CREATE INDEX IF NOT EXISTS idx_message_mentions_role ON message_mentions(mentioned_role_key);
+
+-- ═══════════════════════════════════════════════════════════════
+-- RLS HARDENING PASS (OWNER / EVENT / ORG SCOPE)
+-- Idempotent safety pass to cover newly added operational tables.
+-- ═══════════════════════════════════════════════════════════════
+
+CREATE OR REPLACE FUNCTION imc_current_app_user_id()
+RETURNS uuid
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  resolved_user_id uuid;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT u.id
+    INTO resolved_user_id
+  FROM users u
+  WHERE u.auth_user_id = auth.uid()
+  ORDER BY u.created_at ASC
+  LIMIT 1;
+
+  IF resolved_user_id IS NULL THEN
+    SELECT u.id
+      INTO resolved_user_id
+    FROM users u
+    WHERE lower(u.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+    ORDER BY u.created_at ASC
+    LIMIT 1;
+  END IF;
+
+  RETURN resolved_user_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION imc_is_admin()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT
+    EXISTS (
+      SELECT 1
+      FROM users u
+      WHERE u.id = imc_current_app_user_id()
+        AND coalesce(u.is_admin, false) = true
+    )
+    OR lower(coalesce(auth.jwt() ->> 'email', '')) = lower('juliegood@goodcreativemedia.com');
+$$;
+
+CREATE OR REPLACE FUNCTION imc_can_access_user(target_user_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT target_user_id IS NOT NULL
+    AND (imc_is_admin() OR target_user_id = imc_current_app_user_id());
+$$;
+
+CREATE OR REPLACE FUNCTION imc_can_access_event(target_event_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT target_event_id IS NOT NULL
+    AND EXISTS (
+      SELECT 1
+      FROM events e
+      WHERE e.id = target_event_id
+        AND (imc_is_admin() OR e.user_id = imc_current_app_user_id())
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION imc_can_access_venue(target_venue_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT target_venue_id IS NOT NULL
+    AND EXISTS (
+      SELECT 1
+      FROM venue_profiles v
+      WHERE v.id = target_venue_id
+        AND (imc_is_admin() OR v.user_id = imc_current_app_user_id())
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION imc_can_access_org(target_org_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT imc_can_access_venue(target_org_id);
+$$;
+
+DO $$
+DECLARE
+  t record;
+  has_user_id boolean;
+  has_event_id boolean;
+  has_booking_id boolean;
+  has_venue_id boolean;
+  has_org_id boolean;
+  has_message_id boolean;
+  has_checklist_id boolean;
+  has_training_session_id boolean;
+  has_calendar_entry_id boolean;
+  has_festival_id boolean;
+  has_touring_show_id boolean;
+  has_budget_id boolean;
+  has_rider_id boolean;
+  has_staff_profile_id boolean;
+  has_venue_profile_id boolean;
+  has_is_system boolean;
+  using_expr text;
+  check_expr text;
+BEGIN
+  -- Users table policy (supports auth bootstrap + admin override).
+  EXECUTE 'ALTER TABLE public.users ENABLE ROW LEVEL SECURITY';
+  EXECUTE 'DROP POLICY IF EXISTS "Users can read own record" ON public.users';
+  EXECUTE 'DROP POLICY IF EXISTS "Users can update own record" ON public.users';
+  EXECUTE 'DROP POLICY IF EXISTS imc_users_select ON public.users';
+  EXECUTE 'DROP POLICY IF EXISTS imc_users_update ON public.users';
+  EXECUTE 'DROP POLICY IF EXISTS imc_users_insert ON public.users';
+  EXECUTE 'DROP POLICY IF EXISTS imc_users_delete ON public.users';
+  EXECUTE 'CREATE POLICY imc_users_select ON public.users FOR SELECT USING (
+    imc_is_admin()
+    OR id = imc_current_app_user_id()
+    OR auth_user_id = auth.uid()
+    OR lower(email) = lower(coalesce(auth.jwt() ->> ''email'', ''''))
+  )';
+  EXECUTE 'CREATE POLICY imc_users_update ON public.users FOR UPDATE USING (
+    imc_is_admin()
+    OR id = imc_current_app_user_id()
+    OR auth_user_id = auth.uid()
+  ) WITH CHECK (
+    imc_is_admin()
+    OR id = imc_current_app_user_id()
+    OR auth_user_id = auth.uid()
+  )';
+  EXECUTE 'CREATE POLICY imc_users_insert ON public.users FOR INSERT WITH CHECK (
+    imc_is_admin()
+    OR auth_user_id = auth.uid()
+    OR lower(email) = lower(coalesce(auth.jwt() ->> ''email'', ''''))
+  )';
+  EXECUTE 'CREATE POLICY imc_users_delete ON public.users FOR DELETE USING (imc_is_admin())';
+
+  -- Invites: public read (signup validation), admin mutation only.
+  EXECUTE 'ALTER TABLE public.invites ENABLE ROW LEVEL SECURITY';
+  EXECUTE 'DROP POLICY IF EXISTS "Anyone can read invites" ON public.invites';
+  EXECUTE 'DROP POLICY IF EXISTS imc_invites_public_read ON public.invites';
+  EXECUTE 'DROP POLICY IF EXISTS imc_invites_admin_write ON public.invites';
+  EXECUTE 'CREATE POLICY imc_invites_public_read ON public.invites FOR SELECT USING (true)';
+  EXECUTE 'CREATE POLICY imc_invites_admin_write ON public.invites FOR ALL USING (imc_is_admin()) WITH CHECK (imc_is_admin())';
+
+  FOR t IN
+    SELECT tablename
+    FROM pg_tables
+    WHERE schemaname = 'public'
+      AND tablename NOT IN ('users', 'invites')
+  LOOP
+    EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t.tablename);
+
+    SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t.tablename AND column_name = 'user_id') INTO has_user_id;
+    SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t.tablename AND column_name = 'event_id') INTO has_event_id;
+    SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t.tablename AND column_name = 'booking_id') INTO has_booking_id;
+    SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t.tablename AND column_name = 'venue_id') INTO has_venue_id;
+    SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t.tablename AND column_name = 'org_id') INTO has_org_id;
+    SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t.tablename AND column_name = 'message_id') INTO has_message_id;
+    SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t.tablename AND column_name = 'checklist_id') INTO has_checklist_id;
+    SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t.tablename AND column_name = 'training_session_id') INTO has_training_session_id;
+    SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t.tablename AND column_name = 'calendar_entry_id') INTO has_calendar_entry_id;
+    SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t.tablename AND column_name = 'festival_id') INTO has_festival_id;
+    SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t.tablename AND column_name = 'touring_show_id') INTO has_touring_show_id;
+    SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t.tablename AND column_name = 'budget_id') INTO has_budget_id;
+    SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t.tablename AND column_name = 'rider_id') INTO has_rider_id;
+    SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t.tablename AND column_name = 'staff_profile_id') INTO has_staff_profile_id;
+    SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t.tablename AND column_name = 'venue_profile_id') INTO has_venue_profile_id;
+    SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = t.tablename AND column_name = 'is_system') INTO has_is_system;
+
+    using_expr := NULL;
+    check_expr := NULL;
+
+    IF has_booking_id THEN
+      using_expr := '(imc_is_admin() OR imc_can_access_event(booking_id))';
+      check_expr := using_expr;
+    ELSIF has_event_id THEN
+      using_expr := '(imc_is_admin() OR imc_can_access_event(event_id))';
+      check_expr := using_expr;
+    ELSIF has_festival_id THEN
+      using_expr := '(imc_is_admin() OR EXISTS (
+        SELECT 1 FROM festivals f
+        WHERE f.id = festival_id
+          AND f.user_id = imc_current_app_user_id()
+      ))';
+      check_expr := using_expr;
+    ELSIF has_touring_show_id THEN
+      using_expr := '(imc_is_admin() OR EXISTS (
+        SELECT 1 FROM touring_shows ts
+        WHERE ts.id = touring_show_id
+          AND ts.user_id = imc_current_app_user_id()
+      ))';
+      check_expr := using_expr;
+    ELSIF has_calendar_entry_id THEN
+      using_expr := '(imc_is_admin() OR EXISTS (
+        SELECT 1 FROM rehearsal_calendar_entries ce
+        WHERE ce.id = calendar_entry_id
+          AND ce.user_id = imc_current_app_user_id()
+      ))';
+      check_expr := using_expr;
+    ELSIF has_training_session_id THEN
+      using_expr := '(imc_is_admin() OR EXISTS (
+        SELECT 1 FROM training_sessions ts
+        WHERE ts.id = training_session_id
+          AND ts.user_id = imc_current_app_user_id()
+      ))';
+      check_expr := using_expr;
+    ELSIF has_checklist_id AND t.tablename = 'production_checklist_items' THEN
+      using_expr := '(imc_is_admin() OR EXISTS (
+        SELECT 1
+        FROM production_checklists pc
+        WHERE pc.id = checklist_id
+          AND pc.user_id = imc_current_app_user_id()
+      ))';
+      check_expr := using_expr;
+    ELSIF has_checklist_id AND t.tablename = 'event_safety_checklist_items' THEN
+      using_expr := '(imc_is_admin() OR EXISTS (
+        SELECT 1
+        FROM event_safety_checklists esc
+        WHERE esc.id = checklist_id
+          AND esc.user_id = imc_current_app_user_id()
+      ))';
+      check_expr := using_expr;
+    ELSIF has_message_id THEN
+      using_expr := '(imc_is_admin() OR EXISTS (
+        SELECT 1
+        FROM event_messages em
+        JOIN events e ON e.id = em.event_id
+        WHERE em.id = message_id
+          AND e.user_id = imc_current_app_user_id()
+      ))';
+      check_expr := using_expr;
+    ELSIF has_budget_id THEN
+      using_expr := '(imc_is_admin() OR EXISTS (
+        SELECT 1 FROM booking_budgets bb
+        WHERE bb.id = budget_id
+          AND bb.user_id = imc_current_app_user_id()
+      ))';
+      check_expr := using_expr;
+    ELSIF has_rider_id THEN
+      using_expr := '(imc_is_admin() OR EXISTS (
+        SELECT 1 FROM booking_riders br
+        WHERE br.id = rider_id
+          AND br.user_id = imc_current_app_user_id()
+      ))';
+      check_expr := using_expr;
+    ELSIF has_staff_profile_id THEN
+      using_expr := '(imc_is_admin() OR EXISTS (
+        SELECT 1 FROM staff_profiles sp
+        WHERE sp.id = staff_profile_id
+          AND sp.user_id = imc_current_app_user_id()
+      ))';
+      check_expr := using_expr;
+    ELSIF has_venue_id THEN
+      using_expr := '(imc_is_admin() OR imc_can_access_venue(venue_id))';
+      check_expr := using_expr;
+    ELSIF has_venue_profile_id THEN
+      using_expr := '(imc_is_admin() OR imc_can_access_venue(venue_profile_id))';
+      check_expr := using_expr;
+    ELSIF has_org_id THEN
+      using_expr := '(imc_is_admin() OR imc_can_access_org(org_id))';
+      check_expr := using_expr;
+    ELSIF has_user_id THEN
+      using_expr := '(imc_is_admin() OR imc_can_access_user(user_id))';
+      IF has_is_system THEN
+        using_expr := using_expr || ' OR (user_id IS NULL AND coalesce(is_system, false) = true)';
+      ELSIF t.tablename = 'certification_types' THEN
+        using_expr := using_expr || ' OR user_id IS NULL';
+      END IF;
+      check_expr := '(imc_is_admin() OR imc_can_access_user(user_id))';
+    ELSIF t.tablename = 'notification_templates' THEN
+      using_expr := '(true)';
+      check_expr := '(imc_is_admin())';
+    ELSE
+      using_expr := '(imc_is_admin())';
+      check_expr := '(imc_is_admin())';
+    END IF;
+
+    EXECUTE format('DROP POLICY IF EXISTS imc_scope_all ON public.%I', t.tablename);
+    EXECUTE format(
+      'CREATE POLICY imc_scope_all ON public.%I FOR ALL USING %s WITH CHECK %s',
+      t.tablename,
+      using_expr,
+      check_expr
+    );
+  END LOOP;
+
+  -- Completion tasks can be worked by assignee or creator.
+  EXECUTE 'ALTER TABLE public.completion_tasks ENABLE ROW LEVEL SECURITY';
+  EXECUTE 'DROP POLICY IF EXISTS imc_completion_scope ON public.completion_tasks';
+  EXECUTE 'CREATE POLICY imc_completion_scope ON public.completion_tasks
+    FOR ALL
+    USING (
+      imc_is_admin()
+      OR assigned_to_user_id = imc_current_app_user_id()
+      OR created_by_user_id = imc_current_app_user_id()
+    )
+    WITH CHECK (
+      imc_is_admin()
+      OR created_by_user_id = imc_current_app_user_id()
+      OR assigned_to_user_id = imc_current_app_user_id()
+    )';
+END;
+$$;
 --
 -- ═══════════════════════════════════════════════════════════════
 -- AUDIT COMPLETE ✅
