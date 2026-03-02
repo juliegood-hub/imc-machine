@@ -34,6 +34,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Lint app
+        run: npm run lint
+
       - name: Run tests
         run: npm run test
 
@@ -129,6 +132,9 @@ jobs:
           DEPLOY_URL="$(vercel deploy --prebuilt --prod --token "$VERCEL_TOKEN")"
           echo "url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
 
+      - name: Run production smoke checks
+        run: node scripts/smoke-check.mjs "${{ steps.deploy.outputs.url }}"
+
       - name: Release summary
         run: |
           {
@@ -136,4 +142,5 @@ jobs:
             echo "- Commit: \`${{ github.sha }}\`"
             echo "- Tag: \`${{ steps.prod_tag.outputs.tag }}\`"
             echo "- Deploy URL: ${{ steps.deploy.outputs.url }}"
+            echo "- Smoke checks: passed"
           } >> "$GITHUB_STEP_SUMMARY"
