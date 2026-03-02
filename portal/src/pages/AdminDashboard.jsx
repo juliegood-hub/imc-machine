@@ -22,6 +22,9 @@ import { CLIENT_TYPES, getClientTypeColors, isArtistRole } from '../constants/cl
 import { computeEventWorkflowProgress, computeTaylorZoneProgress } from '../constants/workflowSections';
 
 const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || 'juliegood@goodcreativemedia.com';
+const CLIENT_TYPES_ALPHA = [...CLIENT_TYPES].sort((a, b) => (
+  String(a?.label || '').localeCompare(String(b?.label || ''), undefined, { sensitivity: 'base' })
+));
 
 // Local date string (YYYY-MM-DD) — avoids UTC timezone shift
 function localDateStr(d = new Date()) {
@@ -111,7 +114,6 @@ export default function AdminDashboard() {
   const [activityActionFilter, setActivityActionFilter] = useState('all');
 
   const isAdmin = user?.isAdmin || user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-
   useEffect(() => {
     if (!isAdmin) { navigate('/'); return; }
     reload();
@@ -843,7 +845,7 @@ export default function AdminDashboard() {
               <select value={userFilter} onChange={e => setUserFilter(e.target.value)}
                 className="px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-[#c8a45e]">
                 <option value="all">All Types</option>
-                {CLIENT_TYPES.map(ct => (
+                {CLIENT_TYPES_ALPHA.map(ct => (
                   <option key={ct.key} value={ct.key}>
                     {ct.icon} {ct.label}
                   </option>
@@ -1059,7 +1061,7 @@ export default function AdminDashboard() {
                 <option value="artist">🎸 Artist</option>
                 <option value="promoter">📣 Promoter</option>
                 <option value="media">📰 Media</option>
-                {CLIENT_TYPES.filter(ct => !['venue_owner','artist','promoter','media'].includes(ct.key)).map(ct => (
+                {CLIENT_TYPES_ALPHA.filter(ct => !['venue_owner','artist','promoter','media'].includes(ct.key)).map(ct => (
                   <option key={ct.key} value={ct.key}>{ct.icon} {ct.label}</option>
                 ))}
               </select>
@@ -1236,7 +1238,7 @@ export default function AdminDashboard() {
                     onChange={e => setNewUser({ ...newUser, client_type: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
                   >
-                    {CLIENT_TYPES.map(ct => (
+                    {CLIENT_TYPES_ALPHA.map(ct => (
                       <option key={ct.key} value={ct.key}>
                         {ct.icon} {ct.label}
                       </option>
@@ -1896,7 +1898,7 @@ function UserEditModal({ user, profile, events, onSave, onClose, onUpdateUser, o
                   <label className="block text-sm font-medium text-gray-700 mb-1">Client Type <span className="text-red-500">*</span></label>
                   <select value={user.client_type || ""} onChange={e => updateUser("client_type", e.target.value)}
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white">
-                    {CLIENT_TYPES.map(ct => (
+                    {CLIENT_TYPES_ALPHA.map(ct => (
                       <option key={ct.key} value={ct.key}>{ct.icon} {ct.label}</option>
                     ))}
                   </select>

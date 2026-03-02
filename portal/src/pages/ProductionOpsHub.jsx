@@ -30,6 +30,16 @@ const TRAINING_CATEGORY_OPTIONS = [
   'other',
 ];
 
+function sortByText(values = []) {
+  return [...values].sort((a, b) => String(a || '').localeCompare(String(b || ''), undefined, { sensitivity: 'base' }));
+}
+
+function sortByLabel(items = [], getLabel = (value) => value) {
+  return [...items].sort((a, b) => (
+    String(getLabel(a) || '').localeCompare(String(getLabel(b) || ''), undefined, { sensitivity: 'base' })
+  ));
+}
+
 function toIsoOrNull(value) {
   if (!value) return null;
   const date = new Date(value);
@@ -107,6 +117,18 @@ function isMissingSchemaEntityError(error) {
   return /could not find the table .* in the schema cache/i.test(message)
     || /relation .+ does not exist/i.test(message)
     || /column .+ does not exist/i.test(message);
+}
+
+function isSoftModuleAccessError(error) {
+  const message = String(error?.message || error || '');
+  return isMissingSchemaEntityError(error)
+    || /permission denied/i.test(message)
+    || /not authorized/i.test(message)
+    || /unauthorized/i.test(message)
+    || /forbidden/i.test(message)
+    || /failed to fetch/i.test(message)
+    || /networkerror/i.test(message)
+    || /rls/i.test(message);
 }
 
 function fulfilledValue(result, fallback) {
@@ -249,6 +271,29 @@ export default function ProductionOpsHub() {
       : []
   ), [selectedEvent?.id]);
 
+  const sortedRoleDepartments = useMemo(() => sortByText(PRODUCTION_ROLE_DEPARTMENTS), []);
+  const sortedTrainingCategoryOptions = useMemo(() => sortByText(TRAINING_CATEGORY_OPTIONS), []);
+  const dropdownUpcomingEvents = useMemo(
+    () => sortByLabel(upcomingEvents, (event) => event?.title || ''),
+    [upcomingEvents],
+  );
+  const dropdownTrainingCourses = useMemo(
+    () => sortByLabel(trainingCourses, (course) => course?.title || ''),
+    [trainingCourses],
+  );
+  const dropdownStaffProfiles = useMemo(
+    () => sortByLabel(staffProfiles, (staff) => staff?.display_name || `${staff?.first_name || ''} ${staff?.last_name || ''}`.trim() || 'Staff'),
+    [staffProfiles],
+  );
+  const dropdownCertificationTypes = useMemo(
+    () => sortByLabel(certificationTypes, (type) => type?.name || ''),
+    [certificationTypes],
+  );
+  const dropdownDressingRooms = useMemo(
+    () => sortByLabel(dressingRooms, (room) => room?.room_name_or_number || ''),
+    [dressingRooms],
+  );
+
   const filteredRoleDirectory = useMemo(() => {
     const needle = String(roleSearch || '').trim().toLowerCase();
     return PRODUCTION_ROLE_DIRECTORY.filter((role) => {
@@ -332,9 +377,9 @@ export default function ProductionOpsHub() {
 
     const rejections = collectRejectedReasons(results);
     if (rejections.length) {
-      const allMissingSchema = rejections.every(isMissingSchemaEntityError);
-      if (allMissingSchema) {
-        setStatus('Some production modules are not active yet because database tables are missing. Run the latest Supabase schema and refresh.');
+      const allSoftErrors = rejections.every(isSoftModuleAccessError);
+      if (allSoftErrors) {
+        setStatus(`Loaded available modules. ${rejections.length} optional module${rejections.length === 1 ? '' : 's'} are unavailable for this account right now.`);
       } else {
         setStatus(`I loaded what I could, but hit a snag in ${rejections.length} module${rejections.length === 1 ? '' : 's'}.`);
       }
@@ -385,9 +430,9 @@ export default function ProductionOpsHub() {
 
     const rejections = collectRejectedReasons(results);
     if (rejections.length) {
-      const allMissingSchema = rejections.every(isMissingSchemaEntityError);
-      if (allMissingSchema) {
-        setStatus('Some event operations modules are not active yet because database tables are missing. Run the latest Supabase schema and refresh.');
+      const allSoftErrors = rejections.every(isSoftModuleAccessError);
+      if (allSoftErrors) {
+        setStatus(`Loaded event operations modules. ${rejections.length} optional module${rejections.length === 1 ? '' : 's'} are unavailable for this account right now.`);
       } else {
         setStatus(`I loaded the event operations data I could, but hit a snag in ${rejections.length} module${rejections.length === 1 ? '' : 's'}.`);
       }
@@ -757,7 +802,7 @@ export default function ProductionOpsHub() {
               className="px-3 py-2 border border-gray-300 rounded text-sm bg-white"
             >
               <option value="all">All departments</option>
-              {PRODUCTION_ROLE_DEPARTMENTS.map((department) => (
+              {sortedRoleDepartments.map((department) => (
                 <option key={`dept-${department}`} value={department}>{department}</option>
               ))}
             </select>
@@ -917,7 +962,7 @@ export default function ProductionOpsHub() {
               className="px-3 py-2 border border-gray-300 rounded text-sm bg-white"
             >
               <option value="">Choose event...</option>
-              {upcomingEvents.map((event) => (
+              {dropdownUpcomingEvents.map((event) => (
                 <option key={event.id} value={event.id}>
                   {event.title} · {event.date || 'TBD'}
                 </option>
@@ -1100,7 +1145,7 @@ export default function ProductionOpsHub() {
                     <div key={`assignment-draft-${index}`} className="border border-dashed border-gray-300 rounded p-2 space-y-2">
                       <select value={draft.dressingRoomId} onChange={(e) => setDressingAssignmentDrafts((prev) => prev.map((row, i) => i === index ? { ...row, dressingRoomId: e.target.value } : row))} className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs bg-white">
                         <option value="">Select dressing room...</option>
-                        {dressingRooms.map((room) => (
+                        {dropdownDressingRooms.map((room) => (
                           <option key={room.id} value={room.id}>{room.room_name_or_number}</option>
                         ))}
                       </select>
@@ -1168,7 +1213,7 @@ export default function ProductionOpsHub() {
                   onChange={(e) => setCourseForm((prev) => ({ ...prev, category: e.target.value }))}
                   className="px-3 py-2 border border-gray-300 rounded text-sm bg-white"
                 >
-                  {TRAINING_CATEGORY_OPTIONS.map((category) => (
+                  {sortedTrainingCategoryOptions.map((category) => (
                     <option key={category} value={category}>{category}</option>
                   ))}
                 </select>
@@ -1199,7 +1244,7 @@ export default function ProductionOpsHub() {
                 className="w-full px-3 py-2 border border-gray-300 rounded text-sm bg-white"
               >
                 <option value="">Choose course...</option>
-                {(trainingCourses || []).map((course) => (
+                {dropdownTrainingCourses.map((course) => (
                   <option key={course.id} value={course.id}>{course.title}</option>
                 ))}
               </select>
@@ -1295,7 +1340,7 @@ export default function ProductionOpsHub() {
                 className="w-full px-3 py-2 border border-gray-300 rounded text-sm bg-white"
               >
                 <option value="">Choose staff...</option>
-                {(staffProfiles || []).map((staff) => (
+                {dropdownStaffProfiles.map((staff) => (
                   <option key={staff.id} value={staff.id}>{staff.display_name || `${staff.first_name || ''} ${staff.last_name || ''}`.trim() || 'Staff'}</option>
                 ))}
               </select>
@@ -1305,7 +1350,7 @@ export default function ProductionOpsHub() {
                 className="w-full px-3 py-2 border border-gray-300 rounded text-sm bg-white"
               >
                 <option value="">Choose certification...</option>
-                {(certificationTypes || []).map((type) => (
+                {dropdownCertificationTypes.map((type) => (
                   <option key={type.id} value={type.id}>{type.name}</option>
                 ))}
               </select>

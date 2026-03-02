@@ -159,55 +159,63 @@ export default function Navbar() {
       {user && (
         <>
           {/* Desktop nav */}
-          <div className="hidden xl:flex items-center gap-4 ml-auto min-w-0">
-            <div className="flex items-center gap-4 min-w-0">
-            <Link to="/" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">📊 Dashboard</Link>
-            <Link to="/workflow" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">📖 How It Works</Link>
-            <Link to="/white-papers" className="hidden 2xl:inline text-sm text-gray-300 hover:text-[#c8a45e] no-underline">📄 White Papers</Link>
-            <Link to="/user-guide" className="hidden 2xl:inline text-sm text-gray-300 hover:text-[#c8a45e] no-underline">🧭 User Guide</Link>
-            <Link to="/events/create" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">🎪 Events</Link>
-            <Link to="/imc-composer" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">IMC Composer</Link>
-            <Link to="/podcast" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">🎥 Capture</Link>
-            <Link to="/safety-risk" className="hidden 2xl:inline text-sm text-gray-300 hover:text-[#c8a45e] no-underline">🛡️ Safety</Link>
-            <Link to="/chat" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">💬 Chat Dashboard</Link>
-            <Link to="/buddy" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">🐈‍⬛ CatBot Buddy</Link>
-            <Link to="/crew" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">👥 Crew</Link>
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setHelpOpen((prev) => !prev)}
-                className="text-sm text-gray-300 hover:text-[#c8a45e] bg-transparent border-none cursor-pointer"
-              >
-                ❓ Help
-              </button>
-              {helpOpen && (
-                <div className="absolute right-0 mt-2 w-56 rounded border border-gray-700 bg-[#0d1b2a] shadow-lg p-2 z-[80]">
-                  {HELP_MENU_LINKS.map((link) => (
-                    <Link
-                      key={`help-${link.key}`}
-                      to={link.path}
-                      onClick={() => setHelpOpen(false)}
-                      className="block text-xs text-gray-300 hover:text-[#c8a45e] no-underline px-2 py-1 rounded hover:bg-[#112a44]"
-                    >
-                      {link.icon} {link.label}
-                    </Link>
-                  ))}
-                </div>
-              )}
+          <div className="hidden xl:flex items-start gap-5 ml-auto min-w-0">
+            <div className="flex items-center gap-4 min-w-0 pt-1">
+              <Link to="/" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">📊 Dashboard</Link>
+              <Link to="/workflow" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">📖 How It Works</Link>
+              <Link to="/white-papers" className="hidden 2xl:inline text-sm text-gray-300 hover:text-[#c8a45e] no-underline">📄 White Papers</Link>
+              <Link to="/user-guide" className="hidden 2xl:inline text-sm text-gray-300 hover:text-[#c8a45e] no-underline">🧭 User Guide</Link>
+              <Link to="/events/create" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">🎪 Events</Link>
+              <Link to="/imc-composer" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">IMC Composer</Link>
+              <Link to="/podcast" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">🎥 Capture</Link>
+              <Link to="/safety-risk" className="hidden 2xl:inline text-sm text-gray-300 hover:text-[#c8a45e] no-underline">🛡️ Safety</Link>
+              <Link to="/chat" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">💬 Chat Dashboard</Link>
+              <Link to="/buddy" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">🐈‍⬛ CatBot Buddy</Link>
+              <Link to="/crew" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">👥 Crew</Link>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setHelpOpen((prev) => !prev)}
+                  className="text-sm text-gray-300 hover:text-[#c8a45e] bg-transparent border-none cursor-pointer"
+                >
+                  ❓ Help
+                </button>
+                {helpOpen && (
+                  <div className="absolute right-0 mt-2 w-56 rounded border border-gray-700 bg-[#0d1b2a] shadow-lg p-2 z-[80]">
+                    {HELP_MENU_LINKS.map((link) => (
+                      <Link
+                        key={`help-${link.key}`}
+                        to={link.path}
+                        onClick={() => setHelpOpen(false)}
+                        className="block text-xs text-gray-300 hover:text-[#c8a45e] no-underline px-2 py-1 rounded hover:bg-[#112a44]"
+                      >
+                        {link.icon} {link.label}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {user.isAdmin && <Link to="/admin" className="text-sm text-[#c8a45e] hover:text-white no-underline">👑 Admin</Link>}
             </div>
-            {user.isAdmin && <Link to="/admin" className="text-sm text-[#c8a45e] hover:text-white no-underline">👑 Admin</Link>}
-            <div className="flex items-center gap-3 ml-4">
-              <CircleAvatar
-                entity={profileAvatarEntity}
-                type="user"
-                name={venue.name || user?.name || user?.email}
-                size="w-7 h-7"
-                textSize="text-[9px]"
+            <div className="w-[18rem] 2xl:w-[20rem] shrink-0">
+              <div className="flex items-center justify-end gap-2 mb-1">
+                <CircleAvatar
+                  entity={profileAvatarEntity}
+                  type="user"
+                  name={venue.name || user?.name || user?.email}
+                  size="w-7 h-7"
+                  textSize="text-[9px]"
+                />
+                <span className="text-xs text-gray-300 truncate">{venue.name || user.email}</span>
+                <button onClick={handleLogout} className="text-xs text-gray-400 hover:text-white cursor-pointer bg-transparent border-none">Logout</button>
+              </div>
+              <GlobalSearchBar
+                mode="full"
+                enableShortcut
+                className="w-full"
+                placeholder="Search pages, events, venues, people…"
               />
-              <span className="text-xs text-gray-400">{venue.name || user.email}</span>
-              <button onClick={handleLogout} className="text-xs text-gray-400 hover:text-white cursor-pointer bg-transparent border-none">Logout</button>
             </div>
-          </div>
           </div>
 
           <div className="xl:hidden flex items-center gap-1">
