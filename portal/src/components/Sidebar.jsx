@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { isVenueRole } from '../constants/clientTypes';
+import GlobalSearchBar from './GlobalSearchBar';
 
 export default function Sidebar() {
   const { user, isAdmin } = useAuth();
@@ -68,6 +69,14 @@ export default function Sidebar() {
       className="hidden lg:flex flex-col w-60 bg-white border-r border-gray-200 fixed left-0 overflow-y-auto py-4 z-30"
       style={{ top: 'var(--imc-nav-height, 52px)', height: 'calc(100vh - var(--imc-nav-height, 52px))' }}
     >
+      <div className="px-4 pb-3 mb-2 border-b border-gray-100">
+        <GlobalSearchBar
+          mode="compact"
+          enableShortcut
+          className="w-full"
+          placeholder="Search pages, events, venues, people…"
+        />
+      </div>
       {linkGroups.map((group) => (
         <div key={group.title} className="mb-2">
           <p className="px-5 pt-2 pb-1 m-0 text-[10px] uppercase tracking-wide text-gray-400">{group.title}</p>

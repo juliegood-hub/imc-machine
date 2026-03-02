@@ -159,22 +159,7 @@ export default function Navbar() {
       {user && (
         <>
           {/* Desktop nav */}
-          <div className="hidden xl:flex items-center gap-3 ml-auto min-w-0">
-            <div className="hidden 2xl:block w-[22rem] shrink-0">
-              <GlobalSearchBar
-                mode="full"
-                enableShortcut
-                className="w-full"
-                placeholder="Search pages, events, venues, people…"
-              />
-            </div>
-            <div className="2xl:hidden shrink-0">
-              <GlobalSearchBar
-                mode="compact"
-                className=""
-                placeholder="Search pages, events, venues, people…"
-              />
-            </div>
+          <div className="hidden xl:flex items-center gap-4 ml-auto min-w-0">
             <div className="flex items-center gap-4 min-w-0">
             <Link to="/" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">📊 Dashboard</Link>
             <Link to="/workflow" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">📖 How It Works</Link>
