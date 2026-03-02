@@ -129,7 +129,7 @@ export default function Navbar() {
 
   return (
     <nav ref={navRef} className="relative bg-[#0d1b2a] text-white px-4 md:px-6 py-3 flex items-center justify-between sticky top-0 z-50">
-      <Link to={brandHref} className="flex items-center gap-3 no-underline min-w-0 flex-1 pr-2 md:pr-4">
+      <Link to={brandHref} className="flex items-center gap-3 no-underline min-w-0 flex-1 xl:flex-none xl:max-w-[32rem] pr-2 md:pr-4">
         <img
           src="/imc-catbot-icon.svg"
           alt="The IMC Machine"
@@ -158,25 +158,32 @@ export default function Navbar() {
 
       {user && (
         <>
-          <div className="hidden xl:block w-full max-w-md mr-4">
-            <GlobalSearchBar
-              mode="full"
-              enableShortcut
-              className="w-full"
-              placeholder="Search pages, events, venues, people…"
-            />
-          </div>
-
           {/* Desktop nav */}
-          <div className="hidden xl:flex items-center gap-4">
+          <div className="hidden xl:flex items-center gap-3 ml-auto min-w-0">
+            <div className="hidden 2xl:block w-[22rem] shrink-0">
+              <GlobalSearchBar
+                mode="full"
+                enableShortcut
+                className="w-full"
+                placeholder="Search pages, events, venues, people…"
+              />
+            </div>
+            <div className="2xl:hidden shrink-0">
+              <GlobalSearchBar
+                mode="compact"
+                className=""
+                placeholder="Search pages, events, venues, people…"
+              />
+            </div>
+            <div className="flex items-center gap-4 min-w-0">
             <Link to="/" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">📊 Dashboard</Link>
             <Link to="/workflow" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">📖 How It Works</Link>
-            <Link to="/white-papers" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">📄 White Papers</Link>
-            <Link to="/user-guide" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">🧭 User Guide</Link>
+            <Link to="/white-papers" className="hidden 2xl:inline text-sm text-gray-300 hover:text-[#c8a45e] no-underline">📄 White Papers</Link>
+            <Link to="/user-guide" className="hidden 2xl:inline text-sm text-gray-300 hover:text-[#c8a45e] no-underline">🧭 User Guide</Link>
             <Link to="/events/create" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">🎪 Events</Link>
             <Link to="/imc-composer" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">IMC Composer</Link>
             <Link to="/podcast" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">🎥 Capture</Link>
-            <Link to="/safety-risk" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">🛡️ Safety</Link>
+            <Link to="/safety-risk" className="hidden 2xl:inline text-sm text-gray-300 hover:text-[#c8a45e] no-underline">🛡️ Safety</Link>
             <Link to="/chat" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">💬 Chat Dashboard</Link>
             <Link to="/buddy" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">🐈‍⬛ CatBot Buddy</Link>
             <Link to="/crew" className="text-sm text-gray-300 hover:text-[#c8a45e] no-underline">👥 Crew</Link>
@@ -215,6 +222,7 @@ export default function Navbar() {
               <span className="text-xs text-gray-400">{venue.name || user.email}</span>
               <button onClick={handleLogout} className="text-xs text-gray-400 hover:text-white cursor-pointer bg-transparent border-none">Logout</button>
             </div>
+          </div>
           </div>
 
           <div className="xl:hidden flex items-center gap-1">
