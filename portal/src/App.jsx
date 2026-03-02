@@ -212,6 +212,20 @@ function AppLayout({ children }) {
   }, [useWindowScroll]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const scrollTarget = useWindowScroll ? window : (mainRef.current || window);
+    const resetToTop = () => {
+      scrollContainerToTop(scrollTarget, 'auto');
+      if (scrollTarget !== window) {
+        scrollContainerToTop(window, 'auto');
+      }
+      activeScrollableRef.current = scrollTarget;
+    };
+    const frame = window.requestAnimationFrame(resetToTop);
+    return () => window.cancelAnimationFrame(frame);
+  }, [location.pathname, location.search, useWindowScroll]);
+
+  useEffect(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined' || !isTouchDevice) return undefined;
     const captureActiveScrollable = (event) => {
       const target = event.target instanceof Element ? event.target : null;
