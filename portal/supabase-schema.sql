@@ -2530,10 +2530,10 @@ create index if not exists idx_message_mentions_role on message_mentions(mention
 
 -- ═══════════════════════════════════════════════════════════════
 -- RLS HARDENING PASS (OWNER / EVENT / ORG SCOPE)
--- Idempotent safety pass to cover newly added operational tables.
+-- Compatibility-safe: works whether users.auth_user_id exists or not.
 -- ═══════════════════════════════════════════════════════════════
 
-create or replace function imc_current_app_user_id()
+create or replace function public.imc_current_app_user_id()
 returns uuid
 language plpgsql
 stable
@@ -2542,23 +2542,35 @@ set search_path = public
 as $$
 declare
   resolved_user_id uuid;
+  has_auth_user_id boolean;
 begin
   if auth.uid() is null then
     return null;
   end if;
 
-  select u.id
-    into resolved_user_id
-  from users u
-  where u.auth_user_id = auth.uid()
-  order by u.created_at asc
-  limit 1;
+  select exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'users'
+      and column_name = 'auth_user_id'
+  ) into has_auth_user_id;
+
+  if has_auth_user_id then
+    execute 'select u.id
+             from public.users u
+             where u.auth_user_id::text = $1::text
+             order by u.created_at asc
+             limit 1'
+      into resolved_user_id
+      using auth.uid();
+  end if;
 
   if resolved_user_id is null then
     select u.id
       into resolved_user_id
-    from users u
-    where lower(u.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+    from public.users u
+    where lower(coalesce(u.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
     order by u.created_at asc
     limit 1;
   end if;
@@ -2567,99 +2579,74 @@ begin
 end;
 $$;
 
-create or replace function imc_is_admin()
+create or replace function public.imc_is_admin()
 returns boolean
-language sql
+language plpgsql
 stable
 security definer
 set search_path = public
 as $$
-  select
-    exists (
-      select 1
-      from users u
-      where u.id = imc_current_app_user_id()
-        and coalesce(u.is_admin, false) = true
-    )
+declare
+  has_is_admin boolean;
+  admin_value boolean := false;
+begin
+  select exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'users'
+      and column_name = 'is_admin'
+  ) into has_is_admin;
+
+  if has_is_admin then
+    select coalesce(u.is_admin, false)
+      into admin_value
+    from public.users u
+    where u.id::text = public.imc_current_app_user_id()::text
+    limit 1;
+  end if;
+
+  return coalesce(admin_value, false)
     or lower(coalesce(auth.jwt() ->> 'email', '')) = lower('juliegood@goodcreativemedia.com');
-$$;
-
-create or replace function imc_can_access_user(target_user_id uuid)
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select target_user_id is not null
-    and (imc_is_admin() or target_user_id = imc_current_app_user_id());
-$$;
-
-create or replace function imc_can_access_event(target_event_id uuid)
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select target_event_id is not null
-    and exists (
-      select 1
-      from events e
-      where e.id = target_event_id
-        and (imc_is_admin() or e.user_id = imc_current_app_user_id())
-    );
-$$;
-
-create or replace function imc_can_access_venue(target_venue_id uuid)
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select target_venue_id is not null
-    and exists (
-      select 1
-      from venue_profiles v
-      where v.id = target_venue_id
-        and (imc_is_admin() or v.user_id = imc_current_app_user_id())
-    );
-$$;
-
-create or replace function imc_can_access_org(target_org_id uuid)
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select imc_can_access_venue(target_org_id);
+end;
 $$;
 
 do $$
 declare
   t record;
+  p record;
+  has_auth_user_id boolean;
   has_user_id boolean;
   has_event_id boolean;
   has_booking_id boolean;
   has_venue_id boolean;
   has_org_id boolean;
-  has_message_id boolean;
-  has_checklist_id boolean;
-  has_training_session_id boolean;
-  has_calendar_entry_id boolean;
-  has_festival_id boolean;
-  has_touring_show_id boolean;
-  has_budget_id boolean;
-  has_rider_id boolean;
-  has_staff_profile_id boolean;
-  has_venue_profile_id boolean;
+  has_assigned_to_user_id boolean;
+  has_created_by_user_id boolean;
   has_is_system boolean;
+  has_venue_profiles_table boolean;
+  has_organizations_table boolean;
   using_expr text;
   check_expr text;
 begin
-  -- Users table policy (supports auth bootstrap + admin override).
+  select exists (
+    select 1 from information_schema.tables
+    where table_schema = 'public' and table_name = 'venue_profiles'
+  ) into has_venue_profiles_table;
+
+  select exists (
+    select 1 from information_schema.tables
+    where table_schema = 'public' and table_name = 'organizations'
+  ) into has_organizations_table;
+
+  select exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'users'
+      and column_name = 'auth_user_id'
+  ) into has_auth_user_id;
+
   execute 'alter table public.users enable row level security';
   execute 'drop policy if exists "Users can read own record" on public.users';
   execute 'drop policy if exists "Users can update own record" on public.users';
@@ -2667,35 +2654,59 @@ begin
   execute 'drop policy if exists imc_users_update on public.users';
   execute 'drop policy if exists imc_users_insert on public.users';
   execute 'drop policy if exists imc_users_delete on public.users';
-  execute 'create policy imc_users_select on public.users for select using (
-    imc_is_admin()
-    or id = imc_current_app_user_id()
-    or auth_user_id = auth.uid()
-    or lower(email) = lower(coalesce(auth.jwt() ->> ''email'', ''''))
-  )';
-  execute 'create policy imc_users_update on public.users for update using (
-    imc_is_admin()
-    or id = imc_current_app_user_id()
-    or auth_user_id = auth.uid()
-  ) with check (
-    imc_is_admin()
-    or id = imc_current_app_user_id()
-    or auth_user_id = auth.uid()
-  )';
-  execute 'create policy imc_users_insert on public.users for insert with check (
-    imc_is_admin()
-    or auth_user_id = auth.uid()
-    or lower(email) = lower(coalesce(auth.jwt() ->> ''email'', ''''))
-  )';
-  execute 'create policy imc_users_delete on public.users for delete using (imc_is_admin())';
 
-  -- Invites: public read (signup validation), admin mutation only.
+  if has_auth_user_id then
+    execute 'create policy imc_users_select on public.users for select using (
+      public.imc_is_admin()
+      or id::text = public.imc_current_app_user_id()::text
+      or auth_user_id::text = auth.uid()::text
+      or lower(coalesce(email, )) = lower(coalesce(auth.jwt() ->> email, ))
+    )';
+
+    execute 'create policy imc_users_update on public.users for update using (
+      public.imc_is_admin()
+      or id::text = public.imc_current_app_user_id()::text
+      or auth_user_id::text = auth.uid()::text
+    ) with check (
+      public.imc_is_admin()
+      or id::text = public.imc_current_app_user_id()::text
+      or auth_user_id::text = auth.uid()::text
+    )';
+
+    execute 'create policy imc_users_insert on public.users for insert with check (
+      public.imc_is_admin()
+      or auth_user_id::text = auth.uid()::text
+      or lower(coalesce(email, )) = lower(coalesce(auth.jwt() ->> email, ))
+    )';
+  else
+    execute 'create policy imc_users_select on public.users for select using (
+      public.imc_is_admin()
+      or id::text = public.imc_current_app_user_id()::text
+      or lower(coalesce(email, )) = lower(coalesce(auth.jwt() ->> email, ))
+    )';
+
+    execute 'create policy imc_users_update on public.users for update using (
+      public.imc_is_admin()
+      or id::text = public.imc_current_app_user_id()::text
+    ) with check (
+      public.imc_is_admin()
+      or id::text = public.imc_current_app_user_id()::text
+    )';
+
+    execute 'create policy imc_users_insert on public.users for insert with check (
+      public.imc_is_admin()
+      or lower(coalesce(email, )) = lower(coalesce(auth.jwt() ->> email, ))
+    )';
+  end if;
+
+  execute 'create policy imc_users_delete on public.users for delete using (public.imc_is_admin())';
+
   execute 'alter table public.invites enable row level security';
   execute 'drop policy if exists "Anyone can read invites" on public.invites';
   execute 'drop policy if exists imc_invites_public_read on public.invites';
   execute 'drop policy if exists imc_invites_admin_write on public.invites';
   execute 'create policy imc_invites_public_read on public.invites for select using (true)';
-  execute 'create policy imc_invites_admin_write on public.invites for all using (imc_is_admin()) with check (imc_is_admin())';
+  execute 'create policy imc_invites_admin_write on public.invites for all using (public.imc_is_admin()) with check (public.imc_is_admin())';
 
   for t in
     select tablename
@@ -2705,154 +2716,51 @@ begin
   loop
     execute format('alter table public.%I enable row level security', t.tablename);
 
-    select exists(select 1 from information_schema.columns where table_schema = 'public' and table_name = t.tablename and column_name = 'user_id') into has_user_id;
-    select exists(select 1 from information_schema.columns where table_schema = 'public' and table_name = t.tablename and column_name = 'event_id') into has_event_id;
-    select exists(select 1 from information_schema.columns where table_schema = 'public' and table_name = t.tablename and column_name = 'booking_id') into has_booking_id;
-    select exists(select 1 from information_schema.columns where table_schema = 'public' and table_name = t.tablename and column_name = 'venue_id') into has_venue_id;
-    select exists(select 1 from information_schema.columns where table_schema = 'public' and table_name = t.tablename and column_name = 'org_id') into has_org_id;
-    select exists(select 1 from information_schema.columns where table_schema = 'public' and table_name = t.tablename and column_name = 'message_id') into has_message_id;
-    select exists(select 1 from information_schema.columns where table_schema = 'public' and table_name = t.tablename and column_name = 'checklist_id') into has_checklist_id;
-    select exists(select 1 from information_schema.columns where table_schema = 'public' and table_name = t.tablename and column_name = 'training_session_id') into has_training_session_id;
-    select exists(select 1 from information_schema.columns where table_schema = 'public' and table_name = t.tablename and column_name = 'calendar_entry_id') into has_calendar_entry_id;
-    select exists(select 1 from information_schema.columns where table_schema = 'public' and table_name = t.tablename and column_name = 'festival_id') into has_festival_id;
-    select exists(select 1 from information_schema.columns where table_schema = 'public' and table_name = t.tablename and column_name = 'touring_show_id') into has_touring_show_id;
-    select exists(select 1 from information_schema.columns where table_schema = 'public' and table_name = t.tablename and column_name = 'budget_id') into has_budget_id;
-    select exists(select 1 from information_schema.columns where table_schema = 'public' and table_name = t.tablename and column_name = 'rider_id') into has_rider_id;
-    select exists(select 1 from information_schema.columns where table_schema = 'public' and table_name = t.tablename and column_name = 'staff_profile_id') into has_staff_profile_id;
-    select exists(select 1 from information_schema.columns where table_schema = 'public' and table_name = t.tablename and column_name = 'venue_profile_id') into has_venue_profile_id;
-    select exists(select 1 from information_schema.columns where table_schema = 'public' and table_name = t.tablename and column_name = 'is_system') into has_is_system;
+    for p in
+      select policyname
+      from pg_policies
+      where schemaname = 'public' and tablename = t.tablename
+    loop
+      execute format('drop policy if exists %I on public.%I', p.policyname, t.tablename);
+    end loop;
 
-    using_expr := null;
-    check_expr := null;
+    select exists(select 1 from information_schema.columns where table_schema='public' and table_name=t.tablename and column_name='user_id') into has_user_id;
+    select exists(select 1 from information_schema.columns where table_schema='public' and table_name=t.tablename and column_name='event_id') into has_event_id;
+    select exists(select 1 from information_schema.columns where table_schema='public' and table_name=t.tablename and column_name='booking_id') into has_booking_id;
+    select exists(select 1 from information_schema.columns where table_schema='public' and table_name=t.tablename and column_name='venue_id') into has_venue_id;
+    select exists(select 1 from information_schema.columns where table_schema='public' and table_name=t.tablename and column_name='org_id') into has_org_id;
+    select exists(select 1 from information_schema.columns where table_schema='public' and table_name=t.tablename and column_name='assigned_to_user_id') into has_assigned_to_user_id;
+    select exists(select 1 from information_schema.columns where table_schema='public' and table_name=t.tablename and column_name='created_by_user_id') into has_created_by_user_id;
+    select exists(select 1 from information_schema.columns where table_schema='public' and table_name=t.tablename and column_name='is_system') into has_is_system;
 
-    if has_booking_id then
-      using_expr := '(imc_is_admin() or imc_can_access_event(booking_id))';
+    using_expr := '(public.imc_is_admin())';
+    check_expr := '(public.imc_is_admin())';
+
+    if t.tablename = 'completion_tasks' and has_assigned_to_user_id and has_created_by_user_id then
+      using_expr := '(public.imc_is_admin() or assigned_to_user_id::text = public.imc_current_app_user_id()::text or created_by_user_id::text = public.imc_current_app_user_id()::text)';
+      check_expr := using_expr;
+    elsif has_booking_id then
+      using_expr := '(public.imc_is_admin() or exists (select 1 from public.events e where e.id::text = booking_id::text and e.user_id::text = public.imc_current_app_user_id()::text))';
       check_expr := using_expr;
     elsif has_event_id then
-      using_expr := '(imc_is_admin() or imc_can_access_event(event_id))';
-      check_expr := using_expr;
-    elsif has_festival_id then
-      using_expr := '(imc_is_admin() or exists (
-        select 1 from festivals f
-        where f.id = festival_id
-          and f.user_id = imc_current_app_user_id()
-      ))';
-      check_expr := using_expr;
-    elsif has_touring_show_id then
-      using_expr := '(imc_is_admin() or exists (
-        select 1 from touring_shows ts
-        where ts.id = touring_show_id
-          and ts.user_id = imc_current_app_user_id()
-      ))';
-      check_expr := using_expr;
-    elsif has_calendar_entry_id then
-      using_expr := '(imc_is_admin() or exists (
-        select 1 from rehearsal_calendar_entries ce
-        where ce.id = calendar_entry_id
-          and ce.user_id = imc_current_app_user_id()
-      ))';
-      check_expr := using_expr;
-    elsif has_training_session_id then
-      using_expr := '(imc_is_admin() or exists (
-        select 1 from training_sessions ts
-        where ts.id = training_session_id
-          and ts.user_id = imc_current_app_user_id()
-      ))';
-      check_expr := using_expr;
-    elsif has_checklist_id and t.tablename = 'production_checklist_items' then
-      using_expr := '(imc_is_admin() or exists (
-        select 1
-        from production_checklists pc
-        where pc.id = checklist_id
-          and pc.user_id = imc_current_app_user_id()
-      ))';
-      check_expr := using_expr;
-    elsif has_checklist_id and t.tablename = 'event_safety_checklist_items' then
-      using_expr := '(imc_is_admin() or exists (
-        select 1
-        from event_safety_checklists esc
-        where esc.id = checklist_id
-          and esc.user_id = imc_current_app_user_id()
-      ))';
-      check_expr := using_expr;
-    elsif has_message_id then
-      using_expr := '(imc_is_admin() or exists (
-        select 1
-        from event_messages em
-        join events e on e.id = em.event_id
-        where em.id = message_id
-          and e.user_id = imc_current_app_user_id()
-      ))';
-      check_expr := using_expr;
-    elsif has_budget_id then
-      using_expr := '(imc_is_admin() or exists (
-        select 1 from booking_budgets bb
-        where bb.id = budget_id
-          and bb.user_id = imc_current_app_user_id()
-      ))';
-      check_expr := using_expr;
-    elsif has_rider_id then
-      using_expr := '(imc_is_admin() or exists (
-        select 1 from booking_riders br
-        where br.id = rider_id
-          and br.user_id = imc_current_app_user_id()
-      ))';
-      check_expr := using_expr;
-    elsif has_staff_profile_id then
-      using_expr := '(imc_is_admin() or exists (
-        select 1 from staff_profiles sp
-        where sp.id = staff_profile_id
-          and sp.user_id = imc_current_app_user_id()
-      ))';
-      check_expr := using_expr;
-    elsif has_venue_id then
-      using_expr := '(imc_is_admin() or imc_can_access_venue(venue_id))';
-      check_expr := using_expr;
-    elsif has_venue_profile_id then
-      using_expr := '(imc_is_admin() or imc_can_access_venue(venue_profile_id))';
-      check_expr := using_expr;
-    elsif has_org_id then
-      using_expr := '(imc_is_admin() or imc_can_access_org(org_id))';
+      using_expr := '(public.imc_is_admin() or exists (select 1 from public.events e where e.id::text = event_id::text and e.user_id::text = public.imc_current_app_user_id()::text))';
       check_expr := using_expr;
     elsif has_user_id then
-      using_expr := '(imc_is_admin() or imc_can_access_user(user_id))';
+      using_expr := '(public.imc_is_admin() or user_id::text = public.imc_current_app_user_id()::text)';
       if has_is_system then
-        using_expr := using_expr || ' or (user_id is null and coalesce(is_system, false) = true)';
-      elsif t.tablename = 'certification_types' then
-        using_expr := using_expr || ' or user_id is null';
+        using_expr := '(public.imc_is_admin() or user_id::text = public.imc_current_app_user_id()::text or (user_id is null and coalesce(is_system, false) = true))';
       end if;
-      check_expr := '(imc_is_admin() or imc_can_access_user(user_id))';
-    elsif t.tablename = 'notification_templates' then
-      using_expr := '(true)';
-      check_expr := '(imc_is_admin())';
-    else
-      using_expr := '(imc_is_admin())';
-      check_expr := '(imc_is_admin())';
+      check_expr := '(public.imc_is_admin() or user_id::text = public.imc_current_app_user_id()::text)';
+    elsif has_venue_id and has_venue_profiles_table then
+      using_expr := '(public.imc_is_admin() or exists (select 1 from public.venue_profiles v where v.id::text = venue_id::text and v.user_id::text = public.imc_current_app_user_id()::text))';
+      check_expr := using_expr;
+    elsif has_org_id and has_organizations_table then
+      using_expr := '(public.imc_is_admin() or exists (select 1 from public.organizations o where o.id::text = org_id::text and o.user_id::text = public.imc_current_app_user_id()::text))';
+      check_expr := using_expr;
     end if;
 
-    execute format('drop policy if exists imc_scope_all on public.%I', t.tablename);
-    execute format(
-      'create policy imc_scope_all on public.%I for all using %s with check %s',
-      t.tablename,
-      using_expr,
-      check_expr
-    );
+    execute format('create policy imc_scope_all on public.%I for all using %s with check %s', t.tablename, using_expr, check_expr);
   end loop;
-
-  -- Completion tasks can be worked by assignee or creator.
-  execute 'alter table public.completion_tasks enable row level security';
-  execute 'drop policy if exists imc_completion_scope on public.completion_tasks';
-  execute 'create policy imc_completion_scope on public.completion_tasks
-    for all
-    using (
-      imc_is_admin()
-      or assigned_to_user_id = imc_current_app_user_id()
-      or created_by_user_id = imc_current_app_user_id()
-    )
-    with check (
-      imc_is_admin()
-      or created_by_user_id = imc_current_app_user_id()
-      or assigned_to_user_id = imc_current_app_user_id()
-    )';
 end;
 $$;
+
