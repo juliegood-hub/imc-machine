@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, useLocation, useNavigate, Link } from 'react-router-dom';
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { VenueProvider } from './context/VenueContext';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -110,6 +110,7 @@ function AppLayout({ children }) {
   });
   const pageMeta = resolvePageFlow(location.pathname, { variant: workflowVariant });
   const mainRef = useRef(null);
+  const stepActionsRef = useRef(null);
   const activeScrollableRef = useRef(null);
   const touchStartYRef = useRef(0);
   const touchStartXRef = useRef(0);
@@ -192,12 +193,51 @@ function AppLayout({ children }) {
     navigate(appendWorkflowVariant(pageMeta.nextPath || '/'));
   };
 
+  const scrollToStepActions = useCallback((behavior = 'smooth') => {
+    if (!stepActionsRef.current) return;
+    stepActionsRef.current.scrollIntoView({ behavior, block: 'center' });
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const handleGuidedNextScroll = () => scrollToStepActions('smooth');
+    window.addEventListener('imc-guided-next', handleGuidedNextScroll);
+    return () => {
+      window.removeEventListener('imc-guided-next', handleGuidedNextScroll);
+    };
+  }, [scrollToStepActions]);
+
   const pageStatusMeta = {
-    complete: { label: 'Complete', className: 'bg-emerald-100 text-emerald-700' },
-    saved: { label: 'Saved for Later', className: 'bg-blue-100 text-blue-700' },
-    skipped: { label: 'Skipped', className: 'bg-amber-100 text-amber-800' },
-    in_progress: { label: 'In Progress', className: 'bg-gray-100 text-gray-600' },
-  }[pageActionStatus] || { label: 'In Progress', className: 'bg-gray-100 text-gray-600' };
+    complete: {
+      label: 'Complete',
+      className: 'bg-emerald-100 text-emerald-700',
+      cardClassName: 'border-emerald-200 bg-emerald-50',
+      reportNoteClassName: 'text-emerald-800',
+    },
+    saved: {
+      label: 'Saved for Later',
+      className: 'bg-blue-100 text-blue-700',
+      cardClassName: 'border-blue-200 bg-blue-50',
+      reportNoteClassName: 'text-blue-800',
+    },
+    skipped: {
+      label: 'Skipped',
+      className: 'bg-amber-100 text-amber-800',
+      cardClassName: 'border-amber-200 bg-amber-50',
+      reportNoteClassName: 'text-amber-800',
+    },
+    in_progress: {
+      label: 'In Progress',
+      className: 'bg-gray-100 text-gray-600',
+      cardClassName: 'border-slate-200 bg-slate-50',
+      reportNoteClassName: 'text-slate-700',
+    },
+  }[pageActionStatus] || {
+    label: 'In Progress',
+    className: 'bg-gray-100 text-gray-600',
+    cardClassName: 'border-slate-200 bg-slate-50',
+    reportNoteClassName: 'text-slate-700',
+  };
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -399,12 +439,19 @@ function AppLayout({ children }) {
             {children}
           </div>
           <div className="px-4 md:px-8 pb-4">
-            <div className="card border border-gray-200 bg-white">
+            <div
+              ref={stepActionsRef}
+              data-imc-step-actions="true"
+              className={`card border ${pageStatusMeta.cardClassName}`}
+            >
               <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                 <div>
                   <p className="text-sm font-semibold m-0">Step Actions</p>
                   <p className="text-xs text-gray-500 m-0 mt-1">
                     {pageMeta.actionIntro || 'Choose what you want to do with this section before moving on.'}
+                  </p>
+                  <p className={`text-[11px] m-0 mt-1 ${pageStatusMeta.reportNoteClassName}`}>
+                    Group reporting tool only: this updates completion status for team and stakeholder reporting.
                   </p>
                 </div>
                 <span className={`text-xs px-2 py-1 rounded ${pageStatusMeta.className}`}>{pageStatusMeta.label}</span>
@@ -413,7 +460,7 @@ function AppLayout({ children }) {
                 <button type="button" className="btn-primary text-xs" onClick={markStepComplete}>✓ {pageMeta.actionLabels?.complete || 'Mark Complete'}</button>
                 <button type="button" className="btn-secondary text-xs" onClick={saveForLater}>{pageMeta.actionLabels?.save || 'Save for Later'}</button>
                 <button type="button" className="btn-secondary text-xs" onClick={skipThisStep}>{pageMeta.actionLabels?.skip || 'Skip This Step'}</button>
-                <button type="button" className="btn-secondary text-xs" onClick={goToNextStep}>
+                <button type="button" className="btn-secondary btn-next-cta text-xs" onClick={goToNextStep}>
                   {pageMeta.actionLabels?.next || 'Next Step →'}
                 </button>
               </div>

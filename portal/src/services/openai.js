@@ -48,6 +48,10 @@ const GENRE_STYLES = {
     tone: 'Contemplative, precise, respectful of tradition.',
     mood: 'The silence before the downbeat. Sacred attention.'
   },
+  'Talking Heads|Comedy|Speaking|Lectures|Workshops': {
+    tone: 'Sharp, witty, conversational.',
+    mood: 'The lean-in moment. Anticipation of the punchline or insight.'
+  },
   'Comedy|Speaking|Lectures|Workshops': {
     tone: 'Sharp, witty, conversational.',
     mood: 'The lean-in moment. Anticipation of the punchline or insight.'

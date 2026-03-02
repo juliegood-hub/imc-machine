@@ -108,6 +108,7 @@ const GENRE_VISUALS = {
   'Theater|Plays|Musicals': 'Closeup of velvet curtain texture, spotlight beam cutting through dark air, ornate theater seat details, playbill on a vintage table, stage door with hand-painted sign. NO people on stage.',
   'Live Music|Contemporary|Jazz|Electronic|Indie': 'Closeup of guitar neck against brick wall, drum kit in empty spotlight, vintage amp knobs, mic stand silhouette, vinyl records on a bar top, neon bar sign reflected in a glass. NO people performing.',
   'Orchestral|Classical|Choral': 'Closeup of violin scroll, sheet music on a stand with warm light, concert hall architectural ceiling details, polished wood stage floor, brass instrument bell reflection. NO musicians.',
+  'Talking Heads|Comedy|Speaking|Lectures|Workshops': 'Empty mic on a stool under spotlight, brick wall comedy club backdrop, notebook and coffee on a podium, marquee letterboard with event details blurred. NO performers.',
   'Comedy|Speaking|Lectures|Workshops': 'Empty mic on a stool under spotlight, brick wall comedy club backdrop, notebook and coffee on a podium, marquee letterboard with event details blurred. NO performers.',
   'Dance|Performance Art|Experimental': 'Dance shoes on a wooden floor, rehearsal barre closeup, fabric in motion blur (no body visible), chalk dust in spotlight, abstract shadows on a studio wall. NO dancers.',
 };

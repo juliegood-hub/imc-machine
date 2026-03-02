@@ -2202,7 +2202,7 @@ function UserEditModal({ user, profile, events, onSave, onClose, onUpdateUser, o
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Genre</label>
                   <input type="text" value={profile?.genre || ""} onChange={e => updateProfile("genre", e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" placeholder="Jazz, Rock, Electronic, Comedy..." />
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" placeholder="Jazz, Rock, Electronic, Talking Heads / Comedy..." />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Members / Ensemble Size</label>

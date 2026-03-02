@@ -13,13 +13,22 @@ import { uploadImageAsset } from '../services/mediaUpload';
 import { deepResearchDraft, deepResearchImageCaptionPack } from '../services/research';
 import { isArtistRole, normalizeClientType } from '../constants/clientTypes';
 
+const TALKING_HEADS_GENRE_KEY = 'Talking Heads | Comedy | Speaking | Lectures | Workshops';
+const LEGACY_COMEDY_GENRE_KEY = 'Comedy | Speaking | Lectures | Workshops';
+
+function normalizeGenreValue(rawGenre = '') {
+  const value = String(rawGenre || '').trim();
+  if (value === LEGACY_COMEDY_GENRE_KEY) return TALKING_HEADS_GENRE_KEY;
+  return value;
+}
+
 const PERFORMANCE_GENRES = [
   'Theater | Plays | Musicals',
   'Acting Gigs | Character Performance | Seasonal',
   'Live Music | Contemporary | Jazz | Electronic | Indie',
   'Orchestral | Classical | Choral',
   'Visual Art | Artisan | Gallery | Craft Shows',
-  'Comedy | Speaking | Lectures | Workshops',
+  TALKING_HEADS_GENRE_KEY,
   'Yoga | Wellness | Mindfulness Classes',
   'Legal CLE | Law Panels | Bar Association Events',
   'Dance | Performance Art | Experimental',
@@ -351,7 +360,7 @@ export default function ArtistSetup() {
     hometown: venue.hometown || 'San Antonio, TX',
     
     // Professional
-    genre: venue.genre || '',
+    genre: normalizeGenreValue(venue.genre || ''),
     subgenres: venue.subgenres || [],
     yearsActive: venue.yearsActive || '',
     recordLabel: venue.recordLabel || '',
@@ -422,7 +431,10 @@ export default function ArtistSetup() {
   const [photoCaptionStatus, setPhotoCaptionStatus] = useState('');
   const [avatarUploadStatus, setAvatarUploadStatus] = useState('');
 
-  const update = (field) => (e) => setForm({ ...form, [field]: e.target.value });
+  const update = (field) => (e) => {
+    const nextValue = field === 'genre' ? normalizeGenreValue(e.target.value) : e.target.value;
+    setForm({ ...form, [field]: nextValue });
+  };
   const updateCheckbox = (field) => (e) => setForm({ ...form, [field]: e.target.checked });
 
   const toggleSection = (section) => {
@@ -724,7 +736,16 @@ export default function ArtistSetup() {
   );
 
   const applyArtistPatch = (fields) => {
-    setForm(prev => ({ ...prev, ...fields }));
+    const patch = { ...fields };
+    if (Object.prototype.hasOwnProperty.call(patch, 'genre')) {
+      patch.genre = normalizeGenreValue(patch.genre);
+    }
+    setForm(prev => ({ ...prev, ...patch }));
+  };
+
+  const requestGuidedNextScroll = () => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new Event('imc-guided-next'));
   };
 
   return (
@@ -942,7 +963,17 @@ export default function ArtistSetup() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     {isArtisanUser ? 'Primary Medium' : isPoliticianUser ? 'Office Level / Jurisdiction' : isKnowledgeCreatorUser ? 'Primary Topic / Focus' : 'Genre'}
                   </label>
-                  <select value={isPoliticianUser ? form.politicalScope : form.genre} onChange={update(isPoliticianUser ? 'politicalScope' : 'genre')}
+                  <select
+                    value={isPoliticianUser ? form.politicalScope : form.genre}
+                    onChange={(event) => {
+                      if (isPoliticianUser) {
+                        update('politicalScope')(event);
+                      } else {
+                        const nextGenre = normalizeGenreValue(event.target.value);
+                        setForm((prev) => ({ ...prev, genre: nextGenre }));
+                        requestGuidedNextScroll();
+                      }
+                    }}
                     className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-[#c8a45e] bg-white">
                     <option value="">{isArtisanUser ? 'Select primary medium...' : isPoliticianUser ? 'Select campaign jurisdiction...' : isKnowledgeCreatorUser ? 'Select primary topic...' : 'Select genre...'}</option>
                     {(isArtisanUser ? ARTISAN_MEDIA : isPoliticianUser ? POLITICAL_SCOPES : isKnowledgeCreatorUser ? KNOWLEDGE_CREATOR_TOPICS : PERFORMANCE_GENRES).map(g => <option key={g} value={g}>{g}</option>)}

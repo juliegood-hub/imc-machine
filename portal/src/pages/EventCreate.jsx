@@ -36,6 +36,15 @@ import {
 const LEGAL_CLE_GENRE_KEY = 'Legal CLE | Law Panels | Bar Association Events';
 const ARTISAN_GENRE_KEY = 'Visual Art | Artisan | Gallery | Craft Shows';
 const YOGA_WELLNESS_GENRE_KEY = 'Yoga | Wellness | Mindfulness Classes';
+const TALKING_HEADS_GENRE_KEY = 'Talking Heads | Comedy | Speaking | Lectures | Workshops';
+const LEGACY_COMEDY_GENRE_KEY = 'Comedy | Speaking | Lectures | Workshops';
+
+function normalizeGenreValue(rawGenre = '') {
+  const value = String(rawGenre || '').trim();
+  if (!value) return '';
+  if (value === LEGACY_COMEDY_GENRE_KEY) return TALKING_HEADS_GENRE_KEY;
+  return value;
+}
 
 const GENRES = [
   { key: THEATER_GENRE_KEY, icon: '🎭', color: '#8B5CF6', desc: 'Plays, musicals, theatrical performances' },
@@ -46,7 +55,7 @@ const GENRES = [
   { key: 'Literary | Poetry | Book Signings', icon: '📚', color: '#7C3AED', desc: 'Book signings, poetry readings, author talks, literary events' },
   { key: LEGAL_CLE_GENRE_KEY, icon: '⚖️', color: '#1E40AF', desc: 'CLE seminars, legal panels, bar events, law-focused speaking events' },
   { key: 'Politics | Civic | Campaign Events', icon: '🗳️', color: '#2563EB', desc: 'Campaign launches, civic forums, policy events, candidate meet-and-greets' },
-  { key: 'Comedy | Speaking | Lectures | Workshops', icon: '🎤', color: '#F59E0B', desc: 'Comedy, talks, workshops, panels, classes' },
+  { key: TALKING_HEADS_GENRE_KEY, icon: '🎤', color: '#F59E0B', desc: 'Talking heads, comedy, talks, workshops, panels, classes' },
   { key: YOGA_WELLNESS_GENRE_KEY, icon: '🧘', color: '#14B8A6', desc: 'Yoga classes, mindfulness sessions, breathwork, and wellness gatherings' },
   { key: 'Dance | Performance Art | Experimental', icon: '💃', color: '#10B981', desc: 'Dance, movement theater, and live performance art' },
 ];
@@ -60,7 +69,8 @@ const GENRE_ROLES = {
   'Literary | Poetry | Book Signings': ['Author', 'Poet', 'Spoken Word Artist', 'Moderator', 'Interviewer', 'Editor', 'Publisher', 'Bookseller', 'Host/Emcee'],
   [LEGAL_CLE_GENRE_KEY]: ['Attorney', 'Trial Lawyer', 'General Counsel', 'District Attorney Candidate', 'Assistant District Attorney', 'Judge', 'Law Professor', 'CLE Presenter', 'CLE Moderator', 'Panelist', 'Bar Association Host', 'MCLE Coordinator', 'Legal Aid Director', 'Policy Counsel', 'Compliance Officer'],
   'Politics | Civic | Campaign Events': ['Candidate for Office', 'Incumbent Officeholder', 'Campaign Manager', 'Field Director', 'Policy Director', 'Press Secretary', 'Volunteer Coordinator', 'Fundraising Chair', 'District Attorney Candidate', 'Judge Candidate', 'County Clerk Candidate', 'City Council Candidate', 'County Commissioner Candidate', 'State House Candidate', 'State Senate Candidate', 'Congressional Candidate', 'Moderator', 'Host/Emcee'],
-  'Comedy | Speaking | Lectures | Workshops': ['Comedian/Comic', 'Host/Emcee', 'Keynote Speaker', 'Panelist', 'Moderator', 'Workshop Facilitator', 'Opening Act', 'Headliner', 'Candidate for Office', 'Campaign Manager', 'District Attorney Candidate', 'Judge Candidate', 'County Clerk Candidate'],
+  [TALKING_HEADS_GENRE_KEY]: ['Comedian/Comic', 'Host/Emcee', 'Keynote Speaker', 'Panelist', 'Moderator', 'Workshop Facilitator', 'Opening Act', 'Headliner', 'Candidate for Office', 'Campaign Manager', 'District Attorney Candidate', 'Judge Candidate', 'County Clerk Candidate'],
+  [LEGACY_COMEDY_GENRE_KEY]: ['Comedian/Comic', 'Host/Emcee', 'Keynote Speaker', 'Panelist', 'Moderator', 'Workshop Facilitator', 'Opening Act', 'Headliner', 'Candidate for Office', 'Campaign Manager', 'District Attorney Candidate', 'Judge Candidate', 'County Clerk Candidate'],
   [YOGA_WELLNESS_GENRE_KEY]: ['Yoga Instructor', 'Breathwork Facilitator', 'Meditation Guide', 'Wellness Coach', 'Sound Bath Practitioner', 'Host/Emcee', 'Workshop Facilitator', 'Studio Manager', 'Check-In Coordinator'],
   'Dance | Performance Art | Experimental': ['Choreographer', 'Lead Dancer', 'Performance Artist', 'Movement Director', 'Aerialist', 'Puppeteer'],
 };
@@ -1186,6 +1196,8 @@ export default function EventCreate() {
     nextStep: '',
   });
   const autoDescriptionTriggeredRef = useRef(false);
+  const wizardTopRef = useRef(null);
+  const stepNavigationRef = useRef(null);
   const genreLabelLower = String(form.genre || '').toLowerCase();
   const isWorkshopFlow = genreLabelLower.includes('workshop')
     || genreLabelLower.includes('yoga')
@@ -1216,10 +1228,29 @@ export default function EventCreate() {
     setShowAiIntakeStarter(false);
   };
 
-  const update = (field) => (e) => setForm({ ...form, [field]: e.target.value });
-  const applyEventPatch = (fields) => {
-    setForm(prev => ({ ...prev, ...fields }));
+  const update = (field) => (e) => {
+    const nextValue = field === 'genre' ? normalizeGenreValue(e.target.value) : e.target.value;
+    setForm({ ...form, [field]: nextValue });
   };
+  const applyEventPatch = (fields) => {
+    const patch = { ...fields };
+    if (Object.prototype.hasOwnProperty.call(patch, 'genre')) {
+      patch.genre = normalizeGenreValue(patch.genre);
+    }
+    setForm(prev => ({ ...prev, ...patch }));
+  };
+  const requestGuidedNextScroll = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new Event('imc-guided-next'));
+  }, []);
+
+  const scrollToStepNavigation = useCallback(() => {
+    if (!stepNavigationRef.current || typeof window === 'undefined') return;
+    window.requestAnimationFrame(() => {
+      stepNavigationRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      requestGuidedNextScroll();
+    });
+  }, [requestGuidedNextScroll]);
   const toggleRecurrenceDay = (dayValue) => {
     setForm(prev => {
       const current = new Set(Array.isArray(prev.recurrenceDaysOfWeek) ? prev.recurrenceDaysOfWeek : []);
@@ -1283,6 +1314,13 @@ export default function EventCreate() {
     if (descriptionStyleManual) return;
     setDescriptionStyleIntensity(genreDefaultDescriptionStyle);
   }, [genreDefaultDescriptionStyle, descriptionStyleManual]);
+
+  useEffect(() => {
+    if (!wizardTopRef.current || typeof window === 'undefined') return;
+    window.requestAnimationFrame(() => {
+      wizardTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, [step]);
 
   const applyLegalWorkflowPreset = (mode) => {
     const defaults = getLegalWorkflowDefaults(mode);
@@ -2384,6 +2422,18 @@ export default function EventCreate() {
     };
   }, [stepCompletionChecklist]);
 
+  const stakeholderExportMeta = stepCompletion.isComplete
+    ? {
+      statusLabel: 'Ready for Group Reporting',
+      containerClassName: 'border-emerald-200 bg-emerald-50',
+      helperClassName: 'text-emerald-800',
+    }
+    : {
+      statusLabel: 'In Progress',
+      containerClassName: 'border-amber-200 bg-amber-50',
+      helperClassName: 'text-amber-800',
+    };
+
   const currentStepExportData = useMemo(() => {
     switch (step) {
       case 0:
@@ -2511,13 +2561,16 @@ export default function EventCreate() {
       case 0: return (
         <div>
           <h2 className="text-2xl mb-2" style={{ fontFamily: "'Playfair Display', serif" }}>What type of event?</h2>
-          <p className="text-gray-500 mb-6">Choose the event type and I will shape your crew roles, prompts, and workflow around it.</p>
+          <p className="text-gray-500 mb-1">Choose one event type and I will shape your roles, prompts, and workflow around it.</p>
+          <p className="text-xs text-gray-500 mb-6">After you select, I will auto-scroll you to the Next button so the next move is obvious.</p>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {GENRES.map(g => (
               <button key={g.key} onClick={() => {
-                setForm({ ...form, genre: g.key });
+                setForm({ ...form, genre: normalizeGenreValue(g.key) });
                 setStepError('');
+                scrollToStepNavigation();
               }}
+                data-imc-guided-choice="true"
                 className={`p-6 rounded-xl border-2 text-left transition-all cursor-pointer bg-white ${
                   form.genre === g.key ? 'border-[#c8a45e] shadow-lg' : 'border-gray-200 hover:border-gray-300'
                 }`}>
@@ -4330,7 +4383,7 @@ export default function EventCreate() {
   };
 
   return (
-    <div className="p-4 md:p-8 max-w-3xl">
+    <div ref={wizardTopRef} className="p-4 md:p-8 max-w-3xl">
       {showAiIntakeStarter && (
         <div className="fixed inset-0 z-[90] bg-black/40 flex items-center justify-center px-4">
           <div className="w-full max-w-md rounded-xl bg-white border border-gray-200 shadow-lg p-4 space-y-3">
@@ -4417,15 +4470,18 @@ export default function EventCreate() {
 
       {renderStep()}
 
-      <div className="mt-6 border border-gray-200 rounded-lg p-4 bg-gray-50 space-y-3">
+      <div className={`mt-6 border rounded-lg p-4 space-y-3 ${stakeholderExportMeta.containerClassName}`}>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold m-0">Stakeholder Export · {currentStepLabel}</h3>
+          <h3 className="text-sm font-semibold m-0">Group Reporting Tool · Stakeholder Export · {currentStepLabel}</h3>
           <p className="text-[11px] text-gray-600 m-0">
             Completion: {stepCompletion.done}/{stepCompletion.total || 1}
           </p>
         </div>
-        <p className="text-[11px] text-gray-500 m-0">
-          Export this step as proof for stakeholders. Add emails and I will send the same report directly from here.
+        <p className={`text-[11px] m-0 ${stakeholderExportMeta.helperClassName}`}>
+          Status: {stakeholderExportMeta.statusLabel}
+        </p>
+        <p className="text-[11px] text-gray-600 m-0">
+          Reporting only: use this to send group proof packets to stakeholders and board members. It does not change your live event data.
         </p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
           <label className="text-xs flex items-center gap-2 px-2 py-1.5 border border-gray-200 rounded bg-white">
@@ -4487,7 +4543,7 @@ export default function EventCreate() {
       </div>
 
       {/* Navigation */}
-      <div className="flex justify-between mt-8">
+      <div ref={stepNavigationRef} className="flex justify-between mt-8">
         <button onClick={() => {
           setStepError('');
           setStep(s => s - 1);
@@ -4500,7 +4556,7 @@ export default function EventCreate() {
 
         {step < STEP_LABELS.length - 1 ? (
           <button onClick={handleNextStep}
-            className={`btn-primary px-8 ${!canNext() ? 'opacity-90' : ''}`}>
+            className={`btn-primary btn-next-cta px-8 ${!canNext() ? 'opacity-90' : ''}`}>
             Keep Going →
           </button>
         ) : (

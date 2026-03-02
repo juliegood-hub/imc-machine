@@ -8,11 +8,20 @@ import {
   getTheaterDepartmentForRole,
 } from '../constants/theaterRoles';
 
+const TALKING_HEADS_GENRE_KEY = 'Talking Heads | Comedy | Speaking | Lectures | Workshops';
+const LEGACY_COMEDY_GENRE_KEY = 'Comedy | Speaking | Lectures | Workshops';
+
+function normalizeGenreValue(rawGenre = '') {
+  const value = String(rawGenre || '').trim();
+  if (value === LEGACY_COMEDY_GENRE_KEY) return TALKING_HEADS_GENRE_KEY;
+  return value;
+}
+
 const GENRES = [
   THEATER_GENRE_KEY,
   'Live Music | Contemporary | Jazz | Electronic | Indie',
   'Orchestral | Classical | Choral',
-  'Comedy | Speaking | Lectures | Workshops',
+  TALKING_HEADS_GENRE_KEY,
   'Yoga | Wellness | Mindfulness Classes',
   'Dance | Performance Art | Experimental',
   'Literary | Poetry | Book Signings',
@@ -44,7 +53,13 @@ const GENRE_ROLES = {
     'Bass (Voice)', 'Accompanist', 'Librarian', 'Orchestra Manager',
     'Music Director', 'Guest Soloist',
   ],
-  'Comedy | Speaking | Lectures | Workshops': [
+  [TALKING_HEADS_GENRE_KEY]: [
+    'Comedian/Comic', 'Host/Emcee', 'Keynote Speaker', 'Panelist', 'Moderator',
+    'Workshop Facilitator', 'Improv Player', 'Sketch Writer', 'Opening Act',
+    'Headliner', 'Guest Lecturer', 'Q&A Moderator', 'Sign Language Interpreter',
+    'AV Technician',
+  ],
+  [LEGACY_COMEDY_GENRE_KEY]: [
     'Comedian/Comic', 'Host/Emcee', 'Keynote Speaker', 'Panelist', 'Moderator',
     'Workshop Facilitator', 'Improv Player', 'Sketch Writer', 'Opening Act',
     'Headliner', 'Guest Lecturer', 'Q&A Moderator', 'Sign Language Interpreter',
@@ -95,6 +110,11 @@ export default function CrewPortal() {
   const [selectedGenre, setSelectedGenre] = useState(GENRES[0]);
   const [roleSearch, setRoleSearch] = useState('');
 
+  const requestGuidedNextScroll = () => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new Event('imc-guided-next'));
+  };
+
   const roleGroups = useMemo(() => getRoleGroups(selectedGenre), [selectedGenre]);
 
   const filteredRoleGroups = useMemo(() => {
@@ -112,10 +132,11 @@ export default function CrewPortal() {
   const [role, setRole] = useState(availableRoles[0] || '');
 
   const handleGenreChange = (e) => {
-    const g = e.target.value;
+    const g = normalizeGenreValue(e.target.value);
     setSelectedGenre(g);
     const nextRoles = getRoleGroups(g).flatMap(group => group.roles || []);
     if (!nextRoles.includes(role)) setRole(nextRoles[0] || '');
+    requestGuidedNextScroll();
   };
 
   const handleInvite = (e) => {
@@ -139,7 +160,7 @@ export default function CrewPortal() {
 
       <div className="card mb-6">
         <h3 className="text-lg mb-3">🎭 Select Genre</h3>
-        <p className="text-xs text-gray-500 mb-3">Choose a genre to see relevant crew roles</p>
+        <p className="text-xs text-gray-500 mb-3">Choose a category to unlock role options. Once selected, use Invite Crew Member as your next step.</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <select value={selectedGenre} onChange={handleGenreChange}
             className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-[#c8a45e] bg-white">

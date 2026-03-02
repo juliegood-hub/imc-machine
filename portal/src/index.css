@@ -75,6 +75,23 @@ h1, h2, h3, h4, h5, h6 {
   background-color: #1b2d44;
 }
 
+.btn-next-cta {
+  transform: translateY(0) scale(1);
+  box-shadow: 0 6px 0 rgba(9, 18, 30, 0.75), 0 12px 20px rgba(13, 27, 42, 0.25);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
+}
+
+.btn-next-cta:hover {
+  transform: translateY(-2px) scale(1.04);
+  box-shadow: 0 8px 0 rgba(9, 18, 30, 0.75), 0 16px 26px rgba(13, 27, 42, 0.30);
+  filter: brightness(1.04);
+}
+
+.btn-next-cta:active {
+  transform: translateY(2px) scale(0.99);
+  box-shadow: 0 2px 0 rgba(9, 18, 30, 0.75), 0 8px 12px rgba(13, 27, 42, 0.22);
+}
+
 .btn-outline {
   background-color: transparent;
   color: var(--navy);
