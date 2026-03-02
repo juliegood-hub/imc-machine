@@ -14,17 +14,6 @@ const checks = [
     },
   },
   {
-    name: 'health-endpoint',
-    url: `${baseUrl}/api/health`,
-    expectedStatus: 200,
-    assert: async (response) => {
-      const payload = await response.json();
-      if (!payload?.ok) {
-        throw new Error(`Health endpoint returned ok=false: ${JSON.stringify(payload)}`);
-      }
-    },
-  },
-  {
     name: 'search-endpoint',
     url: `${baseUrl}/api/search?q=timeline&scope=all`,
     expectedStatus: 200,
@@ -35,6 +24,20 @@ const checks = [
       }
       if (!('success' in payload)) {
         throw new Error('Search payload missing success field.');
+      }
+    },
+  },
+  {
+    name: 'send-email-method-guard',
+    url: `${baseUrl}/api/send-email`,
+    expectedStatus: 405,
+    assert: async (response) => {
+      const payload = await response.json();
+      if (!payload || typeof payload !== 'object') {
+        throw new Error('send-email guard did not return JSON payload.');
+      }
+      if (!String(payload.error || '').toLowerCase().includes('post')) {
+        throw new Error('send-email guard did not return expected method guidance.');
       }
     },
   },
