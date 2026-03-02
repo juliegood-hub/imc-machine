@@ -289,10 +289,6 @@ export default function ProductionOpsHub() {
     () => sortByLabel(certificationTypes, (type) => type?.name || ''),
     [certificationTypes],
   );
-  const dropdownDressingRooms = useMemo(
-    () => sortByLabel(dressingRooms, (room) => room?.room_name_or_number || ''),
-    [dressingRooms],
-  );
 
   const filteredRoleDirectory = useMemo(() => {
     const needle = String(roleSearch || '').trim().toLowerCase();
@@ -328,6 +324,11 @@ export default function ProductionOpsHub() {
   const [parkingAssignments, setParkingAssignments] = useState([]);
   const [dressingRooms, setDressingRooms] = useState([]);
   const [dressingAssignments, setDressingAssignments] = useState([]);
+
+  const dropdownDressingRooms = useMemo(
+    () => sortByLabel(dressingRooms, (room) => room?.room_name_or_number || ''),
+    [dressingRooms],
+  );
 
   const [costumeDrafts, setCostumeDrafts] = useState([blankCostumeCharacterDraft()]);
   const [setElementDrafts, setSetElementDrafts] = useState([blankSetElementDraft()]);

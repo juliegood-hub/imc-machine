@@ -313,26 +313,26 @@ export default function GlobalSearchBar({
                   setOpen(false);
                 }
               }}
-              className="w-full rounded-lg border border-gray-600 bg-[#12263b] text-white px-3 py-2 pr-24 text-sm placeholder:text-gray-400 focus:border-[#c8a45e] focus:outline-none"
+              className="w-full rounded-lg border border-gray-300 bg-white text-[#0d1b2a] px-3 py-2 pr-24 text-sm placeholder:text-gray-500 focus:border-[#c8a45e] focus:outline-none"
               placeholder={placeholder}
               aria-label="Global search"
             />
             <button
               type="button"
               onClick={submitSearch}
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-gray-500 bg-[#0d1b2a] px-2 py-1 text-xs text-white hover:border-[#c8a45e]"
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-gray-300 bg-white px-2 py-1 text-xs text-[#0d1b2a] hover:border-[#c8a45e]"
               aria-label="Submit search"
             >
               🔍
             </button>
-            <span className="absolute right-12 top-1/2 -translate-y-1/2 text-[10px] text-gray-300 border border-gray-500 rounded px-1.5 py-0.5">
+            <span className="absolute right-12 top-1/2 -translate-y-1/2 text-[10px] text-gray-500 border border-gray-300 rounded px-1.5 py-0.5 bg-white">
               ⌘/Ctrl+K
             </span>
           </div>
-          <p className="m-0 mt-1 text-[11px] text-gray-300">Press Enter or click 🔍 to open full results.</p>
+          <p className="m-0 mt-1 text-[11px] text-gray-200">Press Enter or click 🔍 to open full results.</p>
 
           {eventIdFromPath && open && (
-            <label className="flex items-center gap-2 text-[11px] text-gray-300 mt-1">
+            <label className="flex items-center gap-2 text-[11px] text-gray-200 mt-1">
               <input
                 type="checkbox"
                 checked={withinCurrentEvent}
