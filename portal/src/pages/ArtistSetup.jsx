@@ -853,7 +853,7 @@ export default function ArtistSetup() {
           {expandedSections.contact && (
             <div className="card">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {fieldInput("First Name", "firstName", "text", "Julie", true)}
+                {fieldInput("First Name", "firstName", "text", "First name", true)}
                 {fieldInput("Last Name", "lastName", "text", "Good", true)}
                 <div className="md:col-span-2">
                   {fieldInput(

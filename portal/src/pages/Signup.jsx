@@ -124,10 +124,10 @@ export default function Signup() {
     moderator: 'Julie Good Live Conversations',
     coach: 'Good Creative Coaching',
     consultant: 'Good Creative Advisory',
-    comedian: 'Funny Julie',
+    comedian: 'Funny Julie Good',
     activist: 'SA Community Alliance',
     politician: 'Good for San Antonio',
-    chef: 'Chef Julie at The Pearl',
+    chef: 'Chef Julie Good at The Pearl',
     restaurant: 'The Pearl Brewery',
     festival_organizer: 'Taste of the Southside',
     vendor: 'SA Artisan Collective',
@@ -193,7 +193,7 @@ export default function Signup() {
               <label className="block text-sm font-medium text-gray-700 mb-1">First Name <span className="text-red-500">*</span></label>
               <input type="text" value={firstName} onChange={e => setFirstName(e.target.value)}
                 className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-[#c8a45e]"
-                placeholder="Julie" required />
+                placeholder="First name" required />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Last Name <span className="text-red-500">*</span></label>

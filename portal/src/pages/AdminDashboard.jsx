@@ -39,7 +39,7 @@ function generateInviteCode(name) {
 }
 
 function getSmsTemplate(name, code) {
-  return `Hey ${name}! It's Julie. I built something I think you're going to love. The IMC Machine takes all that event marketing work (press releases, social posts, calendar listings) and handles it from one place. I want you to be one of the first people on it. Sign up at imc.goodcreativemedia.com with code ${code}. Tell me what you think! 🎶`;
+  return `Hey ${name}! It's Julie Good. I built something I think you're going to love. The IMC Machine takes all that event marketing work (press releases, social posts, calendar listings) and handles it from one place. I want you to be one of the first people on it. Sign up at imc.goodcreativemedia.com with code ${code}. Tell me what you think! 🎶`;
 }
 
 function getEmailTemplate(name, code) {
